@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { expandToolSpec } from '../agents/tool_catalog.js';
+import { expandToolSpec, filtrarParaA2A } from '../agents/tool_catalog.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 
 /**
@@ -95,6 +95,22 @@ function resolveTokenValue(raw: string): string | null {
  * Busca el alcance que corresponde a un token A2A presentado por el cliente.
  * Devuelve null si el token no existe: sin alcance no hay conversación.
  */
+/**
+ * Aplica la lista blanca del canal externo. Se hace acá, en la resolución, para
+ * que no exista ninguna ruta —consola, archivo de config o variable de entorno—
+ * capaz de entregarle a un agente remoto una herramienta personal.
+ */
+function aplicarListaBlanca(nombre: string, tools: string[]): string[] {
+  const { permitidas, descartadas } = filtrarParaA2A(tools);
+  if (descartadas.length > 0) {
+    console.warn(
+      `🔒 [A2A] El token "${nombre}" tenía herramientas no permitidas en el canal externo ` +
+      `y se descartaron: ${descartadas.join(', ')}. Revisa el alcance en la consola para evitar la confusión.`
+    );
+  }
+  return permitidas;
+}
+
 export function resolveA2AScope(presented: string | undefined): A2AScope | null {
   if (!presented) return null;
 
@@ -104,7 +120,7 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   try {
     const fromDb = sqliteReminderService.findA2ATokenByValue(presented);
     if (fromDb) {
-      return { name: fromDb.name, tools: expandToolSpec(fromDb.tools) };
+      return { name: fromDb.name, tools: aplicarListaBlanca(fromDb.name, expandToolSpec(fromDb.tools)) };
     }
   } catch {
     // Si la base no está disponible se sigue con la config en archivo
@@ -114,13 +130,13 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   for (const entry of cfg.a2a?.tokens || []) {
     const expected = resolveTokenValue(entry.token);
     if (expected && expected === presented) {
-      return { name: entry.name, tools: expandToolSpec(entry.tools || []) };
+      return { name: entry.name, tools: aplicarListaBlanca(entry.name, expandToolSpec(entry.tools || [])) };
     }
   }
 
   // Compatibilidad: la clave única A2A_API_KEY conserva el alcance por defecto
   if (process.env.A2A_API_KEY && presented === process.env.A2A_API_KEY) {
-    return { name: 'default', tools: expandToolSpec(cfg.a2a?.defaultTools || []) };
+    return { name: 'default', tools: aplicarListaBlanca('default', expandToolSpec(cfg.a2a?.defaultTools || [])) };
   }
 
   return null;

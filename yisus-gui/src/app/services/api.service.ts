@@ -97,6 +97,11 @@ export class ApiService {
   }
 
   // ─── Tokens A2A ───────────────────────────────────────────────────────
+  /** Herramientas que el canal externo admite (el resto ni se ofrece) */
+  getToolsPermitidasA2A(): Observable<{ permitidas: string[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/a2a/tools-permitidas`);
+  }
+
   getTokens(): Observable<{ tokens: A2AToken[] }> {
     return this.http.get<any>(`${this.baseUrl}/api/a2a/tokens`);
   }

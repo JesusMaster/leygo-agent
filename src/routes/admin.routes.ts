@@ -3,7 +3,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools } from '../config/channels.js';
-import { allToolNames, TOOL_GROUPS, expandToolSpec } from '../agents/tool_catalog.js';
+import { allToolNames, TOOL_GROUPS, expandToolSpec, TOOLS_PERMITIDAS_A2A, filtrarParaA2A } from '../agents/tool_catalog.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 
 /**
@@ -95,6 +95,11 @@ export default function createAdminRoutes() {
 
   // ─── Tokens A2A ──────────────────────────────────────────────────────────
   // El valor del token se muestra UNA sola vez, al crearlo.
+  /** Qué herramientas admite el canal externo (la GUI ofrece solo estas) */
+  app.get('/api/a2a/tools-permitidas', (_req, res) => {
+    res.json({ permitidas: TOOLS_PERMITIDAS_A2A });
+  });
+
   app.get('/api/a2a/tokens', (_req, res) => {
     const tokens = sqliteReminderService.listA2ATokens().map((t) => ({
       name: t.name,
@@ -116,21 +121,26 @@ export default function createAdminRoutes() {
       return res.status(409).json({ error: `Ya existe un token llamado "${name}"` });
     }
 
+    const { permitidas, descartadas } = filtrarParaA2A(expandToolSpec(Array.isArray(tools) ? tools : []));
     const token = `yisus_${randomBytes(24).toString('hex')}`;
-    sqliteReminderService.createA2AToken(name, token, Array.isArray(tools) ? tools : []);
+    sqliteReminderService.createA2AToken(name, token, permitidas);
 
     res.json({
       status: 'success',
       name,
       token, // única vez que se devuelve completo
-      tools: expandToolSpec(tools || []),
-      aviso: 'Guarda este token ahora: no se vuelve a mostrar.',
+      tools: permitidas,
+      descartadas,
+      aviso: descartadas.length
+        ? `Guarda este token ahora: no se vuelve a mostrar. Se descartaron herramientas no permitidas en el canal externo: ${descartadas.join(', ')}.`
+        : 'Guarda este token ahora: no se vuelve a mostrar.',
     });
   });
 
   app.patch('/api/a2a/tokens/:name', (req, res) => {
     const { tools, enabled } = req.body || {};
-    const ok = sqliteReminderService.updateA2AToken(req.params.name, { tools, enabled });
+    const filtradas = tools !== undefined ? filtrarParaA2A(expandToolSpec(tools)).permitidas : undefined;
+    const ok = sqliteReminderService.updateA2AToken(req.params.name, { tools: filtradas, enabled });
     if (!ok) return res.status(404).json({ error: 'Token no encontrado' });
     res.json({ status: 'success' });
   });

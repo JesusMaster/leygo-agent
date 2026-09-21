@@ -68,6 +68,27 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   buzz:       ['buzz_send_message', 'buzz_status'],
 };
 
+/**
+ * Herramientas que PUEDEN concederse por A2A, el canal de agentes externos.
+ *
+ * Lista blanca, no negra, y aplicada al resolver el token — no al guardarlo. Así
+ * una herramienta nueva no queda disponible para terceros por olvido, y conceder
+ * 'account_agent' a un token desde la consola no basta para exponer la cuenta de
+ * Google: se descarta igual al construir el agente.
+ */
+export const TOOLS_PERMITIDAS_A2A = [
+  'knowledge_public', // documentación técnica de Obsidian, sin memoria episódica
+  'faq_agent',        // preguntas frecuentes de la plataforma
+  'triage_agent',     // permite que un tercero escale un tema a Jesús
+];
+
+/** Filtra un alcance dejando solo lo que un canal externo puede usar */
+export function filtrarParaA2A(tools: string[]): { permitidas: string[]; descartadas: string[] } {
+  const permitidas = tools.filter((t) => TOOLS_PERMITIDAS_A2A.includes(t));
+  const descartadas = tools.filter((t) => !TOOLS_PERMITIDAS_A2A.includes(t));
+  return { permitidas, descartadas };
+}
+
 /** Nombres de todas las herramientas del catálogo */
 export function allToolNames(): string[] {
   return Object.keys(TOOL_CATALOG);

@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, A2AToken, ChannelsConfig } from '../../services/api.service';
+import { ApiService, A2AToken } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -50,6 +50,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
           <label class="field">
             <span>Herramientas habilitadas ({{ toolsNuevo().length }})</span>
           </label>
+          <p class="card-sub" style="margin-top:-8px">
+            Solo aparecen las que el canal externo admite. Las herramientas personales
+            —correo, agenda, Drive, Chat, memoria episódica, publicar en Buzz— no se ofrecen
+            acá: el filtro se aplica al resolver el token, así que tampoco sirve concederlas por otra vía.
+          </p>
           <div class="chips">
             @for (t of catalogo(); track t) {
               <span class="chip" [class.on]="toolsNuevo().includes(t)" (click)="toggleNuevo(t)">
@@ -152,8 +157,8 @@ export class TokensComponent {
       next: (r) => this.tokens.set(r.tokens),
       error: () => this.toast.error('No se pudieron cargar los tokens'),
     });
-    this.api.getChannels().subscribe({
-      next: (c: ChannelsConfig) => this.catalogo.set(c.catalogo),
+    this.api.getToolsPermitidasA2A().subscribe({
+      next: (r) => this.catalogo.set(r.permitidas),
       error: () => {},
     });
   }

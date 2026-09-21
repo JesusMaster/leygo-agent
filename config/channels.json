@@ -17,14 +17,14 @@
       "refresh_pricing_catalog",
       "buzz_send_message",
       "buzz_status",
-      "get_token_usage"
+      "get_token_usage",
+      "knowledge_public"
     ]
   },
   "buzz": {
     "tools": [
       "knowledge_agent",
       "faq_agent",
-      "account_agent",
       "triage_agent",
       "schedule_reminder",
       "list_scheduled_reminders",
