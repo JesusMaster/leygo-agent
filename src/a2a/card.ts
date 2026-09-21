@@ -27,10 +27,9 @@ export const yisusAgentCard: AgentCard = {
     description:
         'Clon digital y asistente de operaciones tecnológicas de Jesús Leiva, CTO de Apprecio. ' +
         'Especializado en arquitectura de software y documentación técnica (Obsidian y Qdrant), ' +
-        'gestión integral de Google Workspace (Gmail, Google Calendar, Google Drive, Google Chat), ' +
         'memoria episódica y acuerdos de reuniones (Google Meet), ' +
-        'asistencia en plataforma y consultas de Apprecio, ' +
-        'y automatización de eventos e incidentes mediante Webhooks.',
+        'y asistencia sobre la plataforma Apprecio. ' +
+        'Por este canal no se exponen la cuenta de Google ni las automatizaciones internas.',
     supportedInterfaces: [
         {
             url:             `${BASE_URL}/a2a/v1`,
@@ -51,7 +50,10 @@ export const yisusAgentCard: AgentCard = {
         extensions:        [],
     },
     securitySchemes,
-    securityRequirements: [],
+    // Si hay API key, la card lo declara: un cliente A2A sabe que debe autenticarse.
+    securityRequirements: process.env.A2A_API_KEY
+        ? [{ schemes: { bearer: { values: [] } } } as any]
+        : [],
     defaultInputModes:    ['text/plain'],
     defaultOutputModes:   ['text/plain'],
     skills: [
@@ -76,31 +78,11 @@ export const yisusAgentCard: AgentCard = {
             securityRequirements: [],
         },
         {
-            id:          'workspace_management',
-            name:        'Gestión de Google Workspace',
-            description: 'Búsqueda y lectura de correos en Gmail, redacción de borradores ejecutivos en nombre de Jesús Leiva, consulta de agenda/reuniones en Calendar, búsqueda en Drive y salas de Chat.',
-            tags:        ['workspace', 'gmail', 'calendar', 'drive', 'chat', 'es'],
-            examples:    ['¿Tengo reuniones hoy en la tarde?', 'Redacta un borrador de correo para el equipo sobre el release'],
-            inputModes:  ['text/plain'],
-            outputModes: ['text/plain'],
-            securityRequirements: [],
-        },
-        {
             id:          'apprecio_platform_faq',
             name:        'Plataforma y Preguntas Frecuentes Apprecio',
             description: 'Respuestas sobre el funcionamiento de la plataforma Apprecio: canjes, puntos, catálogo de beneficios, equivalencias comerciales y comercios asociados.',
             tags:        ['faq', 'apprecio', 'loyalty', 'catalog', 'points', 'es'],
             examples:    ['¿Dónde se pueden canjear los puntos?', '¿Qué comercios están disponibles en el catálogo?'],
-            inputModes:  ['text/plain'],
-            outputModes: ['text/plain'],
-            securityRequirements: [],
-        },
-        {
-            id:          'webhooks_and_automation',
-            name:        'Webhooks y Monitoreo de Eventos',
-            description: 'Recepción y procesamiento con IA de eventos de GitHub (PRs, releases), GitLab, Sentry y webhooks personalizados con alertas directas a Telegram.',
-            tags:        ['webhooks', 'automation', 'github', 'sentry', 'monitoring', 'es'],
-            examples:    ['Consultar webhooks recientes', 'Crear un webhook personalizado para alertas de despliegue'],
             inputModes:  ['text/plain'],
             outputModes: ['text/plain'],
             securityRequirements: [],

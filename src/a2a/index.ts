@@ -19,7 +19,12 @@ import { YisusAgentExecutor } from './executor.js';
 
 function a2aAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
     const apiKey = process.env.A2A_API_KEY;
-    if (!apiKey) return next();
+    // Sin API key el endpoint NO se monta (ver mountA2A), así que llegar acá sin
+    // clave configurada solo puede ser un error de arranque: se rechaza.
+    if (!apiKey) {
+        res.status(503).json({ error: 'A2A deshabilitado: falta A2A_API_KEY' });
+        return;
+    }
 
     const header = req.headers.authorization || '';
     const bearer = header.startsWith('Bearer ') ? header.slice(7) : undefined;
@@ -33,6 +38,13 @@ export function mountA2A(
     app: express.Application,
     deps: { runner: Runner; sessionService: RedisSessionService },
 ): void {
+    // Sin clave no se expone el RPC. Antes quedaba abierto y cualquiera conversaba
+    // con el coordinator completo, que tiene Gmail, Drive y Chat.
+    if (!process.env.A2A_API_KEY) {
+        console.warn('🔒 [A2A] A2A_API_KEY no definida: el endpoint /a2a/v1 NO se monta. Define la variable para habilitarlo.');
+        return;
+    }
+
     const executor = new YisusAgentExecutor(deps.runner, deps.sessionService);
     const requestHandler = new DefaultRequestHandler(
         yisusAgentCard,

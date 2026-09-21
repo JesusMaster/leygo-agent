@@ -7,6 +7,7 @@ import express from 'express';
 import createApiRoutes from './routes/index.js';
 import { Runner, InMemoryArtifactService, InMemoryMemoryService } from '@google/adk';
 import { rootAgent } from './agents/agent.js';
+import { publicCoordinator } from './agents/public.agent.js';
 import { RedisSessionService } from './services/redis_session.service.js';
 import { telegramBotService } from './services/telegram_bot.service.js';
 import { schedulerService } from './services/scheduler.service.js';
@@ -53,7 +54,17 @@ if (app) {
   app.use('/', createApiRoutes(runner, sessionService));
 }
 
-mountA2A(app, { runner, sessionService });
+// A2A corre sobre un agente PÚBLICO restringido (solo conocimiento y FAQs),
+// nunca sobre el coordinator interno que tiene acceso a Gmail, Drive y Chat.
+const publicRunner = new Runner({
+    agent:           publicCoordinator,
+    appName:         `${process.env.ADK_APP_NAME || 'yisus'}-public`,
+    sessionService,
+    artifactService: new InMemoryArtifactService(),
+    memoryService:   new InMemoryMemoryService(),
+});
+
+mountA2A(app, { runner: publicRunner, sessionService });
 
 
 server.start().then(async () => {

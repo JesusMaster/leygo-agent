@@ -177,13 +177,13 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Además `markThreadConsolidated` se ejecuta DESPUÉS del upsert, por lo que los hilos nunca quedan marcados y se reprocesan (y re-pagan tokens de Gemini) en cada corrida nocturna.
   - La misma función en `meeting_ingest.service.ts:24` está correcta (12 chars) — solo quedó mal la copia.
 
-- [ ] **Endpoint A2A abierto y sin aislamiento de canal** (`src/a2a/index.ts`):
+- [x] **Endpoint A2A abierto y sin aislamiento de canal** ✅ ARREGLADO (21-09): sin `A2A_API_KEY` el endpoint no se monta; A2A corre sobre `publicCoordinator` (solo knowledge + FAQ, sin Google Workspace ni webhooks) con los temas vetados repuestos; la Agent Card declara el requisito de seguridad y ya no publica las skills internas. Buzz queda como estaba, por decisión explícita.
   - Si `A2A_API_KEY` no está definida (hoy no está en `.env`), `/a2a/v1` queda público y cualquiera conversa con el Coordinator completo, que tiene acceso a Gmail, Drive y Google Chat.
   - `securityRequirements: []` en la Agent Card, incluso cuando hay API key configurada.
   - Nostr entra por el mismo Runner y las mismas tools que Telegram.
   - **Pendiente**: definir tools permitidas por canal (Telegram = full, A2A/Nostr = solo lectura de conocimiento público) y exigir API key siempre.
 
-- [ ] **Temas vetados recortados en el Coordinator** (`src/agents/agent.ts`):
+- [~] **Temas vetados recortados en el Coordinator** — repuestos en el agente PÚBLICO (A2A). En el Coordinator interno siguen recortados a propósito, porque ahí el interlocutor es el propio Jesús. Revisar si se quiere endurecer también para Buzz (`src/agents/agent.ts`):
   - Se eliminaron sueldos/compensaciones, contrataciones/despidos/evaluaciones y opiniones sobre personas específicas. Quedaron solo contratos y credenciales.
   - Con A2A y Nostr expuestos, el veto debe reponerse al menos para interlocutores externos.
 
