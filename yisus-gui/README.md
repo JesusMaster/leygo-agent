@@ -38,6 +38,24 @@ y revocan los tokens de A2A.
 El backend solo acepta CORS desde los orígenes de `GUI_ORIGIN`
 (por defecto `http://localhost:4200`).
 
+## Exponerla fuera de localhost
+
+`ng serve` bloquea hosts desconocidos. El dominio ya está declarado en
+`angular.json` → `serve.options.allowedHosts`; agrega ahí cualquier otro.
+
+Dos advertencias que van juntas:
+
+1. **`ng serve` es un servidor de desarrollo**: sin compresión, con source maps y
+   recarga en caliente. Para algo que quede publicado, usa `npm run build` y sirve
+   `dist/yisus-gui/browser` con nginx o similar (`nginx.conf` de ejemplo en el repo
+   de Leygo sirve como base).
+2. El backend solo acepta CORS desde los orígenes de `GUI_ORIGIN`. Si publicas la
+   GUI en otro dominio, agrégalo ahí.
+
+Si la GUI vive en un dominio distinto al backend (por ejemplo `gui-yisus` y
+`yisus`), configura la URL del backend en **Ajustes**: por defecto asume el mismo
+host en el puerto 4000.
+
 ## Notas
 
 - El cambio de herramientas de Telegram, Buzz y API se escribe en

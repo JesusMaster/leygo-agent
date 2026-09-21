@@ -84,7 +84,13 @@
           },
           "defaultConfiguration": "development",
           "options": {
-            "proxyConfig": "proxy.conf.json"
+            "proxyConfig": "proxy.conf.json",
+            "allowedHosts": [
+              "localhost",
+              "127.0.0.1",
+              "gui-yisus.openip.cl"
+            ],
+            "host": "0.0.0.0"
           }
         }
       }
