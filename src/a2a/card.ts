@@ -5,7 +5,28 @@
 import type { AgentCard, SecurityScheme } from '@a2a-js/sdk';
 
 const PORT = process.env.PORT || '4000';
-const BASE_URL = process.env.A2A_BASE_URL || `http://localhost:${PORT}`;
+
+/**
+ * Origen del agente. Se normaliza a propósito: si A2A_BASE_URL trae una ruta
+ * (por ejemplo la del propio agent-card), la card terminaría anunciando un RPC
+ * inexistente como ".../agent-card.json/a2a/v1" y el discovery del cliente falla
+ * con 404 sin decir por qué.
+ */
+function normalizarBase(raw?: string): string {
+    if (!raw) return `http://localhost:${PORT}`;
+    try {
+        const u = new URL(raw);
+        if (u.pathname && u.pathname !== '/') {
+            console.warn(`⚠️ [A2A] A2A_BASE_URL traía una ruta ("${u.pathname}"): se usa solo el origen ${u.origin}.`);
+        }
+        return u.origin;
+    } catch {
+        console.warn(`⚠️ [A2A] A2A_BASE_URL inválida ("${raw}"): se usa localhost.`);
+        return `http://localhost:${PORT}`;
+    }
+}
+
+const BASE_URL = normalizarBase(process.env.A2A_BASE_URL);
 
 const securitySchemes: { [key: string]: SecurityScheme } = process.env.A2A_API_KEY
     ? {

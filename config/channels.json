@@ -1,6 +1,4 @@
 {
-  "_doc": "Herramientas disponibles por canal. Usa '*' para todas, el nombre de un grupo (knowledge, publico, faq, workspace, triage, reminders, webhooks, usage, buzz) o el nombre exacto de una herramienta. Lo que no esté listado, el agente de ese canal ni lo ve.",
-
   "telegram": {
     "tools": [
       "knowledge_agent",
@@ -15,14 +13,13 @@
       "list_custom_webhooks",
       "toggle_custom_webhook",
       "get_custom_webhook_logs",
-      "get_token_usage",
       "set_monthly_budget",
       "refresh_pricing_catalog",
       "buzz_send_message",
-      "buzz_status"
+      "buzz_status",
+      "get_token_usage"
     ]
   },
-
   "buzz": {
     "tools": [
       "knowledge_agent",
@@ -44,19 +41,24 @@
       "buzz_status"
     ]
   },
-
   "api": {
-    "tools": ["*"]
+    "tools": [
+      "*"
+    ]
   },
-
   "a2a": {
     "_doc": "Cada token declara SU propio set. 'env:NOMBRE' lee la variable de entorno para no dejar el secreto escrito acá. defaultTools es el alcance de la antigua A2A_API_KEY.",
-    "defaultTools": ["knowledge_public", "faq_agent"],
+    "defaultTools": [
+      "knowledge_public",
+      "faq_agent"
+    ],
     "tokens": [
       {
         "name": "ejemplo-partner",
         "token": "env:A2A_TOKEN_PARTNER",
-        "tools": ["publico"]
+        "tools": [
+          "publico"
+        ]
       }
     ]
   }

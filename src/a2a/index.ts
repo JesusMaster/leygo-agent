@@ -31,7 +31,11 @@ function a2aAuth(req: express.Request, res: express.Response, next: express.Next
 
     const scope = resolveA2AScope(presented);
     if (!scope) {
-        res.status(401).json({ error: 'Unauthorized: token ausente o sin alcance configurado' });
+        res.status(401).json({
+            error: presented
+                ? 'Unauthorized: el token presentado no existe o fue revocado'
+                : 'Unauthorized: falta Authorization: Bearer <token> o X-API-Key',
+        });
         return;
     }
 
@@ -47,11 +51,11 @@ export function mountA2A(
     const cfg = describeChannels();
     const tokensConfigurados = cfg.a2a.tokens.filter((t) => t.configurado);
 
-    // Sin ningún token válido el RPC no se expone: antes quedaba abierto y
-    // cualquiera conversaba con el coordinator completo (Gmail, Drive, Chat).
+    // El Agent Card y el RPC se montan SIEMPRE. Los tokens se crean y revocan en
+    // caliente desde la GUI, así que decidir en el arranque si el endpoint existe
+    // dejaba a A2A en 404 hasta el próximo reinicio. Quien decide es a2aAuth.
     if (tokensConfigurados.length === 0 && !process.env.A2A_API_KEY) {
-        console.warn('🔒 [A2A] Sin tokens configurados (config/channels.json ni A2A_API_KEY): el endpoint /a2a/v1 NO se monta.');
-        return;
+        console.warn('🔒 [A2A] Sin tokens en config/channels.json ni A2A_API_KEY. El endpoint responde 401 hasta que crees uno en la GUI (Tokens A2A).');
     }
 
     for (const t of tokensConfigurados) {
@@ -85,5 +89,7 @@ export function mountA2A(
         }),
     );
 
-    console.log('✅ A2A protocol montado — card: /.well-known/agent-card.json | rpc: /a2a/v1');
+    const rpcUrl = yisusAgentCard.supportedInterfaces?.[0]?.url;
+    console.log(`✅ A2A montado — card pública en /.well-known/agent-card.json | rpc: /a2a/v1`);
+    console.log(`   La card anuncia el RPC en: ${rpcUrl}`);
 }

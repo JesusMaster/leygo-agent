@@ -32,7 +32,13 @@ export default function createAdminRoutes() {
   }
 
   app.use(express.json());
-  app.use(adminGuard);
+
+  // OJO: el guard va montado por PREFIJO, no global. Antes se aplicaba a todo
+  // Express y bloqueaba /.well-known/agent-card.json y /a2a/v1, que tienen su
+  // propio esquema de autenticación (Bearer por token A2A) o son públicos por spec.
+  for (const prefijo of ['/api/admin', '/api/channels', '/api/a2a', '/api/escalations', '/api/reminders', '/api/budgets']) {
+    app.use(prefijo, adminGuard);
+  }
 
   // ─── Sesión de la GUI ────────────────────────────────────────────────────
   app.get('/api/admin/me', (_req, res) => {
