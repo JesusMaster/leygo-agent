@@ -63,11 +63,10 @@ export const accountAgent = new LlmAgent({
     - Seguridad: NUNCA envíes correos finales de forma autónoma sin confirmación explícita; siempre créalos como borrador a menos que Jesús pida explícitamente enviarlo.
     - Cuando termines de responder o ejecutar la acción, simplemente entrega el resultado de forma clara.
 
-    DEVOLUCIÓN DE CONTROL AL COORDINADOR:
-    Usa transfer_to_agent('Coordinator') cuando:
-    - El usuario haga preguntas o solicitudes que NO son de tu especialidad de Google Workspace (por ejemplo, arquitectura de software en Obsidian, preguntas generales o temas que no te corresponden).
-    - El usuario cambie de tema tras haber completado una consulta de correos, agenda, Drive o Google Chat.
-    - El usuario no requiera más acciones en sus servicios de Google.
+    ALCANCE:
+    Estás montado como herramienta del Coordinator: respondes tu parte y terminas el turno.
+    No dispongas de 'transfer_to_agent' ni intentes delegar; si la consulta no es de tu
+    especialidad, dilo en una línea y termina — el Coordinator se encarga del resto.
   `,
   tools: [
     gmailSearchEmails,

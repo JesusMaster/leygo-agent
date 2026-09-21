@@ -177,7 +177,18 @@ export class SqliteReminderService {
       CREATE INDEX IF NOT EXISTS idx_consolidated_source ON consolidated_threads(source, processed_at DESC);
     `);
 
-    // 8. Migraciones de esquema sobre bases ya existentes
+    // 8. Estado de sincronización de archivos externos (Drive/Meet)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sync_state (
+        source TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        version TEXT,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (source, external_id)
+      );
+    `);
+
+    // 9. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
   }
 
@@ -488,6 +499,26 @@ export class SqliteReminderService {
       ORDER BY total_cost DESC
     `);
     return stmt.all(monthStartIso) as any[];
+  }
+
+  // ─── Estado de sincronización (Drive / Meet) ───────────────────────────────
+
+  /** ¿El archivo externo ya fue sincronizado con esta misma versión (modifiedTime)? */
+  public isSynced(source: string, externalId: string, version?: string): boolean {
+    const stmt = this.db.prepare(`SELECT version FROM sync_state WHERE source = ? AND external_id = ?`);
+    const row = stmt.get(source, externalId) as { version?: string } | undefined;
+    if (!row) return false;
+    if (!version) return true;
+    return row.version === version;
+  }
+
+  public markSynced(source: string, externalId: string, version?: string): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO sync_state (source, external_id, version, synced_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(source, external_id) DO UPDATE SET version = excluded.version, synced_at = excluded.synced_at
+    `);
+    stmt.run(source, externalId, version || '', Date.now());
   }
 
   // ─── System Config (key-value) ─────────────────────────────────────────────

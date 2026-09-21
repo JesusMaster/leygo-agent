@@ -170,24 +170,5 @@ export const coordinator = new LlmAgent({
     ],
 });
 
-// FIX: El ADK calcula rootAgent en el constructor de cada agente ANTES de que
-// setParentAgentForSubAgents asigne el parentAgent. En ADK 2.x rootAgent es un getter,
-// por lo que usamos Object.defineProperty para asegurar que toda la jerarquía apunte a root.
-function fixRootAgentReferences(root: any) {
-    for (const sub of root.subAgents || []) {
-        try {
-            sub.rootAgent = root;
-        } catch {
-            Object.defineProperty(sub, 'rootAgent', {
-                get: () => root,
-                configurable: true,
-                enumerable: true
-            });
-        }
-        fixRootAgentReferences(sub);
-    }
-}
-fixRootAgentReferences(coordinator);
-
 // El ADK Web busca específicamente un export llamado 'rootAgent'
 export const rootAgent = coordinator;

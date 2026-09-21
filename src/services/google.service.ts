@@ -133,12 +133,23 @@ export class GoogleWorkspaceService {
   /**
    * Busca hilos recientes de Gmail descartando automáticamente remitentes bots y promociones
    */
-  async searchRecentGmailThreads(query: string = '', maxResults: number = 10) {
+  /**
+   * @param sinceHours ventana hacia atrás. Gmail acepta epoch en segundos con `after:`,
+   *                   que es más preciso que newer_than (que solo admite días).
+   */
+  async searchRecentGmailThreads(query: string = '', maxResults: number = 10, sinceHours?: number) {
     const auth = this.getAuthClient();
     const gmail = google.gmail({ version: 'v1', auth });
 
     const antiNoiseFilter = '-category:promotions -category:social -from:noreply -from:no-reply -from:notifications@github.com -from:sentry.io';
-    const finalQuery = query ? `${query} ${antiNoiseFilter}` : `newer_than:2d ${antiNoiseFilter}`;
+
+    const windowFilter = sinceHours && sinceHours > 0
+      ? `after:${Math.floor(Date.now() / 1000) - Math.round(sinceHours * 3600)}`
+      : 'newer_than:2d';
+
+    const finalQuery = query
+      ? `${query} ${windowFilter} ${antiNoiseFilter}`
+      : `${windowFilter} ${antiNoiseFilter}`;
 
     const listRes = await gmail.users.threads.list({
       userId: 'me',
@@ -592,18 +603,25 @@ export class GoogleWorkspaceService {
   // ─────────────────────────────────────────────────────────────
   // GOOGLE DRIVE & DOCS
   // ─────────────────────────────────────────────────────────────
-  async searchDriveFiles(query: string = '', maxResults: number = 10) {
+  /**
+   * @param rawQuery query cruda de la Drive API. Si viene, reemplaza al filtro por
+   *                 nombre (necesario para buscar varios patrones a la vez).
+   */
+  async searchDriveFiles(query: string = '', maxResults: number = 10, rawQuery?: string) {
     const auth = this.getAuthClient();
     const drive = google.drive({ version: 'v3', auth });
 
     let q = "trashed = false";
-    if (query) {
+    if (rawQuery) {
+      q += ` and (${rawQuery})`;
+    } else if (query) {
       q += ` and (name contains '${query.replace(/'/g, "\\'")}' or fullText contains '${query.replace(/'/g, "\\'")}')`;
     }
 
     const res = await drive.files.list({
       q,
       pageSize: maxResults,
+      orderBy: 'modifiedTime desc',
       fields: 'files(id, name, mimeType, modifiedTime, webViewLink, size)',
     });
 

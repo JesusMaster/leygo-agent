@@ -171,7 +171,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 
 ### 🔴 Críticos
 
-- [ ] **UUID inválido rompe toda la consolidación de Gmail/Chat** (`src/services/context_consolidation.service.ts:33`):
+- [x] **UUID inválido rompe toda la consolidación de Gmail/Chat** ✅ ARREGLADO (21-09): último grupo a 12 chars + cada hilo aislado en try/catch para que un fallo no aborte el lote. (`src/services/context_consolidation.service.ts:33`):
   - `generateDeterministicUuid` arma el último grupo como `'b' + hash.substring(20,32)` → 13 caracteres. Un UUID requiere 12.
   - Qdrant rechaza el ID, el error sube al `catch` del método y **corta el loop completo**: no se indexa ningún hilo.
   - Además `markThreadConsolidated` se ejecuta DESPUÉS del upsert, por lo que los hilos nunca quedan marcados y se reprocesan (y re-pagan tokens de Gemini) en cada corrida nocturna.
@@ -189,20 +189,20 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 
 ### 🟠 Calidad de las respuestas
 
-- [ ] **Dos espacios vectoriales mezclados en la misma colección** (`src/services/qdrant.service.ts`):
+- [x] **Dos espacios vectoriales mezclados en la misma colección** ✅ ARREGLADO (21-09): se eliminó el fallback a Gemini; solo Ollama, con reintentos y error duro si no responde. Cada punto guarda `embeddingModel`. (`src/services/qdrant.service.ts`):
   - El fallback de Ollama (`nomic-embed-text`) a Gemini (`gemini-embedding-001`) genera 768 dims pero de otro espacio semántico. Entra sin error y arruina silenciosamente la similitud.
   - **Fix**: guardar el proveedor del embedding en el payload y, o fallar duro, o usar colección separada por proveedor.
   - Menor asociado: el truncado `safeText` (5000 chars) solo se aplica en la llamada `/api/embed`; el fallback legacy `/api/embeddings` y la rama Gemini usan el `text` completo.
 
-- [ ] **`episodic_search` pierde la metadata más útil** (`src/services/qdrant.service.ts` + `src/agents/tools/knowledge.tools.ts`):
+- [x] **`episodic_search` pierde la metadata más útil** ✅ ARREGLADO (21-09): `searchKnowledge` devuelve el payload completo; la tool muestra participantes, decisiones, tareas, sala, asunto y link a la fuente. (`src/services/qdrant.service.ts` + `src/agents/tools/knowledge.tools.ts`):
   - `searchKnowledge` mapea solo score, title, section, filePath, tags, content, source, date y author.
   - La tool formatea `r.participants`, `r.agreements` y los acuerdos, que **siempre vienen `undefined`**. También se pierde el `link` a la minuta de Drive, justo lo que permite verificar la fuente.
   - **Fix**: devolver el payload completo (o al menos participants, decisions/tasks, link, threadId).
 
-- [ ] **`sinceHours` ignorado en Gmail** (`consolidateGmail`):
+- [x] **`sinceHours` ignorado en Gmail** ✅ ARREGLADO (21-09): `searchRecentGmailThreads` acepta la ventana y la traduce a `after:<epoch>`. (`consolidateGmail`):
   - Recibe el parámetro pero llama `searchRecentGmailThreads('', maxThreads)` sin filtro de fecha: siempre los últimos 10 hilos, pidas 24 o 72 horas.
 
-- [ ] **`syncMeetRecordings` incompleto** (`src/services/meeting_ingest.service.ts`):
+- [x] **`syncMeetRecordings` incompleto** ✅ ARREGLADO (21-09): query bilingüe (Notas de Gemini / Notes by Gemini / transcripciones) + checkpoint incremental en la tabla `sync_state` por fileId y modifiedTime. (`src/services/meeting_ingest.service.ts`):
   - Busca literalmente `'Notas de Gemini'`: se pierden las reuniones en inglés (`Notes by Gemini`) y las transcripciones.
   - Sin checkpoint incremental: reprocesa y re-embeddea los mismos 20 archivos cada noche (Qdrant sobrescribe por ID, pero el costo y el tiempo se pagan igual).
 
@@ -249,8 +249,8 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 
 ### 🟡 Menores / Higiene
 
-- [ ] **Instructions inconsistentes con el modo `AgentTool`**: los subagentes siguen indicando `transfer_to_agent('Coordinator')`, que en ese modo no existe.
-- [ ] **`fixRootAgentReferences` es código muerto**: `subAgents` está vacío desde que se pasó a `AgentTool`.
-- [ ] **Doble arranque de servicios**: `src/adk.ts` y `src/index.ts` levantan ambos el bot de Telegram y el scheduler → dos pollers si se corre ADK Web junto al server.
-- [ ] **`qdrant_storage/` fuera de `.gitignore`**.
-- [ ] **La carpeta no es un repositorio git**: no hay historial ni forma de revertir.
+- [x] **Instructions inconsistentes con el modo `AgentTool`** ✅ ARREGLADO (21-09).: los subagentes siguen indicando `transfer_to_agent('Coordinator')`, que en ese modo no existe.
+- [x] **`fixRootAgentReferences` es código muerto** ✅ ELIMINADO (21-09).: `subAgents` está vacío desde que se pasó a `AgentTool`.
+- [x] **Doble arranque de servicios** ✅ ARREGLADO (21-09): adk.ts solo los levanta con `ADK_START_SERVICES=true`.: `src/adk.ts` y `src/index.ts` levantan ambos el bot de Telegram y el scheduler → dos pollers si se corre ADK Web junto al server.
+- [x] **`qdrant_storage/` fuera de `.gitignore`** ✅ ARREGLADO (21-09)..
+- [x] **Repositorio git** ✅ (ya existía; se agregó commit del estado actual).: no hay historial ni forma de revertir.

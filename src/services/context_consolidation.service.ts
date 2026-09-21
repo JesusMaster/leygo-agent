@@ -40,7 +40,7 @@ function generateDeterministicUuid(input: string): string {
     hash.substring(8, 12),
     '4' + hash.substring(13, 16),
     'a' + hash.substring(17, 20),
-    'b' + hash.substring(20, 32),
+    hash.substring(20, 32), // 12 chars exactos: con 13 Qdrant rechaza el ID y aborta el lote
   ].join('-');
 }
 
@@ -141,9 +141,10 @@ Responde ÚNICAMENTE con el objeto JSON, sin formato markdown ni código alreded
 
     try {
       console.log(`📬 [ContextConsolidation] Buscando hilos recientes de Gmail (últimas ${sinceHours}h)...`);
-      const threadSummaries = await googleService.searchRecentGmailThreads('', maxThreads);
+      const threadSummaries = await googleService.searchRecentGmailThreads('', maxThreads, sinceHours);
 
       for (const tSummary of threadSummaries) {
+       try {
         // Verificar idempotencia en SQLite
         if (sqliteReminderService.isThreadConsolidated(tSummary.id)) {
           result.threadsSkipped++;
@@ -225,6 +226,10 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
         });
 
         console.log(`✅ [ContextConsolidation] Gmail indexado: "${titleStr}" (${analysis.decisions.length} decisiones)`);
+       } catch (threadErr: any) {
+        // Un hilo que falla no puede tumbar el lote entero
+        console.warn(`⚠️ [ContextConsolidation] Error en hilo de Gmail ${tSummary.id}: ${threadErr.message}`);
+       }
       }
     } catch (err: any) {
       console.error('❌ [ContextConsolidation] Error consolidando Gmail:', err.message);
@@ -252,6 +257,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
       const chatThreads = await googleService.getRecentChatThreads(sinceHours);
 
       for (const cThread of chatThreads) {
+       try {
         // Idempotencia: threadName único
         if (sqliteReminderService.isThreadConsolidated(cThread.threadName)) {
           result.threadsSkipped++;
@@ -333,6 +339,9 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
         });
 
         console.log(`✅ [ContextConsolidation] Chat indexado: "${titleStr}" (${analysis.decisions.length} decisiones)`);
+       } catch (threadErr: any) {
+        console.warn(`⚠️ [ContextConsolidation] Error en hilo de Chat ${cThread.threadName}: ${threadErr.message}`);
+       }
       }
     } catch (err: any) {
       console.error('❌ [ContextConsolidation] Error consolidando Google Chat:', err.message);

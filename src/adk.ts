@@ -39,7 +39,15 @@ const telegramRunner = new Runner({
     memoryService: new InMemoryMemoryService(),
 });
 
-telegramBotService.start(telegramRunner, redisSessionService).catch(console.error);
-schedulerService.start();
+// El bot de Telegram y el scheduler los levanta src/index.ts. Si además se corre
+// ADK Web (que carga este archivo), se duplican: dos long-pollings contra la misma
+// cuenta de Telegram devuelven 409 Conflict y los cron corren dos veces.
+// Se activan acá solo si se pide explícitamente.
+if (process.env.ADK_START_SERVICES === 'true') {
+    telegramBotService.start(telegramRunner, redisSessionService).catch(console.error);
+    schedulerService.start();
+} else {
+    console.log('ℹ️ [ADK] Telegram y Scheduler no se inician desde adk.ts (los levanta src/index.ts). Usa ADK_START_SERVICES=true para forzarlo.');
+}
 
 export { rootAgent } from './agents/agent.js';

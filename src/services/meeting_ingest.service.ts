@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { googleService } from './google.service.js';
 import { qdrantService, QdrantKnowledgeService, KnowledgePayload } from './qdrant.service.js';
+import { sqliteReminderService } from '../database/sqlite.service.js';
 
 dotenv.config();
 
@@ -281,26 +282,60 @@ ${content.substring(0, 25000)}`;
   }
 
   /**
-   * Sincroniza en batch las grabaciones y notas de Google Meet desde Google Drive
+   * Sincroniza en batch las minutas y transcripciones de Google Meet desde Drive.
+   *
+   * - La query cubre los nombres en español E inglés: si el Meet estuvo en inglés,
+   *   el documento se llama "Notes by Gemini" y antes quedaba invisible.
+   * - Checkpoint incremental por fileId + modifiedTime en SQLite: sin esto se
+   *   reprocesaban y re-embebían los mismos archivos cada noche.
    */
-  public async syncMeetRecordings(maxFiles: number = 20): Promise<IngestMeetingResult[]> {
+  public async syncMeetRecordings(maxFiles: number = 20, force: boolean = false): Promise<IngestMeetingResult[]> {
     await qdrantService.ensureCollections();
-    const files = await googleService.searchDriveFiles('Notas de Gemini', maxFiles);
+
+    const patrones = [
+      'Notas de Gemini',
+      'Notes by Gemini',
+      'Notas de la reunión',
+      'Meeting notes',
+      'Transcripción',
+      'Transcript',
+    ];
+    const rawQuery = patrones
+      .map((p) => `name contains '${p.replace(/'/g, "\\'")}'`)
+      .join(' or ');
+
+    const files = await googleService.searchDriveFiles('', maxFiles, rawQuery);
     if (!files || files.length === 0) {
       return [];
     }
 
     const results: IngestMeetingResult[] = [];
+    let omitidos = 0;
+
     for (const f of files) {
+      if (!f.id) continue;
+
+      // Ya indexado y sin cambios desde la última vez
+      if (!force && sqliteReminderService.isSynced('google_meet', f.id, f.modifiedTime || undefined)) {
+        omitidos++;
+        continue;
+      }
+
       try {
-        const res = await this.ingestMeeting(f.id!);
+        const res = await this.ingestMeeting(f.id);
         if (res.status === 'success') {
+          sqliteReminderService.markSynced('google_meet', f.id, f.modifiedTime || undefined);
           results.push(res);
         }
       } catch (err: any) {
         console.warn(`[syncMeetRecordings] Error procesando archivo ${f.name} (${f.id}):`, err.message);
       }
     }
+
+    if (omitidos > 0) {
+      console.log(`ℹ️ [syncMeetRecordings] ${omitidos} archivo(s) omitido(s) por no tener cambios desde la última sincronización.`);
+    }
+
     return results;
   }
 }

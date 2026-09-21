@@ -84,15 +84,26 @@ export const episodicSearch = new FunctionTool({
         };
       }
 
+      const listaStr = (label: string, arr?: string[]) =>
+        arr && arr.length > 0 ? `\n${label}:\n${arr.map((a) => `• ${a}`).join('\n')}\n` : '';
+
       const formatted = results
         .map((r: any, idx: number) => {
           const badge = getEpisodicSourceBadge(r.source);
-          const partsStr = r.participants && r.participants.length > 0 ? `Participantes: ${r.participants.join(', ')}\n` : '';
           const dateStr = r.date ? `Fecha: ${r.date}\n` : '';
-          const agreementsStr = r.agreements && r.agreements.length > 0 
-            ? `\nAcuerdos/Compromisos:\n${r.agreements.map((a: string) => `• ${a}`).join('\n')}\n` 
-            : '';
-          return `### ${badge} #${idx + 1}: ${r.title}\n${dateStr}${partsStr}Sección: ${r.section}\nSimilitud: ${(r.score * 100).toFixed(1)}%\n\n${r.content}${agreementsStr}`;
+          const partsStr = r.participants && r.participants.length > 0 ? `Participantes: ${r.participants.join(', ')}\n` : '';
+          const salaStr = r.spaceDisplayName ? `Sala: ${r.spaceDisplayName}\n` : '';
+          const asuntoStr = r.subject ? `Asunto original: ${r.subject}\n` : '';
+          const linkStr = r.link ? `Fuente: ${r.link}\n` : '';
+          const seccionStr = r.section ? `Sección: ${r.section}\n` : '';
+
+          // 'decisions'/'tasks' vienen de Gmail y Chat; 'agreements' de las minutas de Meet
+          const detalles =
+            listaStr('Decisiones clave', r.decisions) +
+            listaStr('Compromisos y tareas', r.tasks) +
+            listaStr('Acuerdos/Compromisos', r.agreements);
+
+          return `### ${badge} #${idx + 1}: ${r.title}\n${dateStr}${partsStr}${salaStr}${asuntoStr}${seccionStr}${linkStr}Similitud: ${(r.score * 100).toFixed(1)}%\n\n${r.content}${detalles}`;
         })
         .join('\n\n---\n\n');
 
