@@ -47,7 +47,7 @@
     ]
   },
   "a2a": {
-    "_doc": "Cada token declara SU propio set. 'env:NOMBRE' lee la variable de entorno para no dejar el secreto escrito acá. defaultTools es el alcance de la antigua A2A_API_KEY.",
+    "_doc": "'disponibles' es el TECHO del canal: qué herramientas se montan en el agente público y se publican como skills en la Agent Card. Cada token concede un subconjunto de eso, y el permiso se valida al invocar la herramienta.",
     "defaultTools": [
       "knowledge_public",
       "faq_agent"
@@ -60,6 +60,11 @@
           "publico"
         ]
       }
+    ],
+    "disponibles": [
+      "knowledge_public",
+      "faq_agent",
+      "triage_agent"
     ]
   }
 }

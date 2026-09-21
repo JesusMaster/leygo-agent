@@ -259,6 +259,14 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - `GET /api/channels` muestra catálogo, grupos y lo vigente por canal; `POST /api/channels/reload` relee el archivo.
   - Pendiente: la recarga en caliente solo afecta a los agentes que se construyan después (A2A). Telegram, Buzz y API necesitan reinicio.
 
+- [x] **Permisos de A2A por token, validados al invocar** ✅ (21-09):
+  - `config/channels.json → a2a.disponibles` define el TECHO del canal: qué herramientas monta el agente público y qué skills publica la Agent Card (la card ahora se arma desde ahí, no hardcodeada).
+  - Cada token concede un subconjunto. El permiso se verifica **al invocar** (`src/agents/a2a_guard.ts`): si el token no la tiene, la herramienta devuelve `sin_permiso` con un mensaje que el agente transmite tal cual, en vez de que el modelo improvise.
+  - Un solo Runner público para todos los tokens (antes uno por alcance).
+  - Editable desde la GUI: skills públicas en "Canales y tools", alcance por token en "Tokens A2A".
+  - Pendiente: `config/channels.json` le da a **Buzz** las 17 herramientas, incluida `account_agent`. Buzz es un canal con terceros; conviene recortarlo.
+  - Pendiente: la ventana de gracia del 2FA de Telegram es global (5 min). Si alguna vez se habilita `account_agent` por un canal no personal, hay que atarla al canal que pidió la aprobación.
+
 ### 🟡 Menores / Higiene
 
 - [x] **Instructions inconsistentes con el modo `AgentTool`** ✅ ARREGLADO (21-09).: los subagentes siguen indicando `transfer_to_agent('Coordinator')`, que en ese modo no existe.

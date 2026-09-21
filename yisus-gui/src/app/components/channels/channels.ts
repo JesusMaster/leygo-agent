@@ -72,12 +72,34 @@ type Canal = 'telegram' | 'buzz' | 'api';
         </div>
 
         <div class="card">
-          <h3>A2A</h3>
-          <p class="card-sub">
-            El canal entre agentes no se configura acá: cada token trae su propio alcance,
-            para que dos integraciones distintas nunca compartan superficie.
-          </p>
-          <a class="btn-secondary" href="#/tokens" style="text-decoration:none;display:inline-block">Ir a Tokens A2A</a>
+          <div class="row">
+            <div>
+              <h3><i class="ph ph-globe-hemisphere-west"></i> A2A — skills públicas</h3>
+              <p class="card-sub">
+                Lo que marques acá se monta en el agente público y se publica como skill en la
+                Agent Card. Cada token concede un subconjunto, y el permiso se valida al invocar:
+                si un token intenta una skill que no tiene, recibe una negativa explícita.
+              </p>
+            </div>
+            <span class="spacer"></span>
+            <span class="badge dim">{{ disponiblesA2A().length }} publicadas</span>
+          </div>
+
+          <div class="chips">
+            @for (tool of config()!.catalogo; track tool) {
+              <span class="chip" [class.on]="disponiblesA2A().includes(tool)" (click)="toggleA2A(tool)">
+                @if (disponiblesA2A().includes(tool)) { <i class="ph ph-check"></i> }
+                {{ tool }}
+              </span>
+            }
+          </div>
+
+          <div class="row" style="margin-top:16px">
+            <span class="spacer"></span>
+            @if (sucioA2A()) { <span class="badge warn">Sin guardar</span> }
+            <button class="btn-primary" [disabled]="!sucioA2A()" (click)="guardarA2A()">Guardar</button>
+            <a class="btn-secondary" href="#/tokens" style="text-decoration:none">Ir a Tokens A2A</a>
+          </div>
         </div>
       }
     </div>
@@ -100,6 +122,8 @@ export class ChannelsComponent {
   original = signal<Record<Canal, string[]>>({ telegram: [], buzz: [], api: [] });
   loading = signal(true);
   guardando = signal(false);
+  disponiblesA2A = signal<string[]>([]);
+  originalA2A = signal<string[]>([]);
 
   constructor() { this.load(); }
 
@@ -118,6 +142,29 @@ export class ChannelsComponent {
         this.loading.set(false);
       },
       error: () => { this.loading.set(false); this.toast.error('No se pudo cargar la configuración de canales'); },
+    });
+
+    this.api.getDisponiblesA2A().subscribe({
+      next: (r) => { this.disponiblesA2A.set([...r.disponibles]); this.originalA2A.set([...r.disponibles]); },
+      error: () => {},
+    });
+  }
+
+  toggleA2A(tool: string) {
+    this.disponiblesA2A.update((s) => (s.includes(tool) ? s.filter((t) => t !== tool) : [...s, tool]));
+  }
+
+  sucioA2A(): boolean {
+    return [...this.disponiblesA2A()].sort().join(',') !== [...this.originalA2A()].sort().join(',');
+  }
+
+  guardarA2A() {
+    this.api.saveDisponiblesA2A(this.disponiblesA2A()).subscribe({
+      next: () => {
+        this.originalA2A.set([...this.disponiblesA2A()]);
+        this.toast.ok('Skills públicas de A2A guardadas. Aplican al reiniciar el servicio.');
+      },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
     });
   }
 

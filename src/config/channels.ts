@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { expandToolSpec, filtrarParaA2A } from '../agents/tool_catalog.js';
+import { expandToolSpec, TOOLS_DISPONIBLES_A2A_POR_DEFECTO } from '../agents/tool_catalog.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 
 /**
@@ -22,6 +22,8 @@ export interface ChannelConfigFile {
   buzz?: { tools: string[] };
   api?: { tools: string[] };
   a2a?: {
+    /** Techo del canal: qué herramientas se montan en el agente público */
+    disponibles?: string[];
     defaultTools?: string[];
     tokens?: Array<{ name: string; token: string; tools: string[] }>;
   };
@@ -39,7 +41,7 @@ const DEFAULTS: Required<Pick<ChannelConfigFile, 'telegram' | 'buzz' | 'api'>> &
   telegram: { tools: ['*'] },
   buzz:     { tools: ['*'] },
   api:      { tools: ['*'] },
-  a2a:      { defaultTools: [], tokens: [] },
+  a2a:      { disponibles: TOOLS_DISPONIBLES_A2A_POR_DEFECTO, defaultTools: [], tokens: [] },
 };
 
 let cached: ChannelConfigFile | null = null;
@@ -95,20 +97,28 @@ function resolveTokenValue(raw: string): string | null {
  * Busca el alcance que corresponde a un token A2A presentado por el cliente.
  * Devuelve null si el token no existe: sin alcance no hay conversación.
  */
+/** Herramientas que el canal A2A ofrece (techo del canal, no permiso del token) */
+export function getToolsDisponiblesA2A(): string[] {
+  const cfg = loadConfig();
+  return expandToolSpec(cfg.a2a?.disponibles || TOOLS_DISPONIBLES_A2A_POR_DEFECTO);
+}
+
 /**
- * Aplica la lista blanca del canal externo. Se hace acá, en la resolución, para
- * que no exista ninguna ruta —consola, archivo de config o variable de entorno—
- * capaz de entregarle a un agente remoto una herramienta personal.
+ * Recorta el alcance de un token al techo del canal. No se descarta por
+ * "peligrosa" sino por no estar ofrecida: si una herramienta no se monta en el
+ * agente público, concederla a un token no significaría nada.
  */
-function aplicarListaBlanca(nombre: string, tools: string[]): string[] {
-  const { permitidas, descartadas } = filtrarParaA2A(tools);
-  if (descartadas.length > 0) {
+function limitarAlTecho(nombre: string, tools: string[]): string[] {
+  const techo = getToolsDisponiblesA2A();
+  const dentro = tools.filter((t) => techo.includes(t));
+  const fuera = tools.filter((t) => !techo.includes(t));
+  if (fuera.length > 0) {
     console.warn(
-      `🔒 [A2A] El token "${nombre}" tenía herramientas no permitidas en el canal externo ` +
-      `y se descartaron: ${descartadas.join(', ')}. Revisa el alcance en la consola para evitar la confusión.`
+      `🔒 [A2A] El token "${nombre}" tiene concedidas herramientas que el canal no ofrece: ${fuera.join(', ')}. ` +
+      `Agrégalas a a2a.disponibles en config/channels.json si quieres que estén disponibles por A2A.`
     );
   }
-  return permitidas;
+  return dentro;
 }
 
 export function resolveA2AScope(presented: string | undefined): A2AScope | null {
@@ -120,7 +130,7 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   try {
     const fromDb = sqliteReminderService.findA2ATokenByValue(presented);
     if (fromDb) {
-      return { name: fromDb.name, tools: aplicarListaBlanca(fromDb.name, expandToolSpec(fromDb.tools)) };
+      return { name: fromDb.name, tools: limitarAlTecho(fromDb.name, expandToolSpec(fromDb.tools)) };
     }
   } catch {
     // Si la base no está disponible se sigue con la config en archivo
@@ -130,13 +140,13 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   for (const entry of cfg.a2a?.tokens || []) {
     const expected = resolveTokenValue(entry.token);
     if (expected && expected === presented) {
-      return { name: entry.name, tools: aplicarListaBlanca(entry.name, expandToolSpec(entry.tools || [])) };
+      return { name: entry.name, tools: limitarAlTecho(entry.name, expandToolSpec(entry.tools || [])) };
     }
   }
 
   // Compatibilidad: la clave única A2A_API_KEY conserva el alcance por defecto
   if (process.env.A2A_API_KEY && presented === process.env.A2A_API_KEY) {
-    return { name: 'default', tools: aplicarListaBlanca('default', expandToolSpec(cfg.a2a?.defaultTools || [])) };
+    return { name: 'default', tools: limitarAlTecho('default', expandToolSpec(cfg.a2a?.defaultTools || [])) };
   }
 
   return null;
@@ -152,6 +162,15 @@ export function saveChannelTools(channel: 'telegram' | 'buzz' | 'api', tools: st
   cached = next;
 }
 
+/** Persiste el techo del canal A2A */
+export function saveToolsDisponiblesA2A(tools: string[]): void {
+  const cfg = loadConfig();
+  const next: any = { ...cfg, a2a: { ...(cfg.a2a || {}), disponibles: tools } };
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
+  cached = next;
+}
+
 /** Resumen legible de la configuración vigente (para diagnóstico) */
 export function describeChannels() {
   const cfg = loadConfig();
@@ -160,6 +179,7 @@ export function describeChannels() {
     buzz:     getChannelTools('buzz'),
     api:      getChannelTools('api'),
     a2a: {
+      disponibles: getToolsDisponiblesA2A(),
       defaultTools: expandToolSpec(cfg.a2a?.defaultTools || []),
       tokens: (cfg.a2a?.tokens || []).map((t) => ({
         name: t.name,

@@ -97,9 +97,12 @@ export class ApiService {
   }
 
   // ─── Tokens A2A ───────────────────────────────────────────────────────
-  /** Herramientas que el canal externo admite (el resto ni se ofrece) */
-  getToolsPermitidasA2A(): Observable<{ permitidas: string[] }> {
-    return this.http.get<any>(`${this.baseUrl}/api/a2a/tools-permitidas`);
+  /** Techo del canal A2A: qué se monta en el agente público y se publica como skill */
+  getDisponiblesA2A(): Observable<{ disponibles: string[]; catalogo: string[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/a2a/disponibles`);
+  }
+  saveDisponiblesA2A(tools: string[]): Observable<any> {
+    return this.http.put(`${this.baseUrl}/api/a2a/disponibles`, { tools });
   }
 
   getTokens(): Observable<{ tokens: A2AToken[] }> {

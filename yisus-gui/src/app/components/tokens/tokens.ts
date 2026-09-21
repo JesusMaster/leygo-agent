@@ -51,9 +51,10 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
             <span>Herramientas habilitadas ({{ toolsNuevo().length }})</span>
           </label>
           <p class="card-sub" style="margin-top:-8px">
-            Solo aparecen las que el canal externo admite. Las herramientas personales
-            —correo, agenda, Drive, Chat, memoria episódica, publicar en Buzz— no se ofrecen
-            acá: el filtro se aplica al resolver el token, así que tampoco sirve concederlas por otra vía.
+            Aparecen las que el canal A2A tiene publicadas. Todas se montan en el agente
+            público: lo que decide este token es cuáles puede <em>usar</em>. Si intenta otra,
+            recibe una negativa explícita en vez de un silencio.
+            Para publicar o retirar skills del canal, ve a <strong>Canales y tools</strong>.
           </p>
           <div class="chips">
             @for (t of catalogo(); track t) {
@@ -157,8 +158,8 @@ export class TokensComponent {
       next: (r) => this.tokens.set(r.tokens),
       error: () => this.toast.error('No se pudieron cargar los tokens'),
     });
-    this.api.getToolsPermitidasA2A().subscribe({
-      next: (r) => this.catalogo.set(r.permitidas),
+    this.api.getDisponiblesA2A().subscribe({
+      next: (r) => this.catalogo.set(r.disponibles),
       error: () => {},
     });
   }

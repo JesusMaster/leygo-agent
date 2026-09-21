@@ -69,25 +69,19 @@ export const TOOL_GROUPS: Record<string, string[]> = {
 };
 
 /**
- * Herramientas que PUEDEN concederse por A2A, el canal de agentes externos.
+ * Herramientas que el canal A2A PUEDE ofrecer (se configuran en
+ * config/channels.json → a2a.disponibles).
  *
- * Lista blanca, no negra, y aplicada al resolver el token — no al guardarlo. Así
- * una herramienta nueva no queda disponible para terceros por olvido, y conceder
- * 'account_agent' a un token desde la consola no basta para exponer la cuenta de
- * Google: se descarta igual al construir el agente.
+ * Es el techo del canal, no el permiso de cada token: todas se montan en el
+ * agente público y cada invocación se valida contra el alcance del token que
+ * llamó (ver src/agents/a2a_guard.ts). Así un token puede tener acceso a algo
+ * que otro no, sin construir un agente distinto por cada uno.
  */
-export const TOOLS_PERMITIDAS_A2A = [
-  'knowledge_public', // documentación técnica de Obsidian, sin memoria episódica
-  'faq_agent',        // preguntas frecuentes de la plataforma
-  'triage_agent',     // permite que un tercero escale un tema a Jesús
+export const TOOLS_DISPONIBLES_A2A_POR_DEFECTO = [
+  'knowledge_public',
+  'faq_agent',
+  'triage_agent',
 ];
-
-/** Filtra un alcance dejando solo lo que un canal externo puede usar */
-export function filtrarParaA2A(tools: string[]): { permitidas: string[]; descartadas: string[] } {
-  const permitidas = tools.filter((t) => TOOLS_PERMITIDAS_A2A.includes(t));
-  const descartadas = tools.filter((t) => !TOOLS_PERMITIDAS_A2A.includes(t));
-  return { permitidas, descartadas };
-}
 
 /** Nombres de todas las herramientas del catálogo */
 export function allToolNames(): string[] {

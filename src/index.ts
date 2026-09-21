@@ -78,21 +78,12 @@ if (app) {
   app.use('/', createApiRoutes(runner, sessionService));
 }
 
-// A2A corre sobre el agente PÚBLICO, nunca sobre el coordinator interno, y con
-// las herramientas que declare el token presentado. Un Runner por alcance, cacheado.
-const a2aRunners = new Map<string, Runner>();
-const resolveA2ARunner = (scope: { name: string; tools: string[] }) => {
-    const key = `${scope.name}:${scope.tools.join(',')}`;
-    let r = a2aRunners.get(key);
-    if (!r) {
-        console.log(`🧰 [A2A] Agente para el token "${scope.name}": ${scope.tools.length} herramienta(s) (${scope.tools.join(', ') || 'ninguna'})`);
-        r = makeRunner(buildPublicCoordinator(scope.tools));
-        a2aRunners.set(key, r);
-    }
-    return r;
-};
+// A2A corre sobre el agente PÚBLICO, nunca sobre el coordinator interno.
+// Un solo runner para todos los tokens: monta las herramientas disponibles del
+// canal y el permiso se verifica en cada invocación contra el alcance del token.
+const publicRunner = makeRunner(buildPublicCoordinator());
 
-mountA2A(app, { resolveRunner: resolveA2ARunner, sessionService });
+mountA2A(app, { resolveRunner: () => publicRunner, sessionService });
 
 
 server.start().then(async () => {

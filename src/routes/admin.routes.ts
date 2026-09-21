@@ -2,8 +2,8 @@ import { Router } from 'express';
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
-import { describeChannels, reloadChannelConfig, saveChannelTools } from '../config/channels.js';
-import { allToolNames, TOOL_GROUPS, expandToolSpec, TOOLS_PERMITIDAS_A2A, filtrarParaA2A } from '../agents/tool_catalog.js';
+import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
+import { allToolNames, TOOL_GROUPS, expandToolSpec } from '../agents/tool_catalog.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 
 /**
@@ -95,9 +95,23 @@ export default function createAdminRoutes() {
 
   // ─── Tokens A2A ──────────────────────────────────────────────────────────
   // El valor del token se muestra UNA sola vez, al crearlo.
-  /** Qué herramientas admite el canal externo (la GUI ofrece solo estas) */
-  app.get('/api/a2a/tools-permitidas', (_req, res) => {
-    res.json({ permitidas: TOOLS_PERMITIDAS_A2A });
+  /**
+   * Techo del canal A2A: qué herramientas se montan en el agente público.
+   * Un token solo puede conceder algo que esté acá.
+   */
+  app.get('/api/a2a/disponibles', (_req, res) => {
+    res.json({ disponibles: getToolsDisponiblesA2A(), catalogo: allToolNames() });
+  });
+
+  app.put('/api/a2a/disponibles', (req, res) => {
+    const tools: string[] = req.body?.tools;
+    if (!Array.isArray(tools)) return res.status(400).json({ error: 'Se espera { tools: string[] }' });
+    saveToolsDisponiblesA2A(tools);
+    res.json({
+      status: 'success',
+      disponibles: getToolsDisponiblesA2A(),
+      aviso: 'El agente público se arma al arrancar: aplica al reiniciar el servicio.',
+    });
   });
 
   app.get('/api/a2a/tokens', (_req, res) => {
@@ -121,7 +135,11 @@ export default function createAdminRoutes() {
       return res.status(409).json({ error: `Ya existe un token llamado "${name}"` });
     }
 
-    const { permitidas, descartadas } = filtrarParaA2A(expandToolSpec(Array.isArray(tools) ? tools : []));
+    const pedidas = expandToolSpec(Array.isArray(tools) ? tools : []);
+    const techo = getToolsDisponiblesA2A();
+    const permitidas = pedidas.filter((t) => techo.includes(t));
+    const descartadas = pedidas.filter((t) => !techo.includes(t));
+
     const token = `yisus_${randomBytes(24).toString('hex')}`;
     sqliteReminderService.createA2AToken(name, token, permitidas);
 
@@ -132,14 +150,15 @@ export default function createAdminRoutes() {
       tools: permitidas,
       descartadas,
       aviso: descartadas.length
-        ? `Guarda este token ahora: no se vuelve a mostrar. Se descartaron herramientas no permitidas en el canal externo: ${descartadas.join(', ')}.`
+        ? `Guarda este token ahora: no se vuelve a mostrar. Estas no las ofrece el canal A2A y se descartaron: ${descartadas.join(', ')}.`
         : 'Guarda este token ahora: no se vuelve a mostrar.',
     });
   });
 
   app.patch('/api/a2a/tokens/:name', (req, res) => {
     const { tools, enabled } = req.body || {};
-    const filtradas = tools !== undefined ? filtrarParaA2A(expandToolSpec(tools)).permitidas : undefined;
+    const techo = getToolsDisponiblesA2A();
+    const filtradas = tools !== undefined ? expandToolSpec(tools).filter((t) => techo.includes(t)) : undefined;
     const ok = sqliteReminderService.updateA2AToken(req.params.name, { tools: filtradas, enabled });
     if (!ok) return res.status(404).json({ error: 'Token no encontrado' });
     res.json({ status: 'success' });
