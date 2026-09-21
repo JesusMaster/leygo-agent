@@ -27,7 +27,6 @@ export const yisusAgentCard: AgentCard = {
     description:
         'Clon digital y asistente de operaciones tecnológicas de Jesús Leiva, CTO de Apprecio. ' +
         'Especializado en arquitectura de software y documentación técnica (Obsidian y Qdrant), ' +
-        'memoria episódica y acuerdos de reuniones (Google Meet), ' +
         'y asistencia sobre la plataforma Apprecio. ' +
         'Por este canal no se exponen la cuenta de Google ni las automatizaciones internas.',
     supportedInterfaces: [
@@ -63,16 +62,6 @@ export const yisusAgentCard: AgentCard = {
             description: 'Consulta sobre arquitectura de software de Apprecio, microservicios, bases de datos, patrones de diseño, decisiones técnicas y notas del vault de Obsidian indexadas en Qdrant.',
             tags:        ['architecture', 'obsidian', 'qdrant', 'engineering', 'apprecio', 'es'],
             examples:    ['¿Cómo funciona la arquitectura de puntos en Apprecio?', 'Explícame el flujo transaccional de canjes'],
-            inputModes:  ['text/plain'],
-            outputModes: ['text/plain'],
-            securityRequirements: [],
-        },
-        {
-            id:          'episodic_memory',
-            name:        'Memoria Episódica y Acuerdos',
-            description: 'Búsqueda semántica de acuerdos, decisiones tomadas, compromisos y minutas en reuniones de Google Meet, hilos de Google Chat y correos de Gmail.',
-            tags:        ['episodic_memory', 'meetings', 'google_meet', 'decisions', 'chat', 'es'],
-            examples:    ['¿Qué acordamos con el equipo el martes sobre infraestructura?', '¿Cuáles fueron los compromisos de la reunión de arquitectura?'],
             inputModes:  ['text/plain'],
             outputModes: ['text/plain'],
             securityRequirements: [],
