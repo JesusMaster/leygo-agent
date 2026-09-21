@@ -72,6 +72,9 @@ export interface ConsolidatedThread {
 }
 
 export class SqliteReminderService {
+  /** Ruta efectiva del archivo SQLite en uso (para diagnóstico) */
+  public readonly dbPath: string;
+
   private db: any;
 
   constructor() {
@@ -90,6 +93,7 @@ export class SqliteReminderService {
     const dbPath = path.join(dataDir, 'reminders.db');
     const existia = fs.existsSync(dbPath);
 
+    this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath);
     this.init();
 

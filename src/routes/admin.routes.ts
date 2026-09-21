@@ -141,6 +141,38 @@ export default function createAdminRoutes() {
     res.json({ status: 'success' });
   });
 
+  /**
+   * Diagnóstico de A2A: responde QUÉ ve esta instancia concreta.
+   *
+   * Existe porque un 401 de token puede significar dos cosas muy distintas — token
+   * inválido, o instancia mirando otra base de datos — y desde afuera son
+   * indistinguibles. Se consulta contra el dominio público para interrogar al
+   * proceso que realmente atiende, no al que uno cree que atiende.
+   */
+  app.get('/api/a2a/diagnostico', (req, res) => {
+    const tokens = sqliteReminderService.listA2ATokens();
+    const aProbar = (req.query.token as string) || '';
+
+    res.json({
+      baseDeDatos: sqliteReminderService.dbPath,
+      directorioDeTrabajo: process.cwd(),
+      pid: process.pid,
+      tokensEnEstaInstancia: tokens.map((t) => ({
+        name: t.name,
+        preview: `${t.token.slice(0, 12)}…${t.token.slice(-4)}`,
+        enabled: t.enabled,
+        tools: t.tools.length,
+      })),
+      pruebaDeToken: aProbar
+        ? (() => {
+            const encontrado = tokens.find((t) => t.token === aProbar);
+            if (!encontrado) return 'NO existe en esta instancia';
+            return encontrado.enabled ? `OK: "${encontrado.name}"` : `existe pero está REVOCADO: "${encontrado.name}"`;
+          })()
+        : 'no se pasó ?token=… para probar',
+    });
+  });
+
   // ─── Escalamientos del triage ────────────────────────────────────────────
   app.get('/api/escalations', (req, res) => {
     const status = (req.query.status as string) || undefined;
