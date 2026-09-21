@@ -188,7 +188,24 @@ export class SqliteReminderService {
       );
     `);
 
-    // 9. Migraciones de esquema sobre bases ya existentes
+    // 9. Escalamientos al Jesús real (triage_agent)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS escalations (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        channel TEXT DEFAULT 'unknown',
+        requester TEXT,
+        topic TEXT,
+        summary TEXT,
+        urgency TEXT DEFAULT 'media',
+        status TEXT DEFAULT 'pendiente',
+        resolved_at INTEGER,
+        resolution TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status, created_at DESC);
+    `);
+
+    // 10. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
   }
 
@@ -499,6 +516,36 @@ export class SqliteReminderService {
       ORDER BY total_cost DESC
     `);
     return stmt.all(monthStartIso) as any[];
+  }
+
+  // ─── Escalamientos (triage_agent) ──────────────────────────────────────────
+
+  public createEscalation(e: {
+    id: string; channel: string; requester: string; topic: string; summary: string; urgency: string;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO escalations (id, created_at, channel, requester, topic, summary, urgency, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')
+    `);
+    stmt.run(e.id, Date.now(), e.channel, e.requester, e.topic, e.summary, e.urgency);
+  }
+
+  public listEscalations(status?: string, limit: number = 20): any[] {
+    const stmt = status
+      ? this.db.prepare(`SELECT * FROM escalations WHERE status = ? ORDER BY created_at DESC LIMIT ?`)
+      : this.db.prepare(`SELECT * FROM escalations ORDER BY created_at DESC LIMIT ?`);
+    return (status ? stmt.all(status, limit) : stmt.all(limit)) as any[];
+  }
+
+  public countPendingEscalations(): number {
+    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM escalations WHERE status = 'pendiente'`).get() as { cnt: number };
+    return row?.cnt ?? 0;
+  }
+
+  public resolveEscalation(id: string, resolution: string, status: string = 'resuelto'): boolean {
+    const stmt = this.db.prepare(`UPDATE escalations SET status = ?, resolution = ?, resolved_at = ? WHERE id = ?`);
+    const res = stmt.run(status, resolution, Date.now(), id) as any;
+    return (res?.changes ?? 0) > 0;
   }
 
   // ─── Estado de sincronización (Drive / Meet) ───────────────────────────────

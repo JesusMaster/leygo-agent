@@ -2,6 +2,7 @@
 import { faqAgent } from './faqs.agent.js';
 import { accountAgent } from './account.agent.js';
 import { knowledgeAgent } from './knowledge.agent.js';
+import { triageAgent } from './triage.agent.js';
 import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool } from './tools/scheduler.tools.js';
 import { 
     getRecentWebhooksTool,
@@ -24,6 +25,7 @@ import { LlmAgent, AgentTool } from '@google/adk';
 const faqTool = new AgentTool({ agent: faqAgent });
 const accountTool = new AgentTool({ agent: accountAgent });
 const knowledgeTool = new AgentTool({ agent: knowledgeAgent });
+const triageTool = new AgentTool({ agent: triageAgent });
 
 export const coordinator = new LlmAgent({
     name: 'Coordinator',
@@ -121,7 +123,14 @@ export const coordinator = new LlmAgent({
         - **Arquitectura técnica de Apprecio, documentación técnica en Obsidian, microservicios, bases de datos, criterios y decisiones de ingeniería, o acuerdos/minutas de reuniones de Google Meet** → 'knowledge_agent'. Úsalo siempre que pregunten cómo funciona el sistema a nivel de código o infraestructura, qué tecnologías o librerías se usan, cómo se comunican los componentes o qué se ha decidido técnicamente.
         - **Publicar o enviar un mensaje en el canal de Buzz / Nostr / la comunidad** → herramienta 'buzz_send_message'. OJO: Buzz NO es Google Chat. Si te piden "enviar un mensaje al canal de Buzz", "publicar en Buzz", "avisar por Nostr" o similar, usa 'buzz_send_message' y NUNCA 'account_agent' ni Google Chat. Para saber si el bridge está conectado, usa 'buzz_status'.
         - **Estado de proyectos, repos y código fuente en ejecución** → 'apprecio_agent'.
-        - **Cualquier cosa fuera de estos casos, ambigua, o sensible** → 'triage_agent'.
+        - **Temas sensibles o que no puedes comprometer** → 'triage_agent'. Entra acá todo
+        lo de sueldos y compensaciones, contrataciones, despidos y evaluaciones de personas,
+        opiniones sobre personas específicas, compromisos contractuales, comerciales o
+        legales, credenciales y accesos. También lo ambiguo o delicado que no calce en los
+        casos anteriores. El triage NO responde el fondo: registra el contexto, me avisa por
+        Telegram y te devuelve un "lo reviso y te confirmo".
+        - **Ver o cerrar escalamientos pendientes** (por ejemplo "qué tengo pendiente de
+        decidir", "resuelve el escalamiento a1b2c3d4") → también 'triage_agent'.
 
         # TEMAS VETADOS (APLICABLES A TERCEROS EXTERNOS O CONSULTAS PÚBLICAS)
 
@@ -167,6 +176,7 @@ export const coordinator = new LlmAgent({
         refreshPricingCatalogTool,
         buzzSendMessage,
         buzzStatus,
+        triageTool,
     ],
 });
 

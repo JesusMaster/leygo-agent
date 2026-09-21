@@ -218,7 +218,15 @@ export class SchedulerService {
         console.warn('⚠️ [SchedulerService] No se pudo obtener correos sin leer:', gmailErr.message);
       }
 
-      // 3. Sintetizar con Gemini 2.5 Flash
+      // 3. Escalamientos pendientes de tu decisión (triage_agent)
+      let pendingEscalations: any[] = [];
+      try {
+        pendingEscalations = sqliteReminderService.listEscalations('pendiente', 10);
+      } catch (escErr: any) {
+        console.warn('⚠️ [SchedulerService] No se pudieron leer los escalamientos:', escErr.message);
+      }
+
+      // 4. Sintetizar con Gemini 2.5 Flash
       const contextPrompt = `
 Eres el clon digital y asistente ejecutivo de Jesús Leiva (CTO de Apprecio).
 Hoy es ${now.toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
@@ -232,9 +240,13 @@ ${events.length === 0 ? 'Sin reuniones programadas para hoy.' : events.map(e => 
 --- CORREOS SIN LEER RECIENTES ---
 ${unreadEmails.length === 0 ? 'Bandeja al día sin correos sin leer recientes.' : unreadEmails.map(m => `- De: ${m.from} | Asunto: ${m.subject} (ID: ${m.id})`).join('\n')}
 
+--- PENDIENTES DE TU DECISIÓN (escalamientos) ---
+${pendingEscalations.length === 0 ? 'Nada pendiente de decisión.' : pendingEscalations.map((e: any) => `- [${e.id}] (${e.urgency}) ${e.topic} — pidió ${e.requester} por ${e.channel}: ${String(e.summary).slice(0, 180)}`).join('\n')}
+
 Instrucciones de formato:
 - Usa encabezados claros y viñetas concisas.
 - Resalta en negrita horas y nombres clave.
+- Si hay escalamientos pendientes, ábrelos en su propia sección al final con su ID entre corchetes: son decisiones que solo Jesús puede tomar y son lo más importante del digest.
 - Si hay un hueco importante en la agenda o temas que requieran foco, menciónalo brevemente al final.
 - Máximo 300 palabras.
 `;
@@ -259,7 +271,7 @@ Instrucciones de formato:
       const digestText = aiRes.text?.trim() || 'No se pudo generar el texto del Morning Digest.';
       const formattedHtml = messageFormatter.formatForTelegram(digestText);
 
-      // 4. Enviar a Telegram
+      // 5. Enviar a Telegram
       await telegramBotService.sendDirectMessage(
         `🌅 <b>MORNING DIGEST — ${now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}</b>\n\n${formattedHtml}`,
         { parseMode: 'HTML' }

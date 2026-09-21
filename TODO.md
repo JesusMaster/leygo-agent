@@ -117,8 +117,13 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
 ### Pendiente ⏳
 - [ ] **`apprecio_agent`**:
   - Conectar con repositorios de GitHub/GitLab de Apprecio para consultar el estado del código fuente, PRs pendientes y releases.
-- [ ] **`triage_agent`**:
-  - Manejo de temas sensibles escalados para consolidar un "Digest de Decisiones" que requieran la atención del Jesús real.
+- [x] **`triage_agent`** ✅ IMPLEMENTADO (21-09):
+  - `src/agents/triage.agent.ts` + `src/agents/tools/triage.tools.ts`, montado como AgentTool del Coordinator.
+  - Tabla `escalations` en SQLite (id corto, canal, solicitante, tema, resumen, urgencia, estado, resolución).
+  - Herramientas: `escalate_to_jesus` (registra y avisa por Telegram con el contexto completo), `list_escalations` y `resolve_escalation` (solo cuando Jesús indica la decisión).
+  - El Morning Digest ahora abre una sección con los escalamientos pendientes de decisión.
+  - Regla de ruteo explícita en el Coordinator: sueldos, contrataciones, evaluaciones, opiniones sobre personas, compromisos legales/comerciales y credenciales van al triage, que NO responde el fondo.
+  - Pendiente: botones de resolución rápida en la tarjeta de Telegram (hoy se resuelve por conversación).
 
 ---
 
