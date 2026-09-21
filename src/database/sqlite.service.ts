@@ -205,7 +205,19 @@ export class SqliteReminderService {
       CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status, created_at DESC);
     `);
 
-    // 10. Migraciones de esquema sobre bases ya existentes
+    // 10. Tokens A2A administrables desde la GUI
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS a2a_tokens (
+        name TEXT PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        tools TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        last_used_at INTEGER
+      );
+    `);
+
+    // 11. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
   }
 
@@ -516,6 +528,46 @@ export class SqliteReminderService {
       ORDER BY total_cost DESC
     `);
     return stmt.all(monthStartIso) as any[];
+  }
+
+  // ─── Tokens A2A ────────────────────────────────────────────────────────────
+
+  public listA2ATokens(): Array<{ name: string; token: string; tools: string[]; enabled: boolean; created_at: number; last_used_at?: number }> {
+    const rows = this.db.prepare(`SELECT * FROM a2a_tokens ORDER BY created_at DESC`).all() as any[];
+    return rows.map((r) => ({
+      name: r.name,
+      token: r.token,
+      tools: JSON.parse(r.tools || '[]'),
+      enabled: !!r.enabled,
+      created_at: r.created_at,
+      last_used_at: r.last_used_at || undefined,
+    }));
+  }
+
+  public createA2AToken(name: string, token: string, tools: string[]): void {
+    this.db.prepare(`INSERT INTO a2a_tokens (name, token, tools, enabled, created_at) VALUES (?, ?, ?, 1, ?)`)
+      .run(name, token, JSON.stringify(tools || []), Date.now());
+  }
+
+  public updateA2AToken(name: string, changes: { tools?: string[]; enabled?: boolean }): boolean {
+    const current = this.db.prepare(`SELECT * FROM a2a_tokens WHERE name = ?`).get(name) as any;
+    if (!current) return false;
+    const tools = changes.tools !== undefined ? JSON.stringify(changes.tools) : current.tools;
+    const enabled = changes.enabled !== undefined ? (changes.enabled ? 1 : 0) : current.enabled;
+    this.db.prepare(`UPDATE a2a_tokens SET tools = ?, enabled = ? WHERE name = ?`).run(tools, enabled, name);
+    return true;
+  }
+
+  public deleteA2AToken(name: string): boolean {
+    const res = this.db.prepare(`DELETE FROM a2a_tokens WHERE name = ?`).run(name) as any;
+    return (res?.changes ?? 0) > 0;
+  }
+
+  public findA2ATokenByValue(token: string): { name: string; tools: string[] } | null {
+    const row = this.db.prepare(`SELECT * FROM a2a_tokens WHERE token = ? AND enabled = 1`).get(token) as any;
+    if (!row) return null;
+    this.db.prepare(`UPDATE a2a_tokens SET last_used_at = ? WHERE name = ?`).run(Date.now(), row.name);
+    return { name: row.name, tools: JSON.parse(row.tools || '[]') };
   }
 
   // ─── Escalamientos (triage_agent) ──────────────────────────────────────────

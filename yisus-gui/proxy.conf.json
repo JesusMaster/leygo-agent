@@ -1,0 +1,5 @@
+{
+  "/api": { "target": "http://localhost:4000", "secure": false, "changeOrigin": true },
+  "/run_sse": { "target": "http://localhost:4000", "secure": false, "changeOrigin": true },
+  "/run": { "target": "http://localhost:4000", "secure": false, "changeOrigin": true }
+}

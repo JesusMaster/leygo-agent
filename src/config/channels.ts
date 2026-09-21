@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { expandToolSpec } from '../agents/tool_catalog.js';
+import { sqliteReminderService } from '../database/sqlite.service.js';
 
 /**
  * Configuración de qué herramientas ve cada canal.
@@ -99,6 +100,17 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
 
   const cfg = loadConfig();
 
+  // 1) Tokens creados desde la GUI (SQLite). Van primero: son los que se revocan en caliente.
+  try {
+    const fromDb = sqliteReminderService.findA2ATokenByValue(presented);
+    if (fromDb) {
+      return { name: fromDb.name, tools: expandToolSpec(fromDb.tools) };
+    }
+  } catch {
+    // Si la base no está disponible se sigue con la config en archivo
+  }
+
+  // 2) Tokens declarados en config/channels.json
   for (const entry of cfg.a2a?.tokens || []) {
     const expected = resolveTokenValue(entry.token);
     if (expected && expected === presented) {
@@ -112,6 +124,16 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   }
 
   return null;
+}
+
+/** Guarda la lista de herramientas de un canal en config/channels.json */
+export function saveChannelTools(channel: 'telegram' | 'buzz' | 'api', tools: string[]): void {
+  const cfg = loadConfig();
+  const next: any = { ...cfg, [channel]: { tools } };
+
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
+  cached = next;
 }
 
 /** Resumen legible de la configuración vigente (para diagnóstico) */

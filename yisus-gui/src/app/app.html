@@ -1,0 +1,92 @@
+<div class="layout-wrapper">
+  <aside class="sidebar">
+    <div class="logo-section">
+      <div class="logo-icon">
+        <svg viewBox="0 0 226.772 226.772" xmlns="http://www.w3.org/2000/svg">
+          <circle style="fill:none;stroke:var(--text-main);stroke-width:8;stroke-miterlimit:10;" cx="50.827" cy="49.444" r="24.941" />
+          <circle cx="50.386" cy="175.193" r="27.5" style="fill:var(--text-main);" />
+          <line style="fill:none;stroke:var(--text-main);stroke-width:10;stroke-miterlimit:10;" x1="77.886" y1="175.193" x2="151.193" y2="175.193" />
+          <line style="fill:none;stroke:var(--accent-primary);stroke-width:10;stroke-miterlimit:10;stroke-dasharray:8.458,8.458;" x1="161.444" y1="152.791" x2="80.705" y2="72.051" />
+          <circle style="fill:var(--accent-primary);" cx="178.693" cy="175.193" r="27.5" />
+          <line style="fill:none;stroke:var(--text-main);stroke-width:10;stroke-miterlimit:10;" x1="50.386" y1="147.693" x2="50.386" y2="74.386" />
+        </svg>
+      </div>
+      <h1 class="logo-text">yisus</h1>
+    </div>
+
+    <nav class="nav-menu">
+      <a routerLink="/chat" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-chat-circle-dots"></i></span><span class="label">Chat</span>
+      </a>
+      <a routerLink="/usage" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-chart-bar"></i></span><span class="label">Consumo</span>
+      </a>
+      <a routerLink="/channels" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-sliders-horizontal"></i></span><span class="label">Canales y tools</span>
+      </a>
+      <a routerLink="/tokens" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-key"></i></span><span class="label">Tokens A2A</span>
+      </a>
+      <a routerLink="/escalations" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-warning-octagon"></i></span><span class="label">Escalamientos</span>
+      </a>
+      <a routerLink="/webhooks" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-share-network"></i></span><span class="label">Webhooks</span>
+      </a>
+      <a routerLink="/reminders" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-calendar-blank"></i></span><span class="label">Recordatorios</span>
+      </a>
+      <a routerLink="/settings" routerLinkActive="active" class="nav-item">
+        <span class="icon"><i class="ph ph-gear"></i></span><span class="label">Ajustes</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-profile">
+        <div class="avatar-container">
+          <img src="https://ui-avatars.com/api/?name=Jesus+Leiva&background=6366f1&color=fff&bold=true" alt="Avatar">
+        </div>
+        <div class="user-details">
+          <span class="user-name">Jesús Leiva</span>
+          <span class="user-role">CTO · Apprecio</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="content-area">
+    <header class="main-header">
+      <div class="project-info">
+        <h2 class="project-name">Yisus Agent</h2>
+        <div class="status">
+          @if (online() === true) {
+            <span class="dot green"></span> Agente en línea
+            @if (!protegido()) { <span class="badge warn" style="margin-left:10px">Admin sin clave</span> }
+          } @else if (online() === false) {
+            <span class="dot red"></span> Sin conexión con el backend
+          } @else {
+            <span class="dot orange"></span> Conectando…
+          }
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="theme-switch-wrapper">
+          <label class="theme-switch" for="checkbox">
+            <input type="checkbox" id="checkbox" [checked]="isDarkMode()" (change)="toggleTheme()" />
+            <div class="slider round">
+              <i class="ph ph-sun sun-icon"></i>
+              <i class="ph ph-moon moon-icon"></i>
+            </div>
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <div class="view-container">
+      <router-outlet></router-outlet>
+    </div>
+  </main>
+
+  <app-toast></app-toast>
+</div>

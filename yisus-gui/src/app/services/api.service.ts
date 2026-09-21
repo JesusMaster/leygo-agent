@@ -1,0 +1,127 @@
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+// ─── Tipos que devuelve el backend ──────────────────────────────────────────
+export interface UsageByModel   { model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
+export interface UsageByAgent   { agent: string; model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
+export interface UsageByChannel { channel: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
+export interface BudgetStatus   { channel: string; currentCost: number; budget: number; percentUsed: number; isExceeded: boolean; isNearLimit: boolean; }
+
+export interface UsageRecord {
+  id?: number; timestamp: string; user_input: string; model: string;
+  input_tokens: number; output_tokens: number; cost_usd: number;
+  thread_id: string; channel?: string; agent?: string;
+}
+
+export interface UsageSummary {
+  allHistory: UsageRecord[];
+  totalCost: number; totalTokens: number; inputTokens: number; outputTokens: number;
+  monthlyBudget: number; percentUsed: number; isExceeded: boolean;
+  byModel: UsageByModel[]; byAgent: UsageByAgent[]; byChannel: UsageByChannel[];
+  channelBudgets: BudgetStatus[];
+}
+
+export interface ChannelsConfig {
+  catalogo: string[];
+  grupos: Record<string, string[]>;
+  canales: {
+    telegram: string[]; buzz: string[]; api: string[];
+    a2a: { defaultTools: string[]; tokens: { name: string; configurado: boolean; tools: string[] }[] };
+  };
+}
+
+export interface A2AToken {
+  name: string; tools: string[]; enabled: boolean;
+  created_at: number; last_used_at?: number; preview: string;
+}
+
+export interface Escalation {
+  id: string; created_at: number; channel: string; requester: string;
+  topic: string; summary: string; urgency: string; status: string;
+  resolved_at?: number; resolution?: string;
+}
+
+export interface Reminder { id: string; target_time: number; message: string; status: string; created_at: number; }
+
+export interface CustomWebhook {
+  id: string; title: string; instructions: string; model: string;
+  enabled?: boolean; active?: boolean; created_at?: number; url?: string;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  private http = inject(HttpClient);
+
+  /** Base del backend. Configurable desde Ajustes; por defecto el mismo host en :4000 */
+  get baseUrl(): string {
+    return localStorage.getItem('yisus_api_url') || `${window.location.protocol}//${window.location.hostname}:4000`;
+  }
+  setBaseUrl(url: string) { localStorage.setItem('yisus_api_url', url.replace(/\/$/, '')); }
+
+  // ─── Estado ───────────────────────────────────────────────────────────
+  getStatus(): Observable<{ status: string; protegido: boolean; agente: string }> {
+    return this.http.get<any>(`${this.baseUrl}/api/admin/me`);
+  }
+
+  // ─── Consumo ──────────────────────────────────────────────────────────
+  getUsage(limit = 200): Observable<UsageSummary> {
+    return this.http.get<UsageSummary>(`${this.baseUrl}/api/usage?limit=${limit}`);
+  }
+  getBudgets(): Observable<{ global: BudgetStatus; canales: BudgetStatus[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/budgets`);
+  }
+  setBudget(budgetUsd: number, channel?: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/api/usage/budget`, channel ? { budgetUsd, channel } : { budgetUsd });
+  }
+  refreshPricing(): Observable<any> {
+    return this.http.post(`${this.baseUrl}/api/usage/refresh-pricing`, {});
+  }
+
+  // ─── Canales y herramientas ───────────────────────────────────────────
+  getChannels(): Observable<ChannelsConfig> {
+    return this.http.get<ChannelsConfig>(`${this.baseUrl}/api/channels`);
+  }
+  saveChannelTools(channel: string, tools: string[]): Observable<any> {
+    return this.http.put(`${this.baseUrl}/api/channels/${channel}`, { tools });
+  }
+  reloadChannels(): Observable<any> {
+    return this.http.post(`${this.baseUrl}/api/channels/reload`, {});
+  }
+
+  // ─── Tokens A2A ───────────────────────────────────────────────────────
+  getTokens(): Observable<{ tokens: A2AToken[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/a2a/tokens`);
+  }
+  createToken(name: string, tools: string[]): Observable<{ name: string; token: string; tools: string[] }> {
+    return this.http.post<any>(`${this.baseUrl}/api/a2a/tokens`, { name, tools });
+  }
+  updateToken(name: string, changes: { tools?: string[]; enabled?: boolean }): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/api/a2a/tokens/${encodeURIComponent(name)}`, changes);
+  }
+  deleteToken(name: string): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/api/a2a/tokens/${encodeURIComponent(name)}`);
+  }
+
+  // ─── Escalamientos ────────────────────────────────────────────────────
+  getEscalations(status = 'pendiente'): Observable<{ escalations: Escalation[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/escalations?status=${status}`);
+  }
+  resolveEscalation(id: string, resolution: string, status = 'resuelto'): Observable<any> {
+    return this.http.post(`${this.baseUrl}/api/escalations/${id}/resolve`, { resolution, status });
+  }
+
+  // ─── Recordatorios ────────────────────────────────────────────────────
+  getReminders(): Observable<{ reminders: Reminder[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/reminders`);
+  }
+
+  // ─── Webhooks con IA ──────────────────────────────────────────────────
+  getWebhooks(): Observable<any> { return this.http.get<any>(`${this.baseUrl}/api/webhooks`); }
+  createWebhook(data: { title: string; instructions: string; model: string }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/api/webhooks`, data);
+  }
+  toggleWebhook(id: string): Observable<any> { return this.http.post(`${this.baseUrl}/api/webhooks/${id}/toggle`, {}); }
+  deleteWebhook(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/webhooks/${id}`); }
+  getWebhookLogs(id: string): Observable<any> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/${id}/logs`); }
+}

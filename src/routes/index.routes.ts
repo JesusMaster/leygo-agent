@@ -3,8 +3,6 @@ import express from 'express';
 import { Runner } from '@google/adk';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 import { USAGE_CHANNELS } from '../services/token_tracker.service.js';
-import { describeChannels, reloadChannelConfig } from '../config/channels.js';
-import { allToolNames, TOOL_GROUPS } from '../agents/tool_catalog.js';
 import { RedisSessionService } from '../services/redis_session.service.js';
 import { telegramBotService } from '../services/telegram_bot.service.js';
 import { webhookService } from '../services/webhook.service.js';
@@ -187,31 +185,6 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
             tokenTrackerService.setMonthlyBudget(budgetUsd, channel);
             const status = tokenTrackerService.getBudgetStatus(channel);
             res.json({ status: 'success', data: status });
-        } catch (err: any) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    // Qué herramientas ve cada canal ahora mismo
-    app.get('/api/channels', async (_req, res) => {
-        try {
-            res.json({
-                catalogo: allToolNames(),
-                grupos: TOOL_GROUPS,
-                canales: describeChannels(),
-            });
-        } catch (err: any) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    // Releer config/channels.json sin reiniciar. Ojo: los agentes ya construidos
-    // conservan sus herramientas; los cambios aplican a los que se creen después
-    // (A2A arma uno por token) y al próximo reinicio para Telegram, Buzz y API.
-    app.post('/api/channels/reload', async (_req, res) => {
-        try {
-            reloadChannelConfig();
-            res.json({ status: 'success', canales: describeChannels() });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

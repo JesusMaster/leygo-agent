@@ -56,6 +56,23 @@ const server = new MicroserviceServer({
 
 const app = (server as any).app as express.Application;
 if (app) {
+  // CORS para yisus-gui. Por defecto solo orígenes locales: la GUI administra
+  // tokens de A2A, así que abrirla a cualquier origen sería regalar esa superficie.
+  const origenesPermitidos = (process.env.GUI_ORIGIN || 'http://localhost:4200,http://127.0.0.1:4200')
+    .split(',').map((o) => o.trim()).filter(Boolean);
+
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && (origenesPermitidos.includes('*') || origenesPermitidos.includes(origin))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key, Authorization, X-API-Key');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use('/', createApiRoutes(runner, sessionService));
