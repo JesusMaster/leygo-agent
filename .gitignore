@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build and Compilation outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables & secrets (CRITICAL: Never commit credentials)
+.env
+.env.*
+!.env.example
+.nostr_keys.json
+credentials.json
+token.json
+service_account*.json
+*.pem
+*.key
+
+# Local Databases, storage & Vector DBs
+data/*.db
+data/*.sqlite
+data/*.sqlite-journal
+qdrant_storage/
+*.rdb
+
+# Logs & Monitoring
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Backups & Temporary files
+*.bak
+*.tmp
+*.temp
+scratch/
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~

@@ -1,0 +1,57 @@
+{
+  "name": "yisus-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "generate": "npx micro-generate generate:feature",
+    "sync:obsidian": "tsx scripts/sync_obsidian.ts",
+    "sync:meet": "tsx scripts/sync_meet_recordings.ts",
+    "sync:context": "tsx scripts/sync_context.ts",
+    "nostr:id": "tsx scripts/nostr_identity.ts"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^1.2.0",
+    "@apollo/server": "^5.2.0",
+    "@as-integrations/express4": "^1.0.0",
+    "@google/adk": "^2.1.0",
+    "@google/genai": "^2.23.0",
+    "@qdrant/js-client-rest": "^1.19.0",
+    "@types/ws": "^8.18.1",
+    "axios": "^1.6.0",
+    "dompurify": "^3.0.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.18.2",
+    "googleapis": "^181.0.0",
+    "graphql": "^16.12.0",
+    "gray-matter": "^4.0.3",
+    "ioredis": "^5.3.2",
+    "jsdom": "^24.0.0",
+    "micro-generate": "*",
+    "mongoose": "^8.1.1",
+    "node-cron": "^4.6.0",
+    "nostr-tools": "^2.25.2",
+    "pino": "^10.2.0",
+    "pino-pretty": "^10.3.1",
+    "ws": "^8.21.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@google/adk-devtools": "^2.1.0",
+    "@types/dompurify": "^3.0.0",
+    "@types/express": "^4.17.21",
+    "@types/jsdom": "^21.1.0",
+    "@types/node": "^20.11.0",
+    "@types/node-cron": "^3.0.11",
+    "pino-pretty": "^10.3.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "adm-zip": ">=0.6.1"
+  }
+}
