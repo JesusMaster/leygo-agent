@@ -1,33 +1,18 @@
-// import { infoUser } from './tools/users.tools.js';
-import { faqAgent } from './faqs.agent.js';
-import { accountAgent } from './account.agent.js';
-import { knowledgeAgent } from './knowledge.agent.js';
-import { triageAgent } from './triage.agent.js';
-import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool } from './tools/scheduler.tools.js';
-import { 
-    getRecentWebhooksTool,
-    createCustomWebhookTool,
-    listCustomWebhooksTool,
-    toggleCustomWebhookTool,
-    getCustomWebhookLogsTool
-} from './tools/webhook.tools.js';
-import { buzzSendMessage, buzzStatus } from './tools/nostr.tools.js';
-import { 
-    getTokenUsageTool, 
-    setMonthlyBudgetTool, 
-    refreshPricingCatalogTool 
-} from './tools/usage.tools.js';
 import 'dotenv/config';
+import { LlmAgent } from '@google/adk';
 import { TrackedGemini } from './tracked_gemini.js';
-import { LlmAgent, AgentTool } from '@google/adk';
+import { resolveTools } from './tool_catalog.js';
+import { getChannelTools } from '../config/channels.js';
 
-// // Tools de agentes para orquestación directa (el Coordinador siempre mantiene el control de la conversación en cada turno)
-const faqTool = new AgentTool({ agent: faqAgent });
-const accountTool = new AgentTool({ agent: accountAgent });
-const knowledgeTool = new AgentTool({ agent: knowledgeAgent });
-const triageTool = new AgentTool({ agent: triageAgent });
+/**
+ * Coordinator interno (Telegram, API y Buzz).
+ *
+ * Las herramientas ya no vienen fijas: se arman por canal desde el catálogo, de
+ * modo que habilitar algo nuevo en Telegram no lo deje expuesto en Buzz.
+ */
+export function buildCoordinator(toolNames: string[] = ['*']) {
+  return new LlmAgent({
 
-export const coordinator = new LlmAgent({
     name: 'Coordinator',
     model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'Coordinator' }),
     description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
@@ -159,26 +144,19 @@ export const coordinator = new LlmAgent({
         Es preferible un "déjame revisarlo" que una respuesta inventada con buen tono.
        
     `,
-    tools: [
-        faqTool,
-        accountTool,
-        knowledgeTool,
-        scheduleReminderTool,
-        listRemindersTool,
-        triggerMorningDigestTool,
-        getRecentWebhooksTool,
-        createCustomWebhookTool,
-        listCustomWebhooksTool,
-        toggleCustomWebhookTool,
-        getCustomWebhookLogsTool,
-        getTokenUsageTool,
-        setMonthlyBudgetTool,
-        refreshPricingCatalogTool,
-        buzzSendMessage,
-        buzzStatus,
-        triageTool,
-    ],
-});
+    tools: resolveTools(toolNames),
+  });
+}
+
+/** Coordinator con acceso completo: ADK Web y usos internos sin canal definido. */
+export const coordinator = buildCoordinator(['*']);
+
+/** Coordinator de un canal concreto, según config/channels.json */
+export function buildChannelCoordinator(channel: 'telegram' | 'buzz' | 'api') {
+  const tools = getChannelTools(channel);
+  console.log(`🧰 [Agent] Coordinator para "${channel}": ${tools.length} herramientas (${tools.join(', ') || 'ninguna'})`);
+  return buildCoordinator(tools);
+}
 
 // El ADK Web busca específicamente un export llamado 'rootAgent'
 export const rootAgent = coordinator;

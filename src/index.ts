@@ -6,8 +6,8 @@ import { createRedisConnector } from './database/redis.js';
 import express from 'express';
 import createApiRoutes from './routes/index.js';
 import { Runner, InMemoryArtifactService, InMemoryMemoryService } from '@google/adk';
-import { rootAgent } from './agents/agent.js';
-import { publicCoordinator } from './agents/public.agent.js';
+import { buildChannelCoordinator } from './agents/agent.js';
+import { buildPublicCoordinator } from './agents/public.agent.js';
 import { RedisSessionService } from './services/redis_session.service.js';
 import { telegramBotService } from './services/telegram_bot.service.js';
 import { schedulerService } from './services/scheduler.service.js';
@@ -26,13 +26,20 @@ const redisConnector = createRedisConnector({
 
 const sessionService = new RedisSessionService();
 
-const runner = new Runner({
-    agent:           rootAgent,
-    appName:         process.env.ADK_APP_NAME || 'yisus',
+const APP_NAME = process.env.ADK_APP_NAME || 'yisus';
+
+/** Cada canal corre con su propio set de herramientas (config/channels.json) */
+const makeRunner = (agent: any) => new Runner({
+    agent,
+    appName:         APP_NAME,
     sessionService,
     artifactService: new InMemoryArtifactService(),
     memoryService:   new InMemoryMemoryService(),
 });
+
+const runner         = makeRunner(buildChannelCoordinator('api'));
+const telegramRunner = makeRunner(buildChannelCoordinator('telegram'));
+const buzzRunner     = makeRunner(buildChannelCoordinator('buzz'));
 
 
 const server = new MicroserviceServer({
@@ -54,17 +61,21 @@ if (app) {
   app.use('/', createApiRoutes(runner, sessionService));
 }
 
-// A2A corre sobre un agente PÚBLICO restringido (solo conocimiento y FAQs),
-// nunca sobre el coordinator interno que tiene acceso a Gmail, Drive y Chat.
-const publicRunner = new Runner({
-    agent:           publicCoordinator,
-    appName:         `${process.env.ADK_APP_NAME || 'yisus'}-public`,
-    sessionService,
-    artifactService: new InMemoryArtifactService(),
-    memoryService:   new InMemoryMemoryService(),
-});
+// A2A corre sobre el agente PÚBLICO, nunca sobre el coordinator interno, y con
+// las herramientas que declare el token presentado. Un Runner por alcance, cacheado.
+const a2aRunners = new Map<string, Runner>();
+const resolveA2ARunner = (scope: { name: string; tools: string[] }) => {
+    const key = `${scope.name}:${scope.tools.join(',')}`;
+    let r = a2aRunners.get(key);
+    if (!r) {
+        console.log(`🧰 [A2A] Agente para el token "${scope.name}": ${scope.tools.length} herramienta(s) (${scope.tools.join(', ') || 'ninguna'})`);
+        r = makeRunner(buildPublicCoordinator(scope.tools));
+        a2aRunners.set(key, r);
+    }
+    return r;
+};
 
-mountA2A(app, { runner: publicRunner, sessionService });
+mountA2A(app, { resolveRunner: resolveA2ARunner, sessionService });
 
 
 server.start().then(async () => {
@@ -74,11 +85,11 @@ server.start().then(async () => {
     console.log('Server initialized');
 
     // Iniciar servicios en segundo plano: Bot de Telegram interactivo, Scheduler de tareas y Bridge Nostr (Buzz)
-    await telegramBotService.start(runner, sessionService);
+    await telegramBotService.start(telegramRunner, sessionService);
     schedulerService.start();
 
     if (process.env.NOSTR_ENABLED !== 'false') {
-        await nostrGatewayService.start(runner, sessionService);
+        await nostrGatewayService.start(buzzRunner, sessionService);
     }
 });
 

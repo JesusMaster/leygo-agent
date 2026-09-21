@@ -252,6 +252,13 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Pendiente: los topes solo **avisan**, no cortan. `isOverBudget(channel)` ya existe para cuando se quiera bloquear consumo.
   - Pendiente: no hay presupuestos de grupo (ej. un tope compartido entre buzz y a2a); hoy cada canal tiene el suyo.
 
+- [x] **Herramientas configurables por canal** ✅ (21-09):
+  - `src/agents/tool_catalog.ts`: catálogo único + grupos (`knowledge`, `publico`, `faq`, `workspace`, `triage`, `reminders`, `webhooks`, `usage`, `buzz`).
+  - `config/channels.json`: Telegram, Buzz y API declaran su lista; A2A declara **tokens con alcance** (`env:NOMBRE` para no escribir el secreto en el JSON).
+  - Un Runner y un Coordinator por canal; en A2A, uno por token (cacheado). Token desconocido = 401; token sin herramientas = conversa pero no ejecuta.
+  - `GET /api/channels` muestra catálogo, grupos y lo vigente por canal; `POST /api/channels/reload` relee el archivo.
+  - Pendiente: la recarga en caliente solo afecta a los agentes que se construyan después (A2A). Telegram, Buzz y API necesitan reinicio.
+
 ### 🟡 Menores / Higiene
 
 - [x] **Instructions inconsistentes con el modo `AgentTool`** ✅ ARREGLADO (21-09).: los subagentes siguen indicando `transfer_to_agent('Coordinator')`, que en ese modo no existe.

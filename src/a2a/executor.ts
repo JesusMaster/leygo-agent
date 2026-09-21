@@ -19,6 +19,7 @@ import {
     type RequestContext,
 } from '@a2a-js/sdk/server';
 import type { RedisSessionService } from '../services/redis_session.service.js';
+import { currentA2AScope } from '../config/channels.js';
 import { agentMessage, extractText, status } from './helpers.js';
 
 const APP_NAME = process.env.ADK_APP_NAME || 'yisus';
@@ -29,7 +30,8 @@ export class YisusAgentExecutor implements AgentExecutor {
     private readonly cancelled = new Set<string>();
 
     constructor(
-        private readonly runner: Runner,
+        /** Devuelve el Runner correspondiente al alcance del token presentado */
+        private readonly resolveRunner: (scope: { name: string; tools: string[] }) => Runner,
         private readonly sessionService: RedisSessionService,
     ) {}
 
@@ -38,6 +40,11 @@ export class YisusAgentExecutor implements AgentExecutor {
         this.contexts.set(taskId, contextId);
 
         const userText = extractText(ctx.userMessage);
+
+        // El alcance lo dejó el middleware al validar el token; sin él no se ejecuta.
+        const scope = currentA2AScope() || { name: 'sin-alcance', tools: [] };
+        const runner = this.resolveRunner(scope);
+
         const userId =
             (ctx.userMessage?.metadata?.userId as string | undefined) ||
             `a2a:${contextId}`;
@@ -74,9 +81,9 @@ export class YisusAgentExecutor implements AgentExecutor {
             const replies: string[] = [];
 
             const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
-            beginUsageScope('a2a', contextId, `[A2A] ${userText}`);
+            beginUsageScope('a2a', contextId, `[A2A:${scope.name}] ${userText}`);
 
-            for await (const event of this.runner.runAsync({
+            for await (const event of runner.runAsync({
                 userId, sessionId: session.id, newMessage,
             })) {
                 if (this.cancelled.has(taskId)) break;
