@@ -15,6 +15,7 @@ import { DefaultRequestHandler, InMemoryTaskStore } from '@a2a-js/sdk/server';
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import type { RedisSessionService } from '../services/redis_session.service.js';
 import { resolveA2AScope, setCurrentA2AScope, describeChannels } from '../config/channels.js';
+import { sqliteReminderService } from '../database/sqlite.service.js';
 import { yisusAgentCard } from './card.js';
 import { YisusAgentExecutor } from './executor.js';
 
@@ -31,6 +32,16 @@ function a2aAuth(req: express.Request, res: express.Response, next: express.Next
 
     const scope = resolveA2AScope(presented);
     if (!scope) {
+        try {
+            const activos = sqliteReminderService.listA2ATokens().filter((t) => t.enabled);
+            console.warn(
+                `🔒 [A2A] Token rechazado (${presented ? presented.slice(0, 12) + '…' : 'ausente'}). ` +
+                `Esta instancia tiene ${activos.length} token(s) activo(s): ${activos.map((t) => t.name).join(', ') || 'ninguno'}. ` +
+                `Si el token existe en tu base pero acá aparece 0, el proceso que responde NO es el que crees.`
+            );
+        } catch (err: any) {
+            console.warn(`🔒 [A2A] Token rechazado y además no se pudo leer la tabla de tokens: ${err.message}`);
+        }
         res.status(401).json({
             error: presented
                 ? 'Unauthorized: el token presentado no existe o fue revocado'

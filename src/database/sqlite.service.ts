@@ -75,13 +75,28 @@ export class SqliteReminderService {
   private db: any;
 
   constructor() {
-    const dataDir = path.resolve(process.cwd(), 'data');
+    // La ruta dependía SOLO de process.cwd(): dos procesos lanzados desde
+    // directorios distintos (pm2, launchd, Docker, otra copia del repo) abrían
+    // bases distintas sin decir nada, y los tokens creados en una no existían
+    // en la otra. DATA_DIR lo hace explícito, y la ruta efectiva se loguea.
+    const dataDir = process.env.DATA_DIR
+      ? path.resolve(process.env.DATA_DIR)
+      : path.resolve(process.cwd(), 'data');
+
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
+
     const dbPath = path.join(dataDir, 'reminders.db');
+    const existia = fs.existsSync(dbPath);
+
     this.db = new DatabaseSync(dbPath);
     this.init();
+
+    console.log(`🗄️  [SQLite] Base: ${dbPath}${existia ? '' : '  ← RECIÉN CREADA (estaba vacía)'}`);
+    if (!existia) {
+      console.warn('⚠️  [SQLite] Si esperabas encontrar datos acá (tokens A2A, consumo, recordatorios), este proceso está corriendo desde otro directorio. Usa DATA_DIR con una ruta absoluta.');
+    }
   }
 
   private init(): void {
