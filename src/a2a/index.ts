@@ -42,10 +42,27 @@ function a2aAuth(req: express.Request, res: express.Response, next: express.Next
         } catch (err: any) {
             console.warn(`🔒 [A2A] Token rechazado y además no se pudo leer la tabla de tokens: ${err.message}`);
         }
+        // Pista opcional para el cliente. Apagada por defecto: revela cuántos
+        // tokens conoce la instancia, que es justo el dato que distingue
+        // "token inválido" de "instancia con otra base de datos".
+        const pista = process.env.A2A_DEBUG_401 === 'true'
+            ? (() => {
+                try {
+                    const activos = sqliteReminderService.listA2ATokens().filter((t) => t.enabled).length;
+                    return activos === 0
+                        ? 'Esta instancia no tiene NINGÚN token activo: probablemente lee otra base de datos que la consola donde se creó.'
+                        : `Esta instancia conoce ${activos} token(s) activo(s), pero ninguno coincide con el presentado.`;
+                } catch {
+                    return 'No se pudo leer la tabla de tokens en esta instancia.';
+                }
+            })()
+            : undefined;
+
         res.status(401).json({
             error: presented
                 ? 'Unauthorized: el token presentado no existe o fue revocado'
                 : 'Unauthorized: falta Authorization: Bearer <token> o X-API-Key',
+            ...(pista ? { pista } : {}),
         });
         return;
     }
