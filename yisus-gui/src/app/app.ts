@@ -15,6 +15,7 @@ export class App {
   isDarkMode = signal(false);
   online = signal<boolean | null>(null);
   protegido = signal(false);
+  claveOk = signal<boolean | null>(null);
 
   constructor() {
     const savedTheme = localStorage.getItem('yisus_theme');
@@ -30,8 +31,17 @@ export class App {
 
   private ping() {
     this.api.getStatus().subscribe({
-      next: (r) => { this.online.set(true); this.protegido.set(r.protegido); },
-      error: () => this.online.set(false),
+      next: (r) => {
+        this.online.set(true);
+        this.protegido.set(r.protegido);
+        if (!r.protegido) { this.claveOk.set(true); return; }
+        // El backend exige clave: se valida la que tenga cargada este navegador
+        this.api.validarClave().subscribe({
+          next: () => this.claveOk.set(true),
+          error: () => this.claveOk.set(false),
+        });
+      },
+      error: () => { this.online.set(false); this.claveOk.set(null); },
     });
   }
 

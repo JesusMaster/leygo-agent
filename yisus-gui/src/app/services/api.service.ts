@@ -60,7 +60,14 @@ export class ApiService {
   setBaseUrl(url: string) { localStorage.setItem('yisus_api_url', url.replace(/\/$/, '')); }
 
   // ─── Estado ───────────────────────────────────────────────────────────
+
+  /** Público: responde aunque falte la clave. Sirve para saber si el backend está vivo. */
   getStatus(): Observable<{ status: string; protegido: boolean; agente: string }> {
+    return this.http.get<any>(`${this.baseUrl}/api/status`);
+  }
+
+  /** Protegido: falla con 401 si la clave cargada no sirve. */
+  validarClave(): Observable<{ autenticado: boolean; agente: string }> {
     return this.http.get<any>(`${this.baseUrl}/api/admin/me`);
   }
 

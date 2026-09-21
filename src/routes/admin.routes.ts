@@ -41,9 +41,25 @@ export default function createAdminRoutes() {
   }
 
   // ─── Sesión de la GUI ────────────────────────────────────────────────────
+
+  /**
+   * Público a propósito: solo dice que el backend está vivo y si exige clave.
+   * Si esto estuviera detrás del guard, la GUI no podría distinguir "backend
+   * caído" de "me falta la clave", que es justo lo que necesita explicar.
+   */
+  app.get('/api/status', (_req, res) => {
+    res.json({
+      status: 'ok',
+      protegido: !!process.env.ADMIN_API_KEY,
+      agente: process.env.ADK_APP_NAME || 'yisus',
+    });
+  });
+
+  /** Este SÍ va protegido: sirve para validar que la clave cargada es correcta. */
   app.get('/api/admin/me', (_req, res) => {
     res.json({
       status: 'ok',
+      autenticado: true,
       protegido: !!process.env.ADMIN_API_KEY,
       agente: process.env.ADK_APP_NAME || 'yisus',
     });

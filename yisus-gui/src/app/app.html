@@ -61,7 +61,13 @@
         <div class="status">
           @if (online() === true) {
             <span class="dot green"></span> Agente en línea
-            @if (!protegido()) { <span class="badge warn" style="margin-left:10px">Admin sin clave</span> }
+            @if (!protegido()) {
+              <span class="badge warn" style="margin-left:10px">Admin sin clave: define ADMIN_API_KEY</span>
+            } @else if (claveOk() === false) {
+              <a routerLink="/settings" class="badge danger" style="margin-left:10px;text-decoration:none">
+                Falta tu clave de administración — cárgala en Ajustes
+              </a>
+            }
           } @else if (online() === false) {
             <span class="dot red"></span> Sin conexión con el backend
           } @else {
