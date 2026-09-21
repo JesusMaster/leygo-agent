@@ -28,20 +28,27 @@ function normalizarBase(raw?: string): string {
 
 const BASE_URL = normalizarBase(process.env.A2A_BASE_URL);
 
-const securitySchemes: { [key: string]: SecurityScheme } = process.env.A2A_API_KEY
-    ? {
-        bearer: {
-            scheme: {
-                $case: 'httpAuthSecurityScheme',
-                value: {
-                    description:  'API key estática de Yisus Agent enviada como Bearer token',
-                    scheme:       'Bearer',
-                    bearerFormat: 'opaque',
-                },
+/**
+ * El endpoint SIEMPRE exige token: los tokens viven en la base y se administran
+ * desde la GUI. Antes este bloque dependía de A2A_API_KEY, así que al migrar a
+ * tokens en base la card pasó a declarar "sin autenticación" — el cliente la leía,
+ * no mandaba credencial, y chocaba con un 401 que no podía explicarse.
+ */
+const securitySchemes: { [key: string]: SecurityScheme } = {
+    bearer: {
+        scheme: {
+            $case: 'httpAuthSecurityScheme',
+            value: {
+                description:  'Token de acceso de Yisus Agent. Cada token declara su propio alcance de herramientas.',
+                scheme:       'Bearer',
+                bearerFormat: 'opaque',
             },
         },
-    }
-    : {};
+    },
+};
+
+/** El tipo del SDK es { schemes: { <nombre>: { list: string[] } } } */
+const securityRequirements = [{ schemes: { bearer: { list: [] as string[] } } }];
 
 export const yisusAgentCard: AgentCard = {
     name:        'Yisus',
@@ -70,10 +77,7 @@ export const yisusAgentCard: AgentCard = {
         extensions:        [],
     },
     securitySchemes,
-    // Si hay API key, la card lo declara: un cliente A2A sabe que debe autenticarse.
-    securityRequirements: process.env.A2A_API_KEY
-        ? [{ schemes: { bearer: { values: [] } } } as any]
-        : [],
+    securityRequirements,
     defaultInputModes:    ['text/plain'],
     defaultOutputModes:   ['text/plain'],
     skills: [
@@ -85,7 +89,7 @@ export const yisusAgentCard: AgentCard = {
             examples:    ['¿Cómo funciona la arquitectura de puntos en Apprecio?', 'Explícame el flujo transaccional de canjes'],
             inputModes:  ['text/plain'],
             outputModes: ['text/plain'],
-            securityRequirements: [],
+            securityRequirements,
         },
         {
             id:          'apprecio_platform_faq',
@@ -95,7 +99,7 @@ export const yisusAgentCard: AgentCard = {
             examples:    ['¿Dónde se pueden canjear los puntos?', '¿Qué comercios están disponibles en el catálogo?'],
             inputModes:  ['text/plain'],
             outputModes: ['text/plain'],
-            securityRequirements: [],
+            securityRequirements,
         },
     ],
     signatures: [],
