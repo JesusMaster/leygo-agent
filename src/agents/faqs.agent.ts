@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { LlmAgent } from '@google/adk';
 import { faqs } from './tools/faqs.tools.js';
 
 export const faqAgent = new LlmAgent({
   name: 'faq_agent',
-  model: new TrackedGemini({ model: 'gemini-3.5-flash-lite', agentName: 'faq_agent' }),
+  model: modelFor('faq_agent', 'gemini-3.5-flash-lite'),
   description: 'Subagente especializado en responder dudas generales y preguntas frecuentes (FAQs) de la plataforma Apprecio usando la base de conocimiento.',
   generateContentConfig: {
     thinkingConfig: { thinkingBudget: 0 }

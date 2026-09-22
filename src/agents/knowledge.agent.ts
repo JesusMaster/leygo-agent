@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { LlmAgent } from '@google/adk';
 import { knowledgeSearch, episodicSearch, meetingIngest, consolidateContextTool } from './tools/knowledge.tools.js';
 
 export const knowledgeAgent = new LlmAgent({
   name: 'knowledge_agent',
-  model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'knowledge_agent' }),
+  model: modelFor('knowledge_agent', 'gemini-3.8-flash'),
   description: 'Subagente especializado en consultar y alimentar el cerebro digital y la memoria episódica de Jesús: arquitectura de Apprecio, notas de Obsidian, minutas de reuniones de Meet, y decisiones/acuerdos consolidados desde Google Chat y Gmail.',
   disallowTransferToParent: false,
   disallowTransferToPeers: true,

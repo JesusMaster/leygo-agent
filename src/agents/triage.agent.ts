@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { escalateToJesus, listEscalations, resolveEscalation } from './tools/triage.tools.js';
 
 /**
@@ -12,7 +12,7 @@ import { escalateToJesus, listEscalations, resolveEscalation } from './tools/tri
  */
 export const triageAgent = new LlmAgent({
   name: 'triage_agent',
-  model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'triage_agent' }),
+  model: modelFor('triage_agent', 'gemini-3.8-flash'),
   description: 'Subagente de escalamiento: registra y deriva al Jesús real los temas sensibles, ambiguos o que comprometen a Apprecio, y lleva el registro de lo pendiente de su decisión.',
   instruction: `
     Eres el filtro de escalamiento de Yisus, el agente de Jesús Leiva (CTO de Apprecio).

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { knowledgeSearch } from './tools/knowledge.tools.js';
 
 /**
@@ -14,7 +14,7 @@ import { knowledgeSearch } from './tools/knowledge.tools.js';
  */
 export const publicKnowledgeAgent = new LlmAgent({
   name: 'knowledge_public',
-  model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'knowledge_public' }),
+  model: modelFor('knowledge_public', 'gemini-3.8-flash'),
   description: 'Consulta la documentación técnica y de arquitectura de Apprecio (notas de Obsidian indexadas en Qdrant).',
   instruction: `
     Respondes consultas sobre arquitectura de Apprecio, patrones, microservicios,

@@ -92,6 +92,20 @@ export interface CustomWebhookLog {
 
 export interface WebhookModel { id: string; label: string; provider: 'ollama' | 'gemini'; }
 
+// ─── Ajustes: LLM y .env ────────────────────────────────────────────────────
+export type ProviderKind = 'gemini' | 'openai' | 'anthropic' | 'ollama' | 'openai_compatible';
+export interface ProviderPreset { id: string; name: string; kind: ProviderKind; baseUrl?: string; needsKey: boolean; keysUrl?: string; hint?: string; models?: string[]; }
+export interface LlmProvider { id: string; name: string; kind: ProviderKind; baseUrl?: string; enabled: boolean; preset?: string; apiKeyMask: string | null; tieneKey: boolean; createdAt: string; updatedAt: string; }
+export interface LlmProviderInput { id?: string; name: string; kind: ProviderKind; baseUrl?: string; apiKey?: string; enabled?: boolean; preset?: string; }
+export interface AgenteLlm {
+  name: string; titulo: string; descripcion: string; defaultModel: string;
+  assignment: { provider: string; model: string } | null;
+  efectivo: { provider: string; model: string };
+  advertencia: string | null;
+}
+export interface LlmSettings { presets: ProviderPreset[]; providers: LlmProvider[]; agentes: AgenteLlm[]; }
+export interface EnvVar { key: string; grupo: string; descripcion: string; secreto: boolean; caliente?: boolean; placeholder?: string; valor: string | null; definida: boolean; enArchivo: boolean; }
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private http = inject(HttpClient);
@@ -229,4 +243,25 @@ export class ApiService {
     return this.http.delete(`${this.baseUrl}/api/webhooks/${webhookId}/logs/${logId}`);
   }
   getWebhookModels(): Observable<{ models: WebhookModel[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/models`); }
+
+  // ─── Ajustes ──────────────────────────────────────────────────────────────
+  getLlmSettings(): Observable<LlmSettings> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm`); }
+  saveLlmProvider(data: LlmProviderInput): Observable<{ provider: LlmProvider }> {
+    return data.id
+      ? this.http.put<any>(`${this.baseUrl}/api/settings/llm/providers/${data.id}`, data)
+      : this.http.post<any>(`${this.baseUrl}/api/settings/llm/providers`, data);
+  }
+  deleteLlmProvider(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/settings/llm/providers/${id}`); }
+  getLlmModels(providerId: string): Observable<{ models: string[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/providers/${providerId}/models`); }
+  testLlm(providerId: string, model: string): Observable<{ ok: boolean; ms: number; respuesta?: string; error?: string }> {
+    return this.http.post<any>(`${this.baseUrl}/api/settings/llm/providers/${providerId}/test`, { model });
+  }
+  setLlmAssignment(agent: string, a: { provider: string; model: string } | null): Observable<{ agentes: AgenteLlm[] }> {
+    return this.http.put<any>(`${this.baseUrl}/api/settings/llm/assignments/${agent}`, a || {});
+  }
+  getEnv(): Observable<{ ruta: string; vars: EnvVar[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/env`); }
+  saveEnv(cambios: Record<string, string | null>): Observable<{ cambiadas: string[]; requierenReinicio: string[] }> {
+    return this.http.put<any>(`${this.baseUrl}/api/settings/env`, { cambios });
+  }
+  restartBackend(): Observable<{ modo: 'watch' | 'exit' }> { return this.http.post<any>(`${this.baseUrl}/api/settings/restart`, {}); }
 }

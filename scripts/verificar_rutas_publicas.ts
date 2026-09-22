@@ -29,6 +29,10 @@ const CASOS: Caso[] = [
   { metodo: 'DELETE', ruta: '/api/webhooks/abc/logs/12', debeExigirClave: true,  nota: 'borrar un log' },
   { metodo: 'GET',    ruta: '/api/webhooks/models',      debeExigirClave: true,  nota: 'modelos disponibles' },
   { metodo: 'GET',    ruta: '/api/webhooks/logs',        debeExigirClave: true,  nota: 'todas las ejecuciones' },
+  { metodo: 'GET',    ruta: '/api/settings/env',         debeExigirClave: true,  nota: 'variables del .env' },
+  { metodo: 'PUT',    ruta: '/api/settings/env',         debeExigirClave: true,  nota: 'editar el .env' },
+  { metodo: 'GET',    ruta: '/api/settings/llm',         debeExigirClave: true,  nota: 'proveedores LLM (keys)' },
+  { metodo: 'POST',   ruta: '/api/settings/restart',     debeExigirClave: true,  nota: 'reiniciar backend' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { LlmAgent } from "@google/adk";
-import { TrackedGemini } from "./tracked_gemini.js";
+import { modelFor } from './llm/model_factory.js';
 import {
   gmailSearchEmails,
   gmailReadEmail,
@@ -21,7 +21,7 @@ import { episodicSearch, meetingIngest, consolidateContextTool } from "./tools/k
 
 export const accountAgent = new LlmAgent({
   name: 'account_agent',
-  model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'account_agent' }),
+  model: modelFor('account_agent', 'gemini-3.8-flash'),
   description: 'Subagente especializado en gestionar la cuenta de Google Workspace de Jesús: consultar y redactar correos en Gmail, revisar y agendar reuniones en Google Calendar, buscar o leer documentos en Google Drive, y leer o responder mensajes en Google Chat.',
   disallowTransferToParent: false,
   disallowTransferToPeers: true,

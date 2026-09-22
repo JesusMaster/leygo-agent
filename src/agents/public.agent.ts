@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { resolveTools } from './tool_catalog.js';
 import { envolverConPermisoA2A } from './a2a_guard.js';
 import { getToolsDisponiblesA2A } from '../config/channels.js';
@@ -23,7 +23,7 @@ export function buildPublicCoordinator(toolNames?: string[]) {
 
   return new LlmAgent({
   name: 'Yisus',
-  model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'public_coordinator' }),
+  model: modelFor('public_coordinator', 'gemini-3.8-flash'),
   description: 'Interfaz pública de Yisus para agentes externos (A2A): arquitectura de Apprecio y preguntas frecuentes de la plataforma.',
   instruction: `
     # IDENTIDAD

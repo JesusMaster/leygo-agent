@@ -49,6 +49,8 @@ export const RUTAS_PROTEGIDAS: Array<{ metodos: string[]; test: (ruta: string) =
   // Administración de webhooks (la recepción de eventos externos queda fuera).
   { metodos: ['GET'], test: (r) => r === '/webhooks/recent' },
   { metodos: ['GET', 'POST', 'PUT', 'DELETE'], test: (r) => r === '/api/webhooks' || /^\/api\/webhooks\/[^/]+(\/logs(\/[^/]+)?)?$/.test(r) },
+  // Ajustes: proveedores LLM, asignaciones y variables del .env.
+  { metodos: ['GET', 'POST', 'PUT', 'DELETE'], test: (r) => r === '/api/settings' || r.startsWith('/api/settings/') },
 ];
 
 /**

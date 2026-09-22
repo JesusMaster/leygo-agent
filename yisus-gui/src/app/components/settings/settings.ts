@@ -1,23 +1,61 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService } from '../../services/api.service';
+import { ApiService, LlmSettings } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { AuthService } from '../../services/auth.service';
+import { LlmProvidersComponent } from './llm-providers';
+import { AgentModelsComponent } from './agent-models';
+import { EnvVarsComponent } from './env-vars';
 
-/** Conexión de la GUI con el backend. Todo vive en localStorage de este navegador. */
+type Tab = 'llm' | 'agentes' | 'env' | 'conexion';
+const TAB_KEY = 'yisus_settings_tab';
+
+/**
+ * Ajustes: proveedores de LLM, modelo por agente, claves del .env y conexión
+ * de la GUI. Al estilo de Leygo: pestañas arriba, tarjetas abajo.
+ */
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, LlmProvidersComponent, AgentModelsComponent, EnvVarsComponent],
   template: `
     <div class="page">
       <div class="page-head">
         <div>
           <h2>Ajustes</h2>
-          <p class="sub">Dónde está el backend y cómo se administra. La sesión vive en este navegador.</p>
+          <p class="sub">Modelos, claves y conexión del agente. Los proveedores y el .env se guardan en el backend; la sesión vive en este navegador.</p>
         </div>
       </div>
 
+      <div class="tabs">
+        <button class="tab" [class.on]="tab() === 'llm'" (click)="ir('llm')"><i class="ph ph-cpu"></i> Proveedores LLM</button>
+        <button class="tab" [class.on]="tab() === 'agentes'" (click)="ir('agentes')"><i class="ph ph-robot"></i> Modelos por agente</button>
+        <button class="tab" [class.on]="tab() === 'env'" (click)="ir('env')"><i class="ph ph-key"></i> Claves y variables</button>
+        <button class="tab" [class.on]="tab() === 'conexion'" (click)="ir('conexion')"><i class="ph ph-plugs"></i> Conexión</button>
+      </div>
+
+      @if (tab() === 'llm' || tab() === 'agentes') {
+        @if (!auth.logueado()) {
+          <div class="card"><div class="empty">Inicia sesión para administrar los modelos.</div></div>
+        } @else if (llm(); as l) {
+          @if (tab() === 'llm') {
+            <app-llm-providers [providers]="l.providers" [presets]="l.presets" [usosPorProveedor]="usos()" (cambio)="cargarLlm()" />
+          } @else {
+            <app-agent-models [providers]="l.providers" [agentes]="l.agentes" (cambio)="cargarLlm()" />
+          }
+        } @else if (errorLlm()) {
+          <div class="card"><div class="empty">{{ errorLlm() }}</div></div>
+        } @else {
+          <div class="card"><div class="empty">Cargando…</div></div>
+        }
+      }
+
+      @if (tab() === 'env') {
+        @if (auth.logueado()) { <app-env-vars /> }
+        @else { <div class="card"><div class="empty">Inicia sesión para ver las variables.</div></div> }
+      }
+
+      @if (tab() === 'conexion') {
       <div class="card">
         <h3>Sesión</h3>
         @if (auth.logueado()) {
@@ -91,9 +129,15 @@ import { AuthService } from '../../services/auth.service';
           o una revocación surten efecto de inmediato.
         </p>
       </div>
+      }
     </div>
   `,
   styles: [`
+    .tabs { display: flex; gap: 6px; margin-bottom: 20px; border-bottom: 1px solid var(--border-light); overflow-x: auto; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); font-size: 14px; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
+    .tab i { font-size: 17px; }
+    .tab:hover { color: var(--text-main); }
+    .tab.on { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
     .clave { padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-light); border-radius: 8px; font-size: 13px; word-break: break-all; flex: 1 1 320px; }
     .ejemplo { margin-top: 12px; padding: 10px 12px; background: var(--bg-input); border-radius: 8px; font-size: 12px; overflow: auto; color: var(--text-dim); }
   `],
@@ -110,7 +154,25 @@ export class SettingsComponent {
   adminKeyRemota = signal<string | null | undefined>(undefined);
   mostrar = signal(false);
 
-  constructor() { this.probar(); this.cargarClave(); }
+  tab = signal<Tab>(((localStorage.getItem(TAB_KEY) as Tab) || 'llm'));
+  llm = signal<LlmSettings | null>(null);
+  errorLlm = signal<string | null>(null);
+  usos = computed(() => {
+    const out: Record<string, number> = {};
+    for (const a of this.llm()?.agentes || []) if (a.assignment) out[a.assignment.provider] = (out[a.assignment.provider] || 0) + 1;
+    return out;
+  });
+
+  constructor() { this.probar(); this.cargarClave(); if (this.auth.logueado()) this.cargarLlm(); }
+
+  ir(t: Tab) { this.tab.set(t); try { localStorage.setItem(TAB_KEY, t); } catch {} }
+
+  cargarLlm() {
+    this.api.getLlmSettings().subscribe({
+      next: (r) => { this.llm.set(r); this.errorLlm.set(null); },
+      error: (e) => this.errorLlm.set(e?.error?.error || 'No se pudo cargar la configuración de modelos (¿backend actualizado?)'),
+    });
+  }
 
   private cargarClave() {
     if (!this.auth.logueado() && !localStorage.getItem('yisus_admin_key')) return;

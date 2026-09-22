@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
-import { TrackedGemini } from './tracked_gemini.js';
+import { modelFor } from './llm/model_factory.js';
 import { resolveTools } from './tool_catalog.js';
 import { getChannelTools } from '../config/channels.js';
 
@@ -14,7 +14,7 @@ export function buildCoordinator(toolNames: string[] = ['*']) {
   return new LlmAgent({
 
     name: 'Coordinator',
-    model: new TrackedGemini({ model: 'gemini-3.8-flash', agentName: 'Coordinator' }),
+    model: modelFor('Coordinator', 'gemini-3.8-flash'),
     description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
     instruction: `
         # IDENTIDAD
