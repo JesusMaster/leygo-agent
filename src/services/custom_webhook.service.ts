@@ -1,10 +1,10 @@
-import axios from 'axios';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import { sqliteReminderService, CustomWebhook, CustomWebhookLog } from '../database/sqlite.service.js';
 import { telegramBotService } from './telegram_bot.service.js';
 import { messageFormatter, ChannelType } from '../utils/message_formatter.js';
-import { tokenTrackerService } from './token_tracker.service.js';
+import { llmSettingsService, type LlmProvider } from './llm_settings.service.js';
+import { construirLlm } from '../agents/llm/model_factory.js';
+import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
 dotenv.config();
 
@@ -16,13 +16,6 @@ export interface ExecuteCustomWebhookResult {
 }
 
 export class CustomWebhookService {
-  private ai: GoogleGenAI;
-  private ollamaUrl: string;
-
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-    this.ollamaUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_URL || 'https://ollama.openip.cl';
-  }
 
   /**
    * Obtiene la URL pública o base para invocar el webhook
@@ -38,7 +31,7 @@ export class CustomWebhookService {
   public createWebhook(
     titulo: string,
     instrucciones: string,
-    modelo: string = 'gemini-2.5-flash',
+    modelo: string = 'gemini/gemini-3.5-flash-lite',
     hostHeader?: string
   ): CustomWebhook & { url: string } {
     const wh = sqliteReminderService.createCustomWebhook(titulo, instrucciones, modelo);
@@ -107,24 +100,38 @@ export class CustomWebhookService {
   }
 
   /**
-   * Modelos que la GUI puede ofrecer: los de Ollama (consultando /api/tags) más
-   * los de Gemini que se usan en el proyecto. Si Ollama no responde, solo Gemini.
+   * Proveedores configurados en Ajustes (solo los activos) con sus modelos.
+   * El campo `modelo` del webhook se guarda como "<proveedor>/<modelo>".
    */
-  public async listModels(): Promise<Array<{ id: string; label: string; provider: 'ollama' | 'gemini' }>> {
-    const gemini = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro']
-      .map((id) => ({ id, label: id, provider: 'gemini' as const }));
+  public async listModels(): Promise<{ providers: Array<{ id: string; name: string; kind: string; models: string[]; error?: string }> }> {
+    const providers = llmSettingsService.listProviders().filter((p) => p.enabled);
+    const out = await Promise.all(providers.map(async (p) => {
+      try {
+        return { id: p.id, name: p.name, kind: p.kind, models: await llmSettingsService.listModels(p.id) };
+      } catch (err: any) {
+        return { id: p.id, name: p.name, kind: p.kind, models: [], error: err?.message };
+      }
+    }));
+    return { providers: out };
+  }
 
-    let ollama: Array<{ id: string; label: string; provider: 'ollama' }> = [];
-    try {
-      const res = await axios.get(`${this.ollamaUrl.replace(/\/$/, '')}/api/tags`, { timeout: 4000 });
-      ollama = (res.data?.models || [])
-        .map((m: any) => m.name as string)
-        .filter((n: string) => n && !/embed/i.test(n)) // los de embeddings no generan texto
-        .map((n: string) => ({ id: `${n} (ollama)`, label: `${n} (ollama)`, provider: 'ollama' as const }));
-    } catch {
-      // Ollama caído o inalcanzable: se ofrece solo Gemini
+  /** "<proveedor>/<modelo>" → proveedor + modelo. Entiende los valores antiguos. */
+  public resolverModelo(modelo: string): { provider: LlmProvider; model: string } | null {
+    const v = (modelo || '').trim();
+    const barra = v.indexOf('/');
+    if (barra > 0) {
+      const prov = llmSettingsService.getProvider(v.slice(0, barra));
+      if (prov) return { provider: prov, model: v.slice(barra + 1) };
     }
-    return [...ollama, ...gemini];
+    // Formato antiguo: "gemma3:12b (ollama)" o "gemini-2.5-flash"
+    if (/\(ollama\)/i.test(v) || /^(gemma|llama|qwen|mistral|phi|deepseek|gpt-oss)/i.test(v)) {
+      const prov = llmSettingsService.listProviders().find((p) => p.kind === 'ollama' && p.enabled);
+      const provFull = prov && llmSettingsService.getProvider(prov.id);
+      if (provFull) return { provider: provFull, model: v.replace(/\s*\(ollama\)\s*/i, '').trim() };
+    }
+    const gem = llmSettingsService.getProvider('gemini') || llmSettingsService.listProviders().filter((p) => p.kind === 'gemini' && p.enabled).map((p) => llmSettingsService.getProvider(p.id)!)[0];
+    if (gem) return { provider: gem, model: v.startsWith('gemini') ? v : 'gemini-3.5-flash-lite' };
+    return null;
   }
 
   public getLogs(webhookId?: string, limit: number = 20): CustomWebhookLog[] {
@@ -246,87 +253,22 @@ REGLAS DE RESPUESTA:
 - Si las instrucciones piden un resumen o alertar problemas, sé específico con las causas y variables clave.
 `;
 
-    const modelNormalized = (modelo || 'gemini-2.5-flash').trim();
+    const r = this.resolverModelo(modelo);
+    if (!r) throw new Error(`No hay proveedor para el modelo "${modelo}". Configúralo en Ajustes → Proveedores LLM.`);
 
-    // Caso A: Modelo de Ollama
-    if (modelNormalized.toLowerCase().includes('ollama') || modelNormalized.startsWith('gemma') || modelNormalized.startsWith('llama')) {
-      const cleanOllamaModel = modelNormalized.replace(/\s*\(ollama\)\s*/i, '').trim();
-      try {
-        const ollamaRes = await axios.post(
-          `${this.ollamaUrl.replace(/\/$/, '')}/api/generate`,
-          {
-            model: cleanOllamaModel,
-            prompt,
-            stream: false,
-          },
-          { timeout: 45000 }
-        );
-
-        if (ollamaRes.data && ollamaRes.data.response) {
-          tokenTrackerService.logUsage(
-            `Webhook: ${titulo}`,
-            cleanOllamaModel,
-            ollamaRes.data.prompt_eval_count || 0,
-            ollamaRes.data.eval_count || 0,
-            'webhook',
-          'system',
-          'custom_webhook'
-        ).catch(() => {});
-          return ollamaRes.data.response.trim();
-        }
-      } catch (ollamaErr: any) {
-        console.warn(`⚠️ [CustomWebhookService] Falló Ollama (${cleanOllamaModel}), usando fallback a Gemini:`, ollamaErr.message);
-      }
-    }
-
-    // Caso B: Modelo de Gemini (o fallback)
-    let geminiModel = modelNormalized.replace(/\s*\(ollama\)\s*/i, '').trim();
-    if (!geminiModel.startsWith('gemini')) {
-      geminiModel = 'gemini-2.5-flash';
-    }
-
+    beginUsageScope('webhook' as any, `webhook-${titulo}`, `Webhook: ${titulo}`);
     try {
-      const aiRes = await this.ai.models.generateContent({
-        model: geminiModel,
-        contents: prompt,
-      });
-
-      if (aiRes.usageMetadata) {
-        tokenTrackerService.logUsage(
-          `Webhook: ${titulo}`,
-          geminiModel,
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).inputTokens,
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).outputTokens,
-          'webhook',
-          'system',
-          'custom_webhook'
-        ).catch(() => {});
+      const llm = construirLlm(r.provider, r.model, 'custom_webhook');
+      let texto = '';
+      let error: string | undefined;
+      for await (const resp of llm.generateContentAsync({ model: r.model, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} } as any, false)) {
+        if (resp?.errorMessage) error = resp.errorMessage;
+        for (const p of resp?.content?.parts || []) if (p.text) texto += p.text;
       }
-
-      return aiRes.text?.trim() || '(Sin respuesta generada por la IA)';
-    } catch (geminiErr: any) {
-      if (geminiModel !== 'gemini-2.5-flash') {
-        console.warn(`⚠️ [CustomWebhookService] Modelo ${geminiModel} falló, usando fallback a gemini-2.5-flash:`, geminiErr.message);
-        const fallbackRes = await this.ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt,
-        });
-
-        if (fallbackRes.usageMetadata) {
-          tokenTrackerService.logUsage(
-            `Webhook: ${titulo}`,
-            'gemini-2.5-flash',
-            tokenTrackerService.extractUsage(fallbackRes.usageMetadata).inputTokens,
-            tokenTrackerService.extractUsage(fallbackRes.usageMetadata).outputTokens,
-            'webhook',
-          'system',
-          'custom_webhook'
-        ).catch(() => {});
-        }
-
-        return fallbackRes.text?.trim() || '(Sin respuesta generada por la IA)';
-      }
-      throw geminiErr;
+      if (error) throw new Error(error);
+      return texto.trim() || '(Sin respuesta generada por la IA)';
+    } finally {
+      flushUsageScope().catch(() => {});
     }
   }
 }

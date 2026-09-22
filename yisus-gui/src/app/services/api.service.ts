@@ -90,7 +90,7 @@ export interface CustomWebhookLog {
   status: string; created_at: number; webhook_titulo?: string | null;
 }
 
-export interface WebhookModel { id: string; label: string; provider: 'ollama' | 'gemini'; }
+export interface WebhookProvider { id: string; name: string; kind: string; models: string[]; error?: string; }
 
 // ─── Ajustes: LLM y .env ────────────────────────────────────────────────────
 export type ProviderKind = 'gemini' | 'openai' | 'anthropic' | 'ollama' | 'openai_compatible';
@@ -242,7 +242,7 @@ export class ApiService {
   deleteWebhookLog(webhookId: string, logId: number): Observable<any> {
     return this.http.delete(`${this.baseUrl}/api/webhooks/${webhookId}/logs/${logId}`);
   }
-  getWebhookModels(): Observable<{ models: WebhookModel[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/models`); }
+  getWebhookModels(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/models`); }
 
   // ─── Ajustes ──────────────────────────────────────────────────────────────
   getLlmSettings(): Observable<LlmSettings> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm`); }

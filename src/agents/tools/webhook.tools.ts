@@ -47,15 +47,15 @@ export const getRecentWebhooksTool = new FunctionTool({
  */
 export const createCustomWebhookTool = new FunctionTool({
   name: 'create_custom_webhook',
-  description: 'Crea un nuevo endpoint webhook HTTP POST personalizado. Permite recibir datos de sistemas externos (n8n, grafana, alertas, etc.), procesarlos con un modelo de IA (Gemini u Ollama) según instrucciones dadas, y notificar a Telegram.',
+  description: 'Crea un nuevo endpoint webhook HTTP POST personalizado. Permite recibir datos de sistemas externos (n8n, grafana, alertas, etc.), procesarlos con un modelo de IA de los proveedores configurados en Ajustes según instrucciones dadas, y notificar a Telegram.',
   parameters: z.object({
     titulo: z.string().describe('Título descriptivo del webhook (ej: "Problemas de n8n", "Alertas de Servidor")'),
     instrucciones: z.string().describe('Instrucciones para la IA sobre cómo interpretar el payload recibido (ej: "debes darme un resumen del problema presentado en n8n, notificame via telegram")'),
-    modelo: z.string().optional().describe('Modelo a utilizar, por defecto "gemini-2.5-flash". Puede ser "gemma4:latest (ollama)", "llama3:latest (ollama)", o cualquier modelo disponible.'),
+    modelo: z.string().optional().describe('Modelo en formato "<proveedor>/<modelo>" (p. ej. "gemini/gemini-3.5-flash-lite", "ollama/gemma4:latest", "openai/gpt-4.1-mini"). Por defecto gemini/gemini-3.5-flash-lite.'),
   }) as any,
   execute: async (args: any) => {
     try {
-      const { titulo, instrucciones, modelo = 'gemini-2.5-flash' } = args;
+      const { titulo, instrucciones, modelo = 'gemini/gemini-3.5-flash-lite' } = args;
       const created = customWebhookService.createWebhook(titulo, instrucciones, modelo);
 
       return {

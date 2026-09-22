@@ -85,7 +85,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     // Van ANTES de /api/webhooks/:id para que Express no los tome como un id.
     app.get('/api/webhooks/models', async (_req, res) => {
         try {
-            res.json({ models: await customWebhookService.listModels() });
+            res.json(await customWebhookService.listModels());
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, CustomWebhook, CustomWebhookLog, WebhookModel } from '../../services/api.service';
+import { ApiService, CustomWebhook, CustomWebhookLog, WebhookProvider } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -86,15 +86,24 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <textarea rows="5" [(ngModel)]="form.instrucciones"
                 placeholder="Qué hacer con cada payload: qué resaltar, qué ignorar, a quién avisar y por dónde (Telegram, un espacio de Google Chat, Buzz…)"></textarea>
             </label>
-            <label class="field">
-              <span>Modelo de IA a utilizar</span>
-              <select [(ngModel)]="form.modelo">
-                @if (modelos().length === 0) { <option [value]="form.modelo">{{ form.modelo }}</option> }
-                @for (m of modelos(); track m.id) { <option [value]="m.id">{{ m.label }}</option> }
-                @if (form.modelo && !modeloEnLista()) { <option [value]="form.modelo">{{ form.modelo }} (no disponible ahora)</option> }
-              </select>
-              <small class="hint">Este modelo procesará los payloads asíncronamente. Los de Ollama corren en tu servidor y no gastan presupuesto.</small>
-            </label>
+            <div class="modelo-grid">
+              <label class="field">
+                <span>Proveedor</span>
+                <select [ngModel]="proveedor" (ngModelChange)="cambiarProveedor($event)">
+                  @if (proveedores().length === 0) { <option value="">Cargando proveedores…</option> }
+                  @for (p of proveedores(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+                  @if (proveedor && !proveedorEnLista()) { <option [value]="proveedor">{{ proveedor }} (ya no existe)</option> }
+                </select>
+              </label>
+              <label class="field">
+                <span>Modelo</span>
+                <input type="text" [(ngModel)]="modelo" list="wh-modelos" placeholder="id del modelo" />
+                <datalist id="wh-modelos">
+                  @for (m of modelosDelProveedor(); track m) { <option [value]="m"></option> }
+                </datalist>
+              </label>
+            </div>
+            <small class="hint">Los proveedores son los de Ajustes → Proveedores LLM. Procesa los payloads en segundo plano; conviene un modelo barato o uno local de Ollama (sin costo).</small>
           </div>
           <div class="modal-foot">
             <button class="btn-secondary" (click)="cerrarModal()">Cancelar</button>
@@ -159,6 +168,8 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     }
   `,
   styles: [`
+    .modelo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 560px) { .modelo-grid { grid-template-columns: 1fr; } }
     .wh-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
     @media (max-width: 680px) { .wh-grid { grid-template-columns: 1fr; } .wh-actions { grid-template-columns: 1fr 1fr; } .wh-btn.logs { flex-direction: row; } }
     .wh-card {
@@ -236,13 +247,17 @@ export class WebhooksComponent {
 
   items = signal<CustomWebhook[]>([]);
   cargado = signal(false);
-  modelos = signal<WebhookModel[]>([]);
+  proveedores = signal<WebhookProvider[]>([]);
 
   /** null = cerrado; { id: null } = crear; { id } = editar */
   modal = signal<{ id: string | null } | null>(null);
-  form = { titulo: '', instrucciones: '', modelo: 'gemini-2.5-flash' };
+  form = { titulo: '', instrucciones: '' };
+  /** El webhook guarda "<proveedor>/<modelo>"; acá se editan por separado. */
+  proveedor = '';
+  modelo = '';
   guardando = signal(false);
-  modeloEnLista = computed(() => this.modelos().some((m) => m.id === this.form.modelo));
+  proveedorEnLista = computed(() => this.proveedores().some((p) => p.id === this.proveedor));
+  modelosDelProveedor = computed(() => this.proveedores().find((p) => p.id === this.proveedor)?.models || []);
 
   drawer = signal<{ webhook: CustomWebhook | null; logs: CustomWebhookLog[] | null } | null>(null);
   private abiertos = signal<Set<string>>(new Set());
@@ -257,27 +272,56 @@ export class WebhooksComponent {
   }
 
   private cargarModelos() {
-    if (this.modelos().length) return;
-    this.api.getWebhookModels().subscribe({ next: (r) => this.modelos.set(r.models || []), error: () => {} });
+    if (this.proveedores().length) return;
+    this.api.getWebhookModels().subscribe({
+      next: (r) => {
+        this.proveedores.set(r.providers || []);
+        if (!this.proveedor && r.providers?.length) this.proveedor = r.providers[0].id;
+      },
+      error: () => {},
+    });
+  }
+
+  cambiarProveedor(id: string) {
+    this.proveedor = id;
+    this.modelo = '';
+    // Sugerencia: el primer modelo del proveedor
+    const ms = this.modelosDelProveedor();
+    if (ms.length) this.modelo = ms.find((m) => /flash-lite|mini|nano/.test(m)) || ms[0];
+  }
+
+  /** "gemini/gemini-3.5-flash-lite" → proveedor + modelo (entiende los valores antiguos). */
+  private separarModelo(v: string) {
+    const barra = (v || '').indexOf('/');
+    if (barra > 0 && this.proveedores().some((p) => p.id === v.slice(0, barra))) return { proveedor: v.slice(0, barra), modelo: v.slice(barra + 1) };
+    if (barra > 0) return { proveedor: v.slice(0, barra), modelo: v.slice(barra + 1) };
+    if (/\(ollama\)/i.test(v)) return { proveedor: 'ollama', modelo: v.replace(/\s*\(ollama\)\s*/i, '').trim() };
+    return { proveedor: 'gemini', modelo: v };
   }
 
   url(w: CustomWebhook) { return w.url || `${this.api.baseUrl}/api/webhook/${w.id}`; }
 
   // ─── Crear / editar ───────────────────────────────────────────────────
   abrirNuevo() {
-    this.form = { titulo: '', instrucciones: '', modelo: 'gemini-2.5-flash' };
+    this.form = { titulo: '', instrucciones: '' };
+    this.proveedor = this.proveedores()[0]?.id || 'gemini';
+    this.modelo = 'gemini-3.5-flash-lite';
     this.cargarModelos();
     this.modal.set({ id: null });
   }
   editar(w: CustomWebhook) {
-    this.form = { titulo: w.titulo, instrucciones: w.instrucciones, modelo: w.modelo };
+    this.form = { titulo: w.titulo, instrucciones: w.instrucciones };
+    const s = this.separarModelo(w.modelo);
+    this.proveedor = s.proveedor;
+    this.modelo = s.modelo;
     this.cargarModelos();
     this.modal.set({ id: w.id });
   }
   cerrarModal() { if (!this.guardando()) this.modal.set(null); }
 
   guardar() {
-    const datos = { titulo: this.form.titulo.trim(), instrucciones: this.form.instrucciones.trim(), modelo: this.form.modelo.trim() };
+    if (!this.proveedor || !this.modelo.trim()) { this.toast.error('Elige proveedor y modelo'); return; }
+    const datos = { titulo: this.form.titulo.trim(), instrucciones: this.form.instrucciones.trim(), modelo: `${this.proveedor}/${this.modelo.trim()}` };
     const id = this.modal()?.id;
     this.guardando.set(true);
     const req = id ? this.api.updateWebhook(id, datos) : this.api.createWebhook(datos);
