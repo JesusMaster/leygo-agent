@@ -57,11 +57,14 @@ export class ChatService {
   readonly thinking = signal(false);
   /** Paso actual mientras responde (para la línea de estado) */
   readonly pasoActual = signal<Paso | null>(null);
-  readonly sessionId = signal<string>(localStorage.getItem('yisus_session') || this.nuevaSesion());
+  readonly sessionId = signal<string>(this.sesionValida(localStorage.getItem('yisus_chat_session')) || this.nuevaSesion());
+
+  /** Solo ids de chat propios: si quedó algo raro (p. ej. un token), se descarta. */
+  private sesionValida(v: string | null): string | null { return v && /^gui-[a-z0-9]+$/.test(v) ? v : null; }
 
   private nuevaSesion(): string {
     const id = `gui-${Date.now().toString(36)}`;
-    localStorage.setItem('yisus_session', id);
+    localStorage.setItem('yisus_chat_session', id);
     return id;
   }
 
@@ -109,8 +112,10 @@ export class ChatService {
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const sesion = localStorage.getItem('yisus_auth_token');
       const adminKey = localStorage.getItem('yisus_admin_key');
-      if (adminKey) headers['X-Admin-Key'] = adminKey;
+      if (sesion) headers['Authorization'] = `Bearer ${sesion}`;
+      else if (adminKey) headers['X-Admin-Key'] = adminKey;
 
       const res = await fetch(`${this.api.baseUrl}/run_sse`, {
         method: 'POST',
@@ -119,7 +124,7 @@ export class ChatService {
         body: JSON.stringify({ appName, userId, sessionId: this.sessionId(), newMessage: { role: 'user', parts } }),
       });
 
-      if (res.status === 401) throw new Error('No autorizado: revisa la clave de administración en Ajustes.');
+      if (res.status === 401) throw new Error('No autorizado: tu sesión venció, vuelve a iniciar sesión.');
       if (!res.ok) throw new Error(`El backend respondió HTTP ${res.status}`);
       if (!res.body) throw new Error('El backend no devolvió un stream');
 

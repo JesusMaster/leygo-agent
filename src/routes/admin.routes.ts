@@ -8,6 +8,7 @@ import { describirTool } from '../a2a/card.js';
 import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
 import { escalationDeliveryService } from '../services/escalation_delivery.service.js';
 import { a2aPeersService } from '../services/a2a_peers.service.js';
+import { guiAuthService } from '../services/gui_auth.service.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { adminGuard } from './admin_guard.js';
 
@@ -51,14 +52,39 @@ export default function createAdminRoutes() {
     });
   });
 
-  /** Este SÍ va protegido: sirve para validar que la clave cargada es correcta. */
-  app.get('/api/admin/me', (_req, res) => {
+  /** Este SÍ va protegido: sirve para validar que la sesión o la clave cargada es correcta. */
+  app.get('/api/admin/me', (req, res) => {
     res.json({
       status: 'ok',
       autenticado: true,
+      usuario: (req as any).guiUser || null,
       protegido: !!process.env.ADMIN_API_KEY,
       agente: process.env.ADK_APP_NAME || 'yisus',
     });
+  });
+
+  /** La clave, para quien quiera llamar al API directo. Solo con sesión o con la propia clave. */
+  app.get('/api/admin/key', (_req, res) => {
+    res.json({ key: process.env.ADMIN_API_KEY || null, header: 'X-Admin-Key' });
+  });
+
+  // ─── Inicio de sesión de la GUI ──────────────────────────────────────────
+  app.get('/api/auth/status', (_req, res) => {
+    res.json({ configurado: guiAuthService.configurado(), usuario: process.env.GUI_USER ? String(process.env.GUI_USER) : null });
+  });
+
+  app.post('/api/auth/login', (req, res) => {
+    const { user, password } = req.body || {};
+    const origen = (req.headers['cf-connecting-ip'] as string) || (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'desconocido';
+    const r = guiAuthService.login(user, password, origen, String(req.headers['user-agent'] || ''));
+    if (!r.ok) return res.status(r.esperaSeg ? 429 : 401).json({ error: r.error, esperaSeg: r.esperaSeg });
+    res.json({ status: 'success', token: r.token, expiresAt: r.expiresAt, usuario: process.env.GUI_USER });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    const presented = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    guiAuthService.logout(presented);
+    res.json({ status: 'success' });
   });
 
   // ─── Catálogo y configuración por canal ──────────────────────────────────

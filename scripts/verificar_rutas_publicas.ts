@@ -38,6 +38,8 @@ const CASOS: Caso[] = [
   { metodo: 'GET',    ruta: '/.well-known/agent-card.json', debeExigirClave: false, nota: 'Agent Card: publica por especificacion A2A' },
   { metodo: 'POST',   ruta: '/a2a/v1',                   debeExigirClave: false, nota: 'JSON-RPC A2A: autentica con Bearer propio' },
   { metodo: 'GET',    ruta: '/api/status',               debeExigirClave: false, nota: 'sonda de vida para la GUI' },
+  { metodo: 'GET',    ruta: '/api/auth/status',          debeExigirClave: false, nota: 'si el login está configurado' },
+  { metodo: 'POST',   ruta: '/api/auth/login',           debeExigirClave: false, nota: 'inicio de sesión' },
 ];
 
 function probar(c: Caso): boolean {

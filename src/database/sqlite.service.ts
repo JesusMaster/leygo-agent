@@ -288,6 +288,18 @@ export class SqliteReminderService {
       );
     `);
 
+    // Sesiones de la GUI (solo el hash del token)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS gui_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        last_seen_at INTEGER,
+        user_agent TEXT
+      );
+    `);
+
     // Agentes A2A remotos a los que Yisus puede escribir (lado cliente)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS a2a_peers (
@@ -737,6 +749,23 @@ export class SqliteReminderService {
     if (!row) return null;
     this.db.prepare(`UPDATE a2a_tokens SET last_used_at = ? WHERE name = ?`).run(Date.now(), row.name);
     return { name: row.name, tools: JSON.parse(row.tools || '[]') };
+  }
+
+  // ─── Sesiones de la GUI ─────────────────────────────────────────────────────
+
+  public createGuiSession(tokenHash: string, user: string, expiresAt: number, userAgent: string): void {
+    this.db.prepare(`INSERT INTO gui_sessions (token_hash, user, created_at, expires_at, last_seen_at, user_agent) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(tokenHash, user, Date.now(), expiresAt, Date.now(), (userAgent || '').slice(0, 200));
+    this.db.prepare(`DELETE FROM gui_sessions WHERE expires_at < ?`).run(Date.now());
+  }
+  public getGuiSession(tokenHash: string): { user: string; expires_at: number } | null {
+    return (this.db.prepare(`SELECT user, expires_at FROM gui_sessions WHERE token_hash = ?`).get(tokenHash) as any) || null;
+  }
+  public touchGuiSession(tokenHash: string, expiresAt: number): void {
+    this.db.prepare(`UPDATE gui_sessions SET expires_at = ?, last_seen_at = ? WHERE token_hash = ?`).run(expiresAt, Date.now(), tokenHash);
+  }
+  public deleteGuiSession(tokenHash: string): void {
+    this.db.prepare(`DELETE FROM gui_sessions WHERE token_hash = ?`).run(tokenHash);
   }
 
   // ─── Agentes A2A remotos (peers) ───────────────────────────────────────────

@@ -109,6 +109,9 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/api/status`);
   }
 
+  /** Protegido: devuelve la clave de administración para usar el API directo. */
+  getAdminKey(): Observable<{ key: string | null; header: string }> { return this.http.get<any>(`${this.baseUrl}/api/admin/key`); }
+
   /** Protegido: falla con 401 si la clave cargada no sirve. */
   validarClave(): Observable<{ autenticado: boolean; agente: string }> {
     return this.http.get<any>(`${this.baseUrl}/api/admin/me`);

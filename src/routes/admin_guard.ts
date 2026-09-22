@@ -1,4 +1,5 @@
 import express from 'express';
+import { guiAuthService } from '../services/gui_auth.service.js';
 
 /**
  * Guard compartido de administración.
@@ -23,7 +24,12 @@ export function adminGuard(
     (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
 
   if (presented && presented === expected) return next();
-  res.status(401).json({ error: 'No autorizado: falta X-Admin-Key' });
+
+  // Sesión de la GUI: quien inició sesión con usuario y contraseña pasa igual que con la clave.
+  const sesion = guiAuthService.validar(presented);
+  if (sesion) { (req as any).guiUser = sesion.user; return next(); }
+
+  res.status(401).json({ error: 'No autorizado: inicia sesión o envía X-Admin-Key' });
 }
 
 /**

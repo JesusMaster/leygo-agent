@@ -1,3 +1,6 @@
+@if (esLogin()) {
+  <div class="layout-wrapper"><router-outlet></router-outlet><app-toast></app-toast></div>
+} @else {
 <div class="layout-wrapper" [class.menu-open]="menuOpen()">
   <div class="sidebar-backdrop" (click)="menuOpen.set(false)"></div>
   <aside class="sidebar">
@@ -50,9 +53,10 @@
         </div>
         <div class="user-details">
           <span class="user-name">Jesús Leiva</span>
-          <span class="user-role">CTO · Apprecio</span>
+          <span class="user-role">{{ auth.usuario() || 'CTO · Apprecio' }}</span>
         </div>
       </div>
+      <button type="button" class="logout" (click)="auth.logout()"><i class="ph ph-sign-out"></i> Cerrar sesión</button>
     </div>
   </aside>
 
@@ -67,8 +71,8 @@
             @if (!protegido()) {
               <span class="badge warn" style="margin-left:10px">Admin sin clave: define ADMIN_API_KEY</span>
             } @else if (claveOk() === false) {
-              <a routerLink="/settings" class="badge danger" style="margin-left:10px;text-decoration:none">
-                Falta tu clave de administración — cárgala en Ajustes
+              <a routerLink="/login" class="badge danger" style="margin-left:10px;text-decoration:none">
+                Sin sesión — inicia sesión
               </a>
             }
           } @else if (online() === false) {
@@ -99,3 +103,5 @@
 
   <app-toast></app-toast>
 </div>
+
+}
