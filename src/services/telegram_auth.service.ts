@@ -13,7 +13,27 @@ interface PendingApproval {
 export class TelegramAuthService {
   // Ventana de gracia en milisegundos: si autorizas una vez, tienes 5 minutos de acceso continuo sin re-preguntar
   private gracePeriodMs: number = 5 * 60 * 1000;
-  private lastAuthorizedAt: number = 0;
+
+  /**
+   * Ventana de gracia POR CANAL.
+   *
+   * Antes era una sola marca global: aprobar algo por Telegram abría cinco
+   * minutos en los que cualquier petición —incluida una que entrara por A2A o
+   * por Buzz— ejecutaba acciones sensibles sin volver a preguntar. El permiso
+   * que das en un canal no debe habilitar a otro.
+   */
+  private ultimaAprobacionPorCanal: Map<string, number> = new Map();
+
+  /** Canal que está pidiendo la acción (telegram, buzz, a2a, api, system) */
+  private canalActual(): string {
+    try {
+      // Import perezoso: usage_collector arrastra al token tracker y este al bot,
+      // que a su vez importa este servicio. En estático sería una dependencia circular.
+      const mod = (globalThis as any).__yisusUsageScope;
+      if (typeof mod === 'function') return mod()?.channel || 'system';
+    } catch {}
+    return 'system';
+  }
   private botInstance: any = null;
   private pendingApprovals: Map<string, PendingApproval> = new Map();
 
@@ -38,9 +58,10 @@ export class TelegramAuthService {
   /**
    * Verifica si la sesión actual cuenta con un pase temporal activo.
    */
-  public hasActiveSession(): boolean {
-    const now = Date.now();
-    return now - this.lastAuthorizedAt < this.gracePeriodMs;
+  public hasActiveSession(canal?: string): boolean {
+    const scope = canal || this.canalActual();
+    const last = this.ultimaAprobacionPorCanal.get(scope) || 0;
+    return Date.now() - last < this.gracePeriodMs;
   }
 
   /**
@@ -82,7 +103,7 @@ export class TelegramAuthService {
     console.log(`🛡️ [TelegramAuth] Callback query recibido para ${requestId}: ${isApproved ? 'APROBADO' : 'DENEGADO'}`);
 
     if (isApproved) {
-      this.lastAuthorizedAt = Date.now();
+      this.ultimaAprobacionPorCanal.set(this.canalActual(), Date.now());
       // 1. Responder a Telegram con un toast nativo (desaparece solo en 2 segundos en el teléfono)
       await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
         callback_query_id: callbackId,
@@ -97,7 +118,7 @@ export class TelegramAuthService {
 
       pending.resolve(true);
     } else {
-      this.lastAuthorizedAt = 0;
+      this.ultimaAprobacionPorCanal.delete(this.canalActual());
       await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
         callback_query_id: callbackId,
         text: '❌ Acceso denegado.',
@@ -133,9 +154,11 @@ export class TelegramAuthService {
     }
 
     // 1. Si ya autorizó hace menos de 5 minutos, pasa directo
-    if (this.hasActiveSession()) {
-      const remainingSecs = Math.round((this.gracePeriodMs - (Date.now() - this.lastAuthorizedAt)) / 1000);
-      console.log(`🛡️ [TelegramAuth] Acceso permitido por sesión activa (${remainingSecs}s restantes).`);
+    const canal = this.canalActual();
+    if (this.hasActiveSession(canal)) {
+      const last = this.ultimaAprobacionPorCanal.get(canal) || 0;
+      const remainingSecs = Math.round((this.gracePeriodMs - (Date.now() - last)) / 1000);
+      console.log(`🛡️ [TelegramAuth] Acceso permitido por sesión activa del canal "${canal}" (${remainingSecs}s restantes).`);
       return true;
     }
 
@@ -150,9 +173,10 @@ export class TelegramAuthService {
     const text = `🔐 <b>${title}</b>\n\n` +
       `${subtitle}\n` +
       `📌 <b>Acción:</b> ${actionDescription}\n` +
+      `📡 <b>Canal:</b> ${canal}\n` +
       `⏰ <b>Hora:</b> ${new Date().toLocaleTimeString('es-CL')}\n\n` +
       `${question}\n\n` +
-      `<i>Ojo: la autorización abre una ventana de 5 minutos para todas las acciones sensibles, no solo esta.</i>`;
+      `<i>Ojo: la autorización abre una ventana de 5 minutos para las acciones sensibles de ESTE canal (${canal}), no de los demás.</i>`;
 
     try {
       // Enviar mensaje con botones interactivos

@@ -40,6 +40,11 @@ export function currentUsageScope(): UsageScope | undefined {
   return storage.getStore();
 }
 
+// telegram_auth necesita saber el canal para acotar su ventana de gracia, pero
+// importarlo en estático cerraría un ciclo (usage_collector → token_tracker →
+// telegram_bot → telegram_auth). Se publica el accesor en un global.
+(globalThis as any).__yisusUsageScope = currentUsageScope;
+
 /**
  * Registra el consumo de UNA llamada al modelo. Si hay un scope abierto acumula
  * (se persiste al cerrar el turno); si no, persiste de inmediato como 'system'.
