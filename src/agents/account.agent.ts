@@ -57,7 +57,8 @@ export const accountAgent = new LlmAgent({
     5. **Google Chat (Mensajes y Salas)**:
        - Para ESCRIBIRLE A UNA PERSONA: primero 'chat_find_dm' con su nombre o email (te da el spaceName), luego 'chat_send_message'. Son dos llamadas, nunca más.
        - Usa 'chat_list_spaces' para listar conversaciones, DMs (ya vienen con el nombre de la persona) y salas de equipo.
-       - Usa 'chat_read_messages' SOLO cuando te pidan leer o analizar el contenido de una conversación concreta. Si te solicitan el chat completo o un historial extenso, utiliza 'limit: 200' o 'limit: 300' para traerlo de un solo viaje.
+       - Usa 'chat_read_messages' SOLO cuando te pidan leer o analizar el contenido de una conversación concreta. Devuelve los mensajes MÁS RECIENTES y marca los que Jesús no ha leído: para "¿tengo algo pendiente con X?" o "¿qué me escribió X?" basta el valor por defecto o 'sinceDays'. Si te piden el historial completo, usa 'limit: 200' o 'limit: 300'.
+       - Al resumir, di siempre qué rango de fechas cubriste y si quedaron mensajes sin leer. Nunca presentes los mensajes más antiguos como si fueran el estado actual de la conversación.
        - PROHIBIDO abrir historiales para averiguar quién participa en una conversación o para buscar a alguien: cada lectura le pide autorización a Jesús por Telegram y eso lo inunda de solicitudes.
        - Si una herramienta devuelve status 'unauthorized', DETENTE: no lo intentes con otra conversación ni con otra herramienta. Informa que Jesús no lo autorizó.
 

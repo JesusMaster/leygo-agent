@@ -365,7 +365,7 @@ export const driveReadFile = new FunctionTool({
  */
 export const chatListSpaces = new FunctionTool({
   name: 'chat_list_spaces',
-  description: 'Lista las conversaciones, salas de equipo y mensajes directos (DMs) de Google Chat. Cada DM incluye el nombre de la persona con la que es, así que NO hace falta leer mensajes para saber quién participa.',
+  description: 'Lista las conversaciones, salas de equipo y mensajes directos (DMs) de Google Chat, ordenados por actividad reciente y con la fecha del último mensaje. Cada DM incluye el nombre de la persona con la que es, así que NO hace falta leer mensajes para saber quién participa.',
   parameters: z.object({
     pageSize: z.number().optional().describe('Cantidad máxima de espacios a retornar (por defecto 20).')
   }) as any,
@@ -390,8 +390,8 @@ export const chatListSpaces = new FunctionTool({
         return { status: 'success', result: 'No se encontraron conversaciones ni salas en Google Chat.' };
       }
 
-      const formatted = spaces.map(s => 
-        `ID: ${s.name} | Nombre: ${s.displayName} | Tipo: ${s.spaceType}`
+      const formatted = spaces.map(s =>
+        `ID: ${s.name} | Nombre: ${s.displayName} | Tipo: ${s.spaceType}${s.lastActiveTime ? ` | Última actividad: ${s.lastActiveTime}` : ''}`
       ).join('\n');
 
       return { status: 'success', result: formatted, data: spaces };
@@ -406,42 +406,68 @@ export const chatListSpaces = new FunctionTool({
  */
 export const chatReadMessages = new FunctionTool({
   name: 'chat_read_messages',
-  description: 'Lee el historial de mensajes de una conversación o sala específica en Google Chat en BULK (admite traer 50, 100, 200 o hasta 500 mensajes en una sola llamada para análisis de historial o contexto completo). Los mensajes se entregan ordenados cronológicamente (antiguos a recientes). Cada llamada requiere autorización de Jesús por Telegram: NUNCA la uses para averiguar quién participa en una conversación ni para buscar a una persona; para eso está chat_find_dm.',
+  description: 'Lee los mensajes MÁS RECIENTES de una conversación o sala de Google Chat (los últimos N, entregados en orden cronológico). Marca cuáles están sin leer por Jesús. Usa sinceDays para "qué hay de nuevo en los últimos X días" y limit alto (200-500) solo si piden el historial completo. Cada llamada requiere autorización de Jesús por Telegram: NUNCA la uses para averiguar quién participa en una conversación ni para buscar a una persona; para eso está chat_find_dm.',
   parameters: z.object({
-    spaceName: z.string().describe('ID o nombre del espacio en Google Chat (obtenido previamente con chat_list_spaces).'),
-    limit: z.number().optional().describe('Cantidad de mensajes a leer en bulk (por defecto 100; usa 200 a 500 si te piden el chat completo o un análisis profundo).'),
+    spaceName: z.string().describe('ID del espacio en Google Chat (obtenido con chat_find_dm o chat_list_spaces).'),
+    limit: z.number().optional().describe('Cantidad de mensajes recientes a leer (por defecto 50; 200-500 solo si piden el historial completo).'),
+    sinceDays: z.number().optional().describe('Solo mensajes de los últimos N días. Útil para "qué hay de nuevo".'),
     maxResults: z.number().optional().describe('Alias de limit.')
   }) as any,
   execute: async (args: any) => {
-    const { spaceName, limit, maxResults } = args;
-    const requestedLimit = limit || maxResults || 100;
+    const { spaceName, limit, maxResults, sinceDays } = args;
+    const requestedLimit = limit || maxResults || 50;
+    const sinceIso = sinceDays ? new Date(Date.now() - sinceDays * 86400000).toISOString() : undefined;
     try {
       // 🛡️ 2FA vía Telegram: Si no hay sesión activa, pide confirmación
       const { telegramAuthService } = await import('../../services/telegram_auth.service.js');
-      const isAuthorized = await telegramAuthService.requestApproval(`Leer historial de mensajes en chat (${spaceName}) [hasta ${requestedLimit} mensajes]`);
+      const alcance = sinceDays ? `últimos ${sinceDays} días` : `últimos ${requestedLimit} mensajes`;
+      const isAuthorized = await telegramAuthService.requestApproval(`Leer chat (${spaceName}) [${alcance}]`);
 
       if (!isAuthorized) {
         return {
           status: 'unauthorized',
-          result: 'Acceso denegado: El propietario (Jesús) no autorizó la lectura de mensajes en Telegram.',
+          result: 'Acceso denegado: Jesús no autorizó la lectura de mensajes. No insistas con otra conversación ni otra herramienta; infórmalo.',
         };
       }
 
       const { googleService } = await import('../../services/google.service.js');
-      const messages = await googleService.readChatMessages(spaceName, requestedLimit);
+      const [messages, lastReadTime] = await Promise.all([
+        googleService.readChatMessages(spaceName, requestedLimit, sinceIso),
+        googleService.getChatSpaceReadState(spaceName),
+      ]);
 
       if (!messages || messages.length === 0) {
-        return { status: 'success', result: `No hay mensajes recientes en la conversación "${spaceName}".` };
+        return {
+          status: 'success',
+          result: sinceDays
+            ? `No hay mensajes en los últimos ${sinceDays} días en "${spaceName}".`
+            : `No hay mensajes en la conversación "${spaceName}".`,
+        };
       }
 
-      const formatted = messages.map(m => 
-        `[${m.createTime}] ${m.sender}: ${m.text}${m.threadName ? ` (Thread: ${m.threadName})` : ''}`
+      const leidoHasta = lastReadTime ? new Date(lastReadTime).getTime() : null;
+      const esNuevo = (m: any) => leidoHasta !== null && new Date(m.createTime).getTime() > leidoHasta;
+      const sinLeer = leidoHasta !== null ? messages.filter(esNuevo).length : null;
+
+      const formatted = messages.map(m =>
+        `${esNuevo(m) ? '🔵 [SIN LEER] ' : ''}[${m.createTime}] ${m.sender}: ${m.text}${m.threadName ? ` (Thread: ${m.threadName})` : ''}`
       ).join('\n---\n');
 
-      return { 
-        status: 'success', 
-        result: `Se recuperaron ${messages.length} mensajes en orden cronológico:\n\n${formatted}`, 
-        data: messages 
+      const primero = messages[0].createTime;
+      const ultimo = messages[messages.length - 1].createTime;
+      const cabecera =
+        `Se recuperaron los ${messages.length} mensajes más recientes (del ${primero} al ${ultimo}` +
+        `${messages.length >= requestedLimit && !sinceDays ? '; hay mensajes anteriores que NO se leyeron' : ''}).\n` +
+        (sinLeer === null
+          ? 'Estado de lectura no disponible (el token de Google no tiene el scope chat.users.readstate.readonly).\n'
+          : sinLeer === 0
+          ? 'Jesús ya leyó todos estos mensajes.\n'
+          : `⚠️ ${sinLeer} mensaje(s) SIN LEER por Jesús (leído hasta ${lastReadTime}).\n`);
+
+      return {
+        status: 'success',
+        result: `${cabecera}\n${formatted}`,
+        data: { messages, lastReadTime, sinLeer },
       };
     } catch (error: any) {
       return { status: 'error', message: `Error al leer mensajes de Google Chat: ${error.message}` };

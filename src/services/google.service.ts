@@ -702,7 +702,7 @@ export class GoogleWorkspaceService {
     // Los DMs vienen sin nombre. Sin resolver los participantes, la única manera
     // de saber con quién es cada uno era leer su historial, que es justo lo que
     // no queremos: una lectura de mensajes (y una autorización 2FA) por cada DM.
-    return Promise.all(
+    const resueltos = await Promise.all(
       spaces.map(async (s) => {
         const esDm = (s.spaceType || s.type) === 'DIRECT_MESSAGE';
         const participantes = esDm && s.name ? await this.listChatHumanMembers(chat, s.name) : [];
@@ -712,9 +712,32 @@ export class GoogleWorkspaceService {
           spaceType: s.spaceType || s.type,
           singleUserBotDm: s.singleUserBotDm,
           participantes,
+          lastActiveTime: s.lastActiveTime || undefined,
         };
       }),
     );
+
+    // Los más activos primero: "¿qué chats tienen movimiento?" se responde mirando arriba.
+    return resueltos.sort((a, b) => new Date(b.lastActiveTime || 0).getTime() - new Date(a.lastActiveTime || 0).getTime());
+  }
+
+  /**
+   * Hasta cuándo leyó Jesús un espacio (lastReadTime). Es lo que permite decir
+   * "tienes 3 mensajes sin leer" en vez de adivinarlo.
+   *
+   * Requiere el scope chat.users.readstate.readonly en el refresh token. Si no
+   * está, devuelve null y la herramienta lo dice, en lugar de fallar.
+   */
+  async getChatSpaceReadState(spaceName: string): Promise<string | null> {
+    try {
+      const auth = this.getAuthClient();
+      const chat = google.chat({ version: 'v1', auth });
+      const id = spaceName.replace(/^spaces\//, '');
+      const res = await chat.users.spaces.getSpaceReadState({ name: `users/me/spaces/${id}/spaceReadState` });
+      return res.data.lastReadTime || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -769,7 +792,14 @@ export class GoogleWorkspaceService {
     };
   }
 
-  async readChatMessages(spaceName: string, maxMessages: number = 100) {
+  /**
+   * Devuelve los `maxMessages` MÁS RECIENTES de un espacio, en orden cronológico.
+   *
+   * Sin `orderBy` la API lista ascendente, así que "100 mensajes" eran los 100
+   * más antiguos: el modelo resumía enero-marzo y creía haber leído el chat.
+   * `sinceIso` limita a lo posterior a esa fecha (para "qué hay de nuevo").
+   */
+  async readChatMessages(spaceName: string, maxMessages: number = 100, sinceIso?: string) {
     const auth = this.getAuthClient();
     const chat = google.chat({ version: 'v1', auth });
 
@@ -783,6 +813,8 @@ export class GoogleWorkspaceService {
           parent: spaceName,
           pageSize: batchSize,
           pageToken,
+          orderBy: 'createTime DESC',
+          ...(sinceIso ? { filter: `createTime > "${sinceIso}"` } : {}),
         });
 
         const items = res.data.messages || [];
@@ -831,8 +863,13 @@ export class GoogleWorkspaceService {
 
     for (const space of spaces) {
       if (!space.name) continue;
+      // Espacios sin actividad en la ventana: ni una llamada más.
+      if (space.lastActiveTime && new Date(space.lastActiveTime).getTime() < cutoffTime) continue;
       try {
-        const messages = await this.readChatMessages(space.name, 100);
+        // El filtro va a la API. Antes se traían los 100 más ANTIGUOS y se
+        // filtraban acá: para un chat con historia, la ventana quedaba vacía y
+        // el digest/consolidación no veían nada de Chat.
+        const messages = await this.readChatMessages(space.name, 200, new Date(cutoffTime).toISOString());
         const recentMessages = messages.filter((m) => new Date(m.createTime).getTime() >= cutoffTime);
         if (recentMessages.length === 0) continue;
 
