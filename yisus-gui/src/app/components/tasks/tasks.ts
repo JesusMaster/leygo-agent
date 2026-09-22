@@ -35,7 +35,8 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
       } @else {
         @for (t of items(); track t.id) {
           <div class="task" [class.paused]="t.status === 'paused'" [class.done]="t.status === 'done'">
-            <div class="task-badges">
+            <div class="task-head">
+              <div class="task-badges">
               <span class="tb kind"><i class="ph" [class]="'ph ' + iconoTipo(t.kind)"></i> {{ etiquetaTipo(t.kind) }}</span>
               @if (t.autonomous) { <span class="tb agent"><i class="ph ph-robot"></i> Acción de agente</span> }
               @else { <span class="tb plain"><i class="ph ph-bell"></i> Recordatorio</span> }
@@ -44,6 +45,20 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               }
               @if (t.status === 'paused') { <span class="badge warn">PAUSADA</span> }
               @if (t.status === 'done') { <span class="badge dim">EJECUTADA</span> }
+              </div>
+              <div class="task-actions">
+                <button class="ta ejecutar" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
+                  @if (ejecutando() === t.id) { <span class="spinner"></span> } @else { <i class="ph ph-play"></i> }
+                </button>
+                <button class="ta hist" [class.on]="historial() === t.id" title="Historial de ejecuciones" (click)="toggleHistorial(t)"><i class="ph ph-clock-counter-clockwise"></i></button>
+                @if (t.status !== 'done') {
+                  <button class="ta pause" [title]="t.status === 'paused' ? 'Reanudar' : 'Pausar'" (click)="alternar(t)">
+                    <i class="ph" [class.ph-pause]="t.status === 'active'" [class.ph-play-circle]="t.status === 'paused'"></i>
+                  </button>
+                }
+                <button class="ta edit" title="Editar" (click)="editar(t)"><i class="ph ph-pencil-simple"></i></button>
+                <button class="ta del" title="Eliminar" (click)="eliminar(t)"><i class="ph ph-trash"></i></button>
+              </div>
             </div>
 
             <div class="task-main">
@@ -69,19 +84,6 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                 </div>
               </div>
 
-              <div class="task-actions">
-                <button class="ta ejecutar" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
-                  @if (ejecutando() === t.id) { <span class="spinner"></span> } @else { <i class="ph ph-play"></i> }
-                </button>
-                <button class="ta hist" [class.on]="historial() === t.id" title="Historial de ejecuciones" (click)="toggleHistorial(t)"><i class="ph ph-clock-counter-clockwise"></i></button>
-                @if (t.status !== 'done') {
-                  <button class="ta pause" [title]="t.status === 'paused' ? 'Reanudar' : 'Pausar'" (click)="alternar(t)">
-                    <i class="ph" [class.ph-pause]="t.status === 'active'" [class.ph-play-circle]="t.status === 'paused'"></i>
-                  </button>
-                }
-                <button class="ta edit" title="Editar" (click)="editar(t)"><i class="ph ph-pencil-simple"></i></button>
-                <button class="ta del" title="Eliminar" (click)="eliminar(t)"><i class="ph ph-trash"></i></button>
-              </div>
             </div>
 
             @if (historial() === t.id) {
@@ -182,14 +184,15 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .task.paused { opacity: .85; }
     .task.done { opacity: .7; }
 
-    .task-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .task-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .tb { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
     .tb.kind { background: rgba(45,212,191,.14); color: #5eead4; }
     .tb.agent { background: rgba(129,140,248,.16); color: #a5b4fc; }
     .tb.chan { background: rgba(251,146,60,.14); color: #fdba74; }
     .tb.plain { background: var(--bg-input); color: var(--text-dim); border: 1px solid var(--border-light); }
 
-    .task-main { display: flex; gap: 20px; align-items: flex-start; }
+    .task-main { display: block; }
     .task-body { flex: 1; min-width: 0; }
     .task-title { margin: 0 0 10px; font-size: 17px; }
     .task-msg { padding: 12px 14px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-dim); font-style: italic; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
@@ -197,7 +200,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .task-when { margin-top: 12px; color: var(--text-dim); font-size: 13.5px; }
     .task-when strong { color: var(--text-main); font-weight: 500; }
 
-    .task-actions { display: flex; gap: 2px; flex: 0 0 auto; padding: 2px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border-light); align-self: flex-start; }
+    .task-actions { display: flex; gap: 2px; flex: 0 0 auto; padding: 2px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border-light); }
     .ta { width: 34px; height: 34px; border-radius: 8px; border: 0; background: transparent; cursor: pointer; font-size: 18px; display: grid; place-items: center; color: var(--text-dim); transition: background .12s, color .12s; outline: none; }
     .ta:hover { background: var(--bg-card); }
     .ta:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary) inset; }
@@ -242,7 +245,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .hint code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
 
     @media (max-width: 720px) {
-      .task-main { flex-direction: column; }
+      .task-head { flex-direction: column; }
       .task-actions { align-self: flex-end; }
     }
   `],
