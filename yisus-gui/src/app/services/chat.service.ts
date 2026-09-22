@@ -22,7 +22,7 @@ export interface Paso {
 
 export interface Uso {
   inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number;
-  porAgente?: Array<{ agent: string; model: string; tokens: number; costUsd: number }>;
+  porAgente?: Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas?: number }>;
 }
 
 export interface ChatMessage {

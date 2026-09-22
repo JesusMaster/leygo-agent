@@ -280,7 +280,7 @@ export class ChatComponent {
   detalleUso(m: ChatMessage): string {
     const u = m.uso!;
     const lineas = [`Entrada: ${u.inputTokens.toLocaleString('es-CL')} · Salida: ${u.outputTokens.toLocaleString('es-CL')}`];
-    for (const a of u.porAgente || []) lineas.push(`${a.agent} (${a.model}): ${a.tokens.toLocaleString('es-CL')} tokens · $${a.costUsd.toFixed(4)}`);
+    for (const a of u.porAgente || []) lineas.push(`${a.agent} (${a.model}): ${a.tokens.toLocaleString('es-CL')} tokens · $${a.costUsd.toFixed(4)}${a.llamadas ? ` · ${a.llamadas} llamada${a.llamadas === 1 ? '' : 's'}` : ''}`);
     return lineas.join('\n');
   }
 }

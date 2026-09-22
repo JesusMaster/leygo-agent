@@ -3,7 +3,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
-import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool } from '../agents/tool_catalog.js';
+import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool, TOOL_CATALOG } from '../agents/tool_catalog.js';
 import { describirTool } from '../a2a/card.js';
 import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
 import { escalationDeliveryService } from '../services/escalation_delivery.service.js';
@@ -374,6 +374,26 @@ export default function createAdminRoutes() {
   app.get('/api/tasks/:id/runs', (req, res) => {
     const limit = parseInt((req.query.limit as string) || '20', 10);
     res.json({ runs: scheduledTasksService.runs(req.params.id, limit) });
+  });
+
+  // ─── Ejecutar una herramienta a mano (diagnóstico: tamaño de lo que devuelve) ──
+  app.post('/api/admin/tools/:name/run', async (req, res) => {
+    // También las herramientas internas de los subagentes (knowledge_search, gmail_*, …)
+    let tool: any = TOOL_CATALOG[req.params.name];
+    if (!tool) {
+      for (const t of Object.values(TOOL_CATALOG) as any[]) {
+        const internas: any[] = t?.agent?.tools || [];
+        tool = internas.find((x) => x?.name === req.params.name);
+        if (tool) break;
+      }
+    }
+    if (!tool || typeof tool.runAsync !== 'function') return res.status(404).json({ error: 'Herramienta no encontrada o no ejecutable a mano' });
+    const t0 = Date.now();
+    try {
+      const resultado = await tool.runAsync({ args: req.body?.args || {}, toolContext: {} as any });
+      const json = JSON.stringify(resultado);
+      res.json({ ms: Date.now() - t0, chars: json.length, tokensAprox: Math.round(json.length / 3.5), resultado: req.body?.completo ? resultado : undefined, muestra: json.slice(0, 600) });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   // ─── Presupuestos por canal ──────────────────────────────────────────────

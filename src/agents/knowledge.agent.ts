@@ -6,6 +6,9 @@ import { knowledgeSearch, episodicSearch, meetingIngest, consolidateContextTool 
 export const knowledgeAgent = new LlmAgent({
   name: 'knowledge_agent',
   model: modelFor('knowledge_agent', 'gemini-3.8-flash'),
+  // Sin historial entre turnos: cada consulta llega completa desde el Coordinator y
+  // así no se reenvían búsquedas anteriores en cada llamada (costo).
+  includeContents: 'none',
   description: 'Subagente especializado en consultar y alimentar el cerebro digital y la memoria episódica de Jesús: arquitectura de Apprecio, notas de Obsidian, minutas de reuniones de Meet, y decisiones/acuerdos consolidados desde Google Chat y Gmail.',
   disallowTransferToParent: false,
   disallowTransferToPeers: true,
@@ -23,6 +26,11 @@ export const knowledgeAgent = new LlmAgent({
     5. Sintetiza la información citando claramente el origen (Meet, Chat o Correo), las fechas, participantes y acuerdos tomados.
     6. Si la base de conocimientos no tiene información sobre el tema, dilo con honestidad y en el tono natural de Jesús: "no tengo documentado eso todavía en las notas o reuniones, déjame revisarlo".
     7. Mantén el estilo técnico, directo y ejecutivo de Jesús (sin introducciones de bot ni rodeos).
+    8. ECONOMÍA: cada búsqueda cuesta. Máximo 4 búsquedas por consulta (sumando 'knowledge_search' y
+       'episodic_search'): parte por la más directa, y si no aparece prueba UNA reformulación con
+       sinónimos o el nombre del concepto (p. ej. "fronteras de datos R1-R4" en vez de "barrera R3").
+       Si después de eso no hay nada, responde que no está documentado. No repitas una búsqueda ya hecha
+       ni pidas 'limit' mayor a 5.
 
     ALCANCE:
     Estás montado como herramienta del Coordinator: respondes tu parte y terminas el turno.

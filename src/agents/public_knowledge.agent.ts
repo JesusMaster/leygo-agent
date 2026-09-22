@@ -15,6 +15,9 @@ import { knowledgeSearch } from './tools/knowledge.tools.js';
 export const publicKnowledgeAgent = new LlmAgent({
   name: 'knowledge_public',
   model: modelFor('knowledge_public', 'gemini-3.8-flash'),
+  // Sin historial entre turnos: cada consulta llega completa desde el Coordinator y
+  // así no se reenvían búsquedas anteriores en cada llamada (costo).
+  includeContents: 'none',
   description: 'Consulta la documentación técnica y de arquitectura de Apprecio (notas de Obsidian indexadas en Qdrant).',
   instruction: `
     Respondes consultas sobre arquitectura de Apprecio, patrones, microservicios,

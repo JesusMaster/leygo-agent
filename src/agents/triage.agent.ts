@@ -13,6 +13,9 @@ import { escalateToJesus, listEscalations, resolveEscalation } from './tools/tri
 export const triageAgent = new LlmAgent({
   name: 'triage_agent',
   model: modelFor('triage_agent', 'gemini-3.8-flash'),
+  // Sin historial entre turnos: cada consulta llega completa desde el Coordinator y
+  // así no se reenvían búsquedas anteriores en cada llamada (costo).
+  includeContents: 'none',
   description: 'Subagente de escalamiento: registra y deriva al Jesús real los temas sensibles, ambiguos o que comprometen a Apprecio, y lleva el registro de lo pendiente de su decisión.',
   instruction: `
     Eres el filtro de escalamiento de Yisus, el agente de Jesús Leiva (CTO de Apprecio).

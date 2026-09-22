@@ -6,6 +6,9 @@ import { faqs } from './tools/faqs.tools.js';
 export const faqAgent = new LlmAgent({
   name: 'faq_agent',
   model: modelFor('faq_agent', 'gemini-3.5-flash-lite'),
+  // Sin historial entre turnos: cada consulta llega completa desde el Coordinator y
+  // así no se reenvían búsquedas anteriores en cada llamada (costo).
+  includeContents: 'none',
   description: 'Subagente especializado en responder dudas generales y preguntas frecuentes (FAQs) de la plataforma Apprecio usando la base de conocimiento.',
   generateContentConfig: {
     thinkingConfig: { thinkingBudget: 0 }

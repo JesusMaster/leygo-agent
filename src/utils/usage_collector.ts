@@ -19,7 +19,7 @@ export interface UsageScope {
   threadId: string;
   label: string;
   /** clave: "<agente>::<modelo>" */
-  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number }>;
+  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number; llamadas: number }>;
 }
 
 const storage = new AsyncLocalStorage<UsageScope>();
@@ -61,16 +61,17 @@ export function recordModelUsage(model: string, inputTokens: number, outputToken
   }
 
   const key = `${agent}::${model}`;
-  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0 };
+  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0, llamadas: 0 };
+  acc.llamadas += 1;
   acc.inputTokens += inputTokens;
   acc.outputTokens += outputTokens;
   scope.totals.set(key, acc);
 }
 
 /** Totales del turno en curso (tokens y costo estimado), para mostrarlos en la GUI antes de cerrar. */
-export function summarizeUsageScope(): { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; porAgente: Array<{ agent: string; model: string; tokens: number; costUsd: number }> } {
+export function summarizeUsageScope(): { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; porAgente: Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas: number }> } {
   const scope = storage.getStore();
-  const out = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, porAgente: [] as Array<{ agent: string; model: string; tokens: number; costUsd: number }> };
+  const out = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, porAgente: [] as Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas: number }> };
   if (!scope) return out;
   for (const t of scope.totals.values()) {
     const p = tokenTrackerService.getPrices(t.model);
@@ -78,7 +79,7 @@ export function summarizeUsageScope(): { inputTokens: number; outputTokens: numb
     out.inputTokens += t.inputTokens;
     out.outputTokens += t.outputTokens;
     out.costUsd += cost;
-    out.porAgente.push({ agent: t.agent, model: t.model, tokens: t.inputTokens + t.outputTokens, costUsd: cost });
+    out.porAgente.push({ agent: t.agent, model: t.model, tokens: t.inputTokens + t.outputTokens, costUsd: cost, llamadas: t.llamadas });
   }
   out.totalTokens = out.inputTokens + out.outputTokens;
   return out;
