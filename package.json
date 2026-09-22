@@ -14,7 +14,8 @@
     "nostr:id": "tsx scripts/nostr_identity.ts",
     "check:rutas": "tsx scripts/verificar_rutas_publicas.ts",
     "check:permisos": "tsx scripts/verificar_permisos_a2a.ts",
-    "check:2fa": "tsx scripts/verificar_2fa.ts"
+    "check:2fa": "tsx scripts/verificar_2fa.ts",
+    "google:oauth": "tsx scripts/google_oauth.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "^1.2.0",

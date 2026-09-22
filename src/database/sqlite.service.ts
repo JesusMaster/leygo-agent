@@ -46,6 +46,7 @@ export interface CustomWebhookLog {
 
 export type ScheduledTaskKind = 'once' | 'interval' | 'daily' | 'cron';
 export type ScheduledTaskStatus = 'active' | 'paused' | 'done';
+export type ScheduledTaskChannel = 'telegram' | 'chat' | 'buzz' | 'email';
 
 export interface ScheduledTask {
   id: string;
@@ -57,6 +58,8 @@ export interface ScheduledTask {
   time_of_day: string | null;  // daily, "HH:MM"
   cron_expr: string | null;
   status: ScheduledTaskStatus;
+  channel: ScheduledTaskChannel;   // por dónde se entrega el resultado
+  target: string | null;           // espacio de Chat, correo destino o canal de Buzz (según channel)
   created_at: number;
   updated_at: number;
   last_run_at: number | null;
@@ -277,6 +280,8 @@ export class SqliteReminderService {
         time_of_day TEXT,
         cron_expr TEXT,
         status TEXT NOT NULL DEFAULT 'active',
+        channel TEXT NOT NULL DEFAULT 'telegram',
+        target TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         last_run_at INTEGER,
@@ -296,6 +301,7 @@ export class SqliteReminderService {
 
     // 11. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
+    this.migrateScheduledTasks();
   }
 
   // ─── Recordatorios ──────────────────────────────────────────────────────────
@@ -698,6 +704,16 @@ export class SqliteReminderService {
 
   // ─── Tareas programadas ────────────────────────────────────────────────────
 
+  private migrateScheduledTasks(): void {
+    try {
+      const cols = (this.db.prepare(`PRAGMA table_info(scheduled_tasks)`).all() as any[]).map((c) => c.name);
+      if (!cols.includes('channel')) this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram'`);
+      if (!cols.includes('target'))  this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN target TEXT`);
+    } catch (err: any) {
+      console.warn('⚠️ [SQLite] No se pudo migrar scheduled_tasks:', err.message);
+    }
+  }
+
   public listScheduledTasks(): ScheduledTask[] {
     return this.db.prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`).all() as ScheduledTask[];
   }
@@ -709,9 +725,9 @@ export class SqliteReminderService {
   public createScheduledTask(t: Omit<ScheduledTask, 'created_at' | 'updated_at' | 'last_run_at'>): ScheduledTask {
     const now = Date.now();
     this.db.prepare(`
-      INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, created_at, updated_at, last_run_at, next_run_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    `).run(t.id, t.message, t.autonomous ? 1 : 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status, now, now, t.next_run_at ?? null);
+      INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, channel, target, created_at, updated_at, last_run_at, next_run_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    `).run(t.id, t.message, t.autonomous ? 1 : 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status, t.channel || 'telegram', t.target ?? null, now, now, t.next_run_at ?? null);
     return this.getScheduledTask(t.id)!;
   }
 
@@ -721,10 +737,10 @@ export class SqliteReminderService {
     const n = { ...actual, ...cambios, updated_at: Date.now() };
     this.db.prepare(`
       UPDATE scheduled_tasks SET message = ?, autonomous = ?, kind = ?, run_at = ?, interval_minutes = ?, time_of_day = ?, cron_expr = ?,
-        status = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
+        status = ?, channel = ?, target = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
       WHERE id = ?
     `).run(n.message, n.autonomous ? 1 : 0, n.kind, n.run_at ?? null, n.interval_minutes ?? null, n.time_of_day ?? null, n.cron_expr ?? null,
-      n.status, n.updated_at, n.last_run_at ?? null, n.next_run_at ?? null, id);
+      n.status, n.channel || 'telegram', n.target ?? null, n.updated_at, n.last_run_at ?? null, n.next_run_at ?? null, id);
     return this.getScheduledTask(id);
   }
 
@@ -761,7 +777,7 @@ export class SqliteReminderService {
         this.createScheduledTask({
           id: r.id, message: r.message, autonomous: 0, kind: 'once',
           run_at: r.target_time, interval_minutes: null, time_of_day: null, cron_expr: null,
-          status: 'active', next_run_at: r.target_time,
+          status: 'active', channel: 'telegram', target: null, next_run_at: r.target_time,
         });
         n++;
       }

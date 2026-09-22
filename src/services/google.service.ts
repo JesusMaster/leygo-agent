@@ -35,6 +35,18 @@ export class GoogleWorkspaceService {
     );
   }
 
+  /** Correo de la cuenta autenticada (para proponerlo como destino por defecto). */
+  async getUserEmail(): Promise<string | null> {
+    try {
+      const auth = this.getAuthClient();
+      const gmail = google.gmail({ version: 'v1', auth });
+      const res = await gmail.users.getProfile({ userId: 'me' });
+      return res.data.emailAddress || null;
+    } catch {
+      return null;
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────
   // GMAIL
   // ─────────────────────────────────────────────────────────────
@@ -673,6 +685,9 @@ export class GoogleWorkspaceService {
    * directos es la única forma de saber con quién es la conversación: la API no
    * les pone displayName.
    */
+  /** Último error al listar participantes, para que la GUI lo muestre en vez de un DM sin nombre. */
+  public ultimoErrorMiembrosChat: string | null = null;
+
   private async listChatHumanMembers(chat: any, spaceName: string): Promise<string[]> {
     try {
       const res = await chat.spaces.members.list({
@@ -681,10 +696,16 @@ export class GoogleWorkspaceService {
         filter: 'member.type = "HUMAN"',
       });
       const memberships: any[] = res.data.memberships || [];
+      this.ultimoErrorMiembrosChat = null;
       return memberships
         .map((m) => m.member?.displayName)
         .filter((n): n is string => !!n);
-    } catch {
+    } catch (err: any) {
+      const msg = err?.response?.data?.error?.message || err?.message || String(err);
+      if (this.ultimoErrorMiembrosChat !== msg) {
+        this.ultimoErrorMiembrosChat = msg;
+        console.warn(`⚠️ [GoogleChat] No se pudieron leer los participantes de ${spaceName}: ${msg}`);
+      }
       return [];
     }
   }

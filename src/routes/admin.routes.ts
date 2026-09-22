@@ -232,10 +232,10 @@ export default function createAdminRoutes() {
 
   app.post('/api/tasks', (req, res) => {
     try {
-      const { message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr } = req.body || {};
+      const { message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, channel, target } = req.body || {};
       if (!message || typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Falta el mensaje o instrucción' });
       if (!kind) return res.status(400).json({ error: 'Falta el tipo de tarea (kind)' });
-      const tarea = scheduledTasksService.create({ message, autonomous: !!autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr });
+      const tarea = scheduledTasksService.create({ message, autonomous: !!autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, channel, target });
       res.status(201).json({ status: 'success', task: tarea });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -266,6 +266,32 @@ export default function createAdminRoutes() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  /**
+   * Destinos posibles para entregar una tarea: espacios de Google Chat y
+   * canales de Buzz. Va detrás del guard de admin (no pasa por el 2FA de las
+   * herramientas: acá el que consulta es el administrador de la GUI).
+   */
+  app.get('/api/tasks/destinos', async (_req, res) => {
+    const out: { chat: Array<{ name: string; displayName: string }>; buzz: string[]; email: string | null; errores: string[] } =
+      { chat: [], buzz: [], email: process.env.GOOGLE_USER_EMAIL || process.env.USER_EMAIL || null, errores: [] };
+    try {
+      const { googleService } = await import('../services/google.service.js');
+      const espacios = await googleService.listChatSpaces(50);
+      out.chat = espacios.filter((e) => e.name).map((e) => ({ name: e.name!, displayName: e.displayName }));
+      if (googleService.ultimoErrorMiembrosChat) out.errores.push(`Participantes de Chat: ${googleService.ultimoErrorMiembrosChat}`);
+      if (!out.email) out.email = await googleService.getUserEmail();
+    } catch (err: any) {
+      out.errores.push(`Google Chat: ${err.message}`);
+    }
+    try {
+      const { nostrGatewayService } = await import('../services/nostr_gateway.service.js');
+      out.buzz = nostrGatewayService.getStatus().channels;
+    } catch (err: any) {
+      out.errores.push(`Buzz: ${err.message}`);
+    }
+    res.json(out);
   });
 
   app.get('/api/tasks/:id/runs', (req, res) => {

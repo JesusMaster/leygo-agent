@@ -120,7 +120,7 @@ tr:last-child td { border-bottom: none; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ─── Formularios ─────────────────────────────────────────────────────── */
-input[type=text], input[type=password], input[type=number], textarea, select {
+input[type=text], input[type=password], input[type=number], input[type=email], input[type=time], input[type=date], input[type=datetime-local], textarea, select {
   width: 100%; padding: 10px 12px; border-radius: 8px;
   border: 1px solid var(--border-light); background: var(--bg-input);
   color: var(--text-main); font-family: var(--font-main); font-size: 14px;
@@ -159,6 +159,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .empty { color: var(--text-dim); font-size: 14px; padding: 20px 0; text-align: center; }
 .row { display: flex; align-items: center; gap: 10px; }
 .spacer { flex: 1; }
+
+input[type=time], input[type=date], input[type=datetime-local] { color-scheme: dark; }
 
 /* ─── Modal y drawer (compartidos) ─────────────────────────────────────── */
 .modal-backdrop {

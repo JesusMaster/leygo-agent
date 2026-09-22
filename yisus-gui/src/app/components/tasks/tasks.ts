@@ -1,6 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, ScheduledTask, TaskRun, TaskKind, TaskInput } from '../../services/api.service';
+import { ApiService, ScheduledTask, TaskRun, TaskKind, TaskInput, TaskChannel, TaskDestinos } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -38,6 +38,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <span class="tb kind"><i class="ph" [class]="'ph ' + iconoTipo(t.kind)"></i> {{ etiquetaTipo(t.kind) }}</span>
               @if (t.autonomous) { <span class="tb agent"><i class="ph ph-robot"></i> Acción de agente</span> }
               @else { <span class="tb plain"><i class="ph ph-bell"></i> Recordatorio</span> }
+              <span class="tb chan" [title]="t.target || ''"><i class="ph" [class]="'ph ' + iconoCanal(t.channel)"></i> {{ etiquetaCanal(t.channel) }}</span>
               @if (t.status === 'paused') { <span class="badge warn">PAUSADA</span> }
               @if (t.status === 'done') { <span class="badge dim">EJECUTADA</span> }
             </div>
@@ -47,10 +48,39 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                 <h3 class="task-title">{{ titulo(t) }}</h3>
 
                 @if (editando() === t.id) {
-                  <textarea class="task-edit" rows="3" [(ngModel)]="textoEdit"></textarea>
-                  <div class="row" style="margin-top:10px">
+                  <textarea class="task-edit" rows="3" [(ngModel)]="editForm.message"></textarea>
+                  <div class="dos-col" style="margin-top:12px">
+                    <label class="field">
+                      <span>Entregar por</span>
+                      <select [(ngModel)]="editForm.channel" (ngModelChange)="alCambiarCanal(editForm)">
+                        <option value="telegram">Telegram</option>
+                        <option value="chat">Google Chat</option>
+                        <option value="buzz">Buzz (Nostr)</option>
+                        <option value="email">Email</option>
+                      </select>
+                    </label>
+                    @if (editForm.channel !== 'telegram') {
+                      <label class="field">
+                        <span>{{ etiquetaDestino(editForm.channel) }}</span>
+                        @if (editForm.channel === 'chat' && destinos()?.chat?.length) {
+                          <select [(ngModel)]="editForm.target">
+                            <option value="">Elige un espacio…</option>
+                            @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
+                          </select>
+                        } @else if (editForm.channel === 'buzz' && destinos()?.buzz?.length) {
+                          <select [(ngModel)]="editForm.target">
+                            <option value="">Canal por defecto del bridge</option>
+                            @for (c of destinos()!.buzz; track c) { <option [value]="c">{{ c }}</option> }
+                          </select>
+                        } @else {
+                          <input [type]="editForm.channel === 'email' ? 'email' : 'text'" [(ngModel)]="editForm.target" [placeholder]="placeholderDestino(editForm.channel)" />
+                        }
+                      </label>
+                    }
+                  </div>
+                  <div class="row" style="margin-top:12px">
                     <button class="btn-secondary" (click)="editando.set(null)">Cancelar</button>
-                    <button class="btn-primary" [disabled]="!textoEdit.trim() || textoEdit.trim() === t.message" (click)="guardarEdicion(t)">Guardar</button>
+                    <button class="btn-primary" [disabled]="!edicionValida(t)" (click)="guardarEdicion(t)">Guardar</button>
                   </div>
                 } @else {
                   <div class="task-msg">{{ t.message }}</div>
@@ -158,6 +188,38 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
             @if (form.kind === 'cron') {
               <small class="hint">minuto · hora · día del mes · mes · día de la semana. <code>0 9 * * 1-5</code> = lunes a viernes a las 9:00.</small>
             }
+
+            <div class="dos-col" style="margin-top:14px">
+              <label class="field">
+                <span>Entregar por</span>
+                <select [(ngModel)]="form.channel" (ngModelChange)="alCambiarCanal(form)">
+                  <option value="telegram">Telegram</option>
+                  <option value="chat">Google Chat</option>
+                  <option value="buzz">Buzz (Nostr)</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              @if (form.channel !== 'telegram') {
+                <label class="field">
+                  <span>{{ etiquetaDestino(form.channel) }}</span>
+                  @if (form.channel === 'chat' && destinos()?.chat?.length) {
+                    <select [(ngModel)]="form.target">
+                      <option value="">Elige un espacio…</option>
+                      @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
+                    </select>
+                  } @else if (form.channel === 'buzz' && destinos()?.buzz?.length) {
+                    <select [(ngModel)]="form.target">
+                      <option value="">Canal por defecto del bridge</option>
+                      @for (c of destinos()!.buzz; track c) { <option [value]="c">{{ c }}</option> }
+                    </select>
+                  } @else {
+                    <input [type]="form.channel === 'email' ? 'email' : 'text'" [(ngModel)]="form.target" [placeholder]="placeholderDestino(form.channel)" />
+                  }
+                </label>
+              }
+            </div>
+            @if (form.channel === 'chat' && cargandoDestinos()) { <small class="hint">Cargando tus espacios de Google Chat…</small> }
+            @if (form.channel !== 'telegram' && destinos()?.errores?.length) { <small class="hint warn">{{ destinos()!.errores.join(' · ') }}</small> }
           </div>
           <div class="modal-foot">
             <button class="btn-secondary" (click)="cerrarModal()">Cancelar</button>
@@ -177,6 +239,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .tb { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
     .tb.kind { background: rgba(45,212,191,.14); color: #5eead4; }
     .tb.agent { background: rgba(129,140,248,.16); color: #a5b4fc; }
+    .tb.chan { background: rgba(251,146,60,.14); color: #fdba74; }
     .tb.plain { background: var(--bg-input); color: var(--text-dim); border: 1px solid var(--border-light); }
 
     .task-main { display: flex; gap: 20px; align-items: flex-start; }
@@ -228,6 +291,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .check { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 16px; cursor: pointer; font-size: 14px; }
     .check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent-primary); }
     .field .hint, .hint { display: block; margin-top: 8px; color: var(--text-dim); font-size: 12px; }
+    .hint.warn { color: var(--warn); }
     .hint code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
 
     @media (max-width: 720px) {
@@ -239,11 +303,15 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 export class TasksComponent {
   private api = inject(ApiService);
   private toast = inject(ToastService);
+  // Zoneless: `form` y `editForm` son objetos planos; cuando un callback async los toca hay que avisar.
+  private cdr = inject(ChangeDetectorRef);
 
   items = signal<ScheduledTask[]>([]);
   cargado = signal(false);
   editando = signal<string | null>(null);
-  textoEdit = '';
+  editForm: { message: string; channel: TaskChannel; target: string } = { message: '', channel: 'telegram', target: '' };
+  destinos = signal<TaskDestinos | null>(null);
+  cargandoDestinos = signal(false);
   ejecutando = signal<string | null>(null);
   historial = signal<string | null>(null);
   runs = signal<TaskRun[] | null>(null);
@@ -251,7 +319,7 @@ export class TasksComponent {
 
   modal = signal(false);
   guardando = signal(false);
-  form: { message: string; autonomous: boolean; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string } = this.formVacio();
+  form: { message: string; autonomous: boolean; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; channel: TaskChannel; target: string } = this.formVacio();
 
   constructor() { this.load(); }
 
@@ -268,6 +336,35 @@ export class TasksComponent {
     const corte = m.length > 60 ? m.slice(0, 60).replace(/\s\S*$/, '') + '…' : m;
     return (t.autonomous ? 'Rutina: ' : 'Recordatorio: ') + corte;
   }
+  etiquetaCanal(c: TaskChannel) { return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email' }[c || 'telegram']; }
+  iconoCanal(c: TaskChannel) { return { telegram: 'ph-telegram-logo', chat: 'ph-chats-circle', buzz: 'ph-broadcast', email: 'ph-envelope-simple' }[c || 'telegram']; }
+  etiquetaDestino(c: TaskChannel) { return { telegram: '', chat: 'Espacio de Google Chat', buzz: 'Canal de Buzz (opcional)', email: 'Correo de destino' }[c]; }
+  placeholderDestino(c: TaskChannel) { return { telegram: '', chat: 'spaces/AAAA…', buzz: 'id del canal, o vacío para el configurado', email: 'alguien@dcanje.com' }[c]; }
+
+  /** Al elegir Chat o Buzz se cargan los destinos una sola vez; email propone tu propio correo. */
+  alCambiarCanal(f: { channel: TaskChannel; target: string }) {
+    f.target = '';
+    if (f.channel === 'email' && this.destinos()?.email) f.target = this.destinos()!.email!;
+    if (f.channel !== 'telegram') this.cargarDestinos(() => { if (f.channel === 'email' && !f.target && this.destinos()?.email) f.target = this.destinos()!.email!; });
+  }
+  private cargarDestinos(despues?: () => void) {
+    if (this.destinos()) { despues?.(); return; }
+    if (this.cargandoDestinos()) return;
+    this.cargandoDestinos.set(true);
+    this.api.getTaskDestinos().subscribe({
+      next: (d) => { this.destinos.set(d); this.cargandoDestinos.set(false); despues?.(); this.cdr.markForCheck(); },
+      error: () => { this.cargandoDestinos.set(false); this.destinos.set({ chat: [], buzz: [], email: null, errores: ['No se pudieron cargar los destinos'] }); },
+    });
+  }
+  destinoValido(channel: TaskChannel, target: string): boolean {
+    switch (channel) {
+      case 'telegram': return true;
+      case 'buzz': return true;
+      case 'chat': return /^spaces\/[A-Za-z0-9_-]+$/.test(target.trim());
+      case 'email': return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target.trim());
+    }
+  }
+
   etiquetaTipo(k: TaskKind) { return { once: 'Una vez', interval: 'Recurrente', daily: 'Diario', cron: 'Cron' }[k]; }
   iconoTipo(k: TaskKind) { return { once: 'ph-calendar-blank', interval: 'ph-arrows-clockwise', daily: 'ph-sun', cron: 'ph-code' }[k]; }
   fecha(ms: number) { return new Date(ms).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' }); }
@@ -294,9 +391,19 @@ export class TasksComponent {
     });
   }
 
-  editar(t: ScheduledTask) { this.textoEdit = t.message; this.editando.set(t.id); }
+  editar(t: ScheduledTask) {
+    this.editForm = { message: t.message, channel: t.channel || 'telegram', target: t.target || '' };
+    if (this.editForm.channel !== 'telegram') this.cargarDestinos();
+    this.editando.set(t.id);
+  }
+  edicionValida(t: ScheduledTask): boolean {
+    const f = this.editForm;
+    if (!f.message.trim() || !this.destinoValido(f.channel, f.target)) return false;
+    return f.message.trim() !== t.message || f.channel !== (t.channel || 'telegram') || (f.target.trim() || null) !== (t.target || null);
+  }
   guardarEdicion(t: ScheduledTask) {
-    this.api.updateTask(t.id, { message: this.textoEdit.trim() }).subscribe({
+    const f = this.editForm;
+    this.api.updateTask(t.id, { message: f.message.trim(), channel: f.channel, target: f.channel === 'telegram' ? null : (f.target.trim() || null) }).subscribe({
       next: () => { this.editando.set(null); this.load(); this.toast.ok('Instrucción actualizada'); },
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
     });
@@ -325,13 +432,13 @@ export class TasksComponent {
   abierto(r: TaskRun) { return this.abiertos.has(`${r.id}-${r.started_at}`); }
 
   // ─── Crear ───────────────────────────────────────────────────────────
-  private formVacio() { return { message: '', autonomous: false, kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '' }; }
+  private formVacio() { return { message: '', autonomous: false, kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', channel: 'telegram' as TaskChannel, target: '' }; }
   abrirNueva() { this.form = this.formVacio(); this.modal.set(true); }
   cerrarModal() { if (!this.guardando()) this.modal.set(false); }
 
   formValido(): boolean {
     const f = this.form;
-    if (!f.message.trim()) return false;
+    if (!f.message.trim() || !this.destinoValido(f.channel, f.target)) return false;
     switch (f.kind) {
       case 'once': return !!f.run_at && new Date(f.run_at).getTime() > Date.now();
       case 'interval': return !!f.interval_minutes && f.interval_minutes >= 1;
@@ -342,7 +449,7 @@ export class TasksComponent {
 
   crear() {
     const f = this.form;
-    const datos: TaskInput = { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind };
+    const datos: TaskInput = { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind, channel: f.channel, target: f.channel === 'telegram' ? null : (f.target.trim() || null) };
     if (f.kind === 'once') datos.run_at = new Date(f.run_at).toISOString();
     if (f.kind === 'interval') datos.interval_minutes = f.interval_minutes;
     if (f.kind === 'daily') datos.time_of_day = f.time_of_day;

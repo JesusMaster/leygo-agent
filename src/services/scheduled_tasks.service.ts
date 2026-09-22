@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskRun } from '../database/sqlite.service.js';
+import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskRun, ScheduledTaskChannel } from '../database/sqlite.service.js';
 import { telegramBotService } from './telegram_bot.service.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 
@@ -60,12 +60,14 @@ export class ScheduledTasksService {
   public create(input: {
     message: string; autonomous: boolean; kind: ScheduledTaskKind;
     run_at?: number | string | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
+    channel?: ScheduledTaskChannel | null; target?: string | null;
   }): ScheduledTask {
     const base = this.normalizar(input);
+    const entrega = this.normalizarEntrega(input.channel, input.target);
     const id = Math.random().toString(36).substring(2, 9);
     const tarea = sqliteReminderService.createScheduledTask({
       id, message: input.message.trim(), autonomous: input.autonomous ? 1 : 0, kind: input.kind,
-      ...base, status: 'active', next_run_at: this.proximaEjecucion({ ...base, kind: input.kind } as any),
+      ...base, ...entrega, status: 'active', next_run_at: this.proximaEjecucion({ ...base, kind: input.kind } as any),
     });
     this.programar(tarea);
     return tarea;
@@ -74,7 +76,7 @@ export class ScheduledTasksService {
   public update(id: string, cambios: Partial<{
     message: string; autonomous: boolean; kind: ScheduledTaskKind;
     run_at: number | string | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
-    status: 'active' | 'paused';
+    status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null;
   }>): ScheduledTask | null {
     const actual = sqliteReminderService.getScheduledTask(id);
     if (!actual) return null;
@@ -89,10 +91,14 @@ export class ScheduledTasksService {
     });
 
     const status = cambios.status || (actual.status === 'done' ? 'active' : actual.status);
+    const entrega = this.normalizarEntrega(
+      cambios.channel !== undefined ? cambios.channel : actual.channel,
+      cambios.target !== undefined ? cambios.target : actual.target,
+    );
     const actualizada = sqliteReminderService.updateScheduledTask(id, {
       message: cambios.message !== undefined ? cambios.message.trim() : actual.message,
       autonomous: cambios.autonomous !== undefined ? (cambios.autonomous ? 1 : 0) : actual.autonomous,
-      kind, ...horario, status,
+      kind, ...horario, ...entrega, status,
       next_run_at: status === 'active' ? this.proximaEjecucion({ ...horario, kind } as any) : null,
     });
 
@@ -133,16 +139,10 @@ export class ScheduledTasksService {
       if (t.autonomous) {
         if (!this.runAgent) throw new Error('El agente no está disponible para ejecutar tareas autónomas.');
         result = await this.runAgent(t.message, t.id);
-        await telegramBotService.sendDirectMessage(
-          `🤖 <b>TAREA PROGRAMADA</b>\n<i>${escapar(t.message.slice(0, 120))}${t.message.length > 120 ? '…' : ''}</i>\n\n${formatear(result)}`,
-          { parseMode: 'HTML' },
-        ).catch(() => {});
+        await this.entregar(t, result, true);
       } else {
         result = t.message;
-        await telegramBotService.sendDirectMessage(
-          `⏰ <b>RECORDATORIO:</b>\n\n📌 ${escapar(t.message)}`,
-          { parseMode: 'HTML' },
-        );
+        await this.entregar(t, result, false);
       }
     } catch (err: any) {
       status = 'error';
@@ -166,6 +166,66 @@ export class ScheduledTasksService {
       }
     }
     return { id: 0, ...run };
+  }
+
+  // ─── Entrega ─────────────────────────────────────────────────────────────
+
+  /**
+   * Manda el resultado por el canal de la tarea. `autonoma` distingue el encabezado:
+   * el resultado del agente va con la instrucción de contexto; un recordatorio va solo.
+   */
+  private async entregar(t: ScheduledTask, texto: string, autonoma: boolean): Promise<void> {
+    const encabezado = autonoma ? `Tarea programada: ${t.message.slice(0, 120)}${t.message.length > 120 ? '…' : ''}` : 'Recordatorio';
+
+    switch (t.channel || 'telegram') {
+      case 'chat': {
+        if (!t.target) throw new Error('La tarea no tiene un espacio de Google Chat de destino.');
+        const { googleService } = await import('./google.service.js');
+        const cuerpo = autonoma ? `*${encabezado}*\n\n${texto}` : `⏰ *Recordatorio*\n\n${texto}`;
+        await googleService.sendChatMessage(t.target, messageFormatter.formatForGoogleChat(cuerpo));
+        return;
+      }
+      case 'email': {
+        if (!t.target) throw new Error('La tarea no tiene un correo de destino.');
+        const { googleService } = await import('./google.service.js');
+        const asunto = autonoma ? `[Yisus] ${t.message.slice(0, 70)}${t.message.length > 70 ? '…' : ''}` : `[Yisus] Recordatorio: ${t.message.slice(0, 60)}${t.message.length > 60 ? '…' : ''}`;
+        const borrador = await googleService.createDraft(t.target, asunto, texto);
+        await googleService.sendDraft(borrador.draftId!);
+        return;
+      }
+      case 'buzz': {
+        const { nostrGatewayService } = await import('./nostr_gateway.service.js');
+        const plano = messageFormatter.formatForPlainText(autonoma ? `${encabezado}\n\n${texto}` : `⏰ Recordatorio: ${texto}`);
+        const r = await nostrGatewayService.publishToChannel(plano, t.target || undefined);
+        if (r.status !== 'success') throw new Error(r.message || 'No se pudo publicar en Buzz.');
+        return;
+      }
+      case 'telegram':
+      default: {
+        const html = autonoma
+          ? `🤖 <b>TAREA PROGRAMADA</b>\n<i>${escapar(t.message.slice(0, 120))}${t.message.length > 120 ? '…' : ''}</i>\n\n${formatear(texto)}`
+          : `⏰ <b>RECORDATORIO:</b>\n\n📌 ${escapar(texto)}`;
+        await telegramBotService.sendDirectMessage(html, { parseMode: 'HTML' });
+      }
+    }
+  }
+
+  private normalizarEntrega(channel?: ScheduledTaskChannel | null, target?: string | null): { channel: ScheduledTaskChannel; target: string | null } {
+    const c = (channel || 'telegram') as ScheduledTaskChannel;
+    const tg = (target || '').trim() || null;
+    switch (c) {
+      case 'telegram': return { channel: c, target: null };
+      case 'chat':
+        if (!tg || !/^spaces\/[A-Za-z0-9_-]+$/.test(tg)) throw new Error('Para Google Chat indica el espacio de destino (spaces/…).');
+        return { channel: c, target: tg };
+      case 'email':
+        if (!tg || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tg)) throw new Error('Para email indica un correo de destino válido.');
+        return { channel: c, target: tg };
+      case 'buzz':
+        return { channel: c, target: tg }; // sin destino usa el canal configurado en el bridge
+      default:
+        throw new Error(`Canal desconocido: ${channel}`);
+    }
   }
 
   // ─── Programación ────────────────────────────────────────────────────────
@@ -262,6 +322,19 @@ export class ScheduledTasksService {
   }
 
   private describir(t: ScheduledTask): string {
+    return `${this.describirHorario(t)} · ${this.describirCanal(t)}`;
+  }
+
+  private describirCanal(t: ScheduledTask): string {
+    switch (t.channel || 'telegram') {
+      case 'chat': return `por Google Chat (${t.target})`;
+      case 'email': return `por email a ${t.target}`;
+      case 'buzz': return t.target ? `por Buzz (${t.target.slice(0, 12)}…)` : 'por Buzz';
+      default: return 'por Telegram';
+    }
+  }
+
+  private describirHorario(t: ScheduledTask): string {
     switch (t.kind) {
       case 'once': return `Una vez, el ${new Date(t.run_at || 0).toLocaleString('es-CL', { timeZone: this.timezone, dateStyle: 'medium', timeStyle: 'short' })}`;
       case 'interval': return `Cada ${t.interval_minutes} min`;
