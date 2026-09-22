@@ -11,11 +11,41 @@ import 'dotenv/config';
 import { TOOL_CATALOG } from '../src/agents/tool_catalog.js';
 import { envolverConPermisoA2A } from '../src/agents/a2a_guard.js';
 import { setCurrentA2AScope, getToolsDisponiblesA2A } from '../src/config/channels.js';
+import { construirSkills } from '../src/a2a/card.js';
+import { allToolNames } from '../src/agents/tool_catalog.js';
 
 const CONCEDIDAS = ['knowledge_agent', 'faq_agent', 'knowledge_public'];
 const A_PROBAR = ['get_token_usage', 'account_agent', 'knowledge_public'];
 
+/**
+ * La GUI concede permisos por nombre de herramienta y a2a_guard verifica por ese
+ * mismo nombre. Si el id de la skill en la card no coincide, el cliente ve una
+ * cosa en /.well-known/agent-card.json y hay que habilitarle otra.
+ */
+function verificarCard(): number {
+  const catalogo = allToolNames();
+  const disponibles = getToolsDisponiblesA2A();
+  const skills = construirSkills();
+  const ids = skills.map((s: any) => s.id);
+  let fallos = 0;
+
+  const sinSkill = disponibles.filter((t) => !ids.includes(t));
+  const sobrantes = ids.filter((id) => !disponibles.includes(id));
+  const fueraDelCatalogo = disponibles.filter((t) => !catalogo.includes(t));
+
+  console.log(`Catalogo: ${catalogo.length} | disponibles en A2A: ${disponibles.length} | skills en la card: ${skills.length}`);
+
+  if (sinSkill.length) { console.log('  x disponibles sin skill en la card:', sinSkill.join(', ')); fallos++; }
+  if (sobrantes.length) { console.log('  x skills con id que no es una herramienta:', sobrantes.join(', ')); fallos++; }
+  if (fueraDelCatalogo.length) { console.log('  x disponibles que no estan en el catalogo:', fueraDelCatalogo.join(', ')); fallos++; }
+  if (!fallos) console.log('  ok cada herramienta disponible tiene una skill con su mismo nombre');
+
+  return fallos;
+}
+
 async function main() {
+  let fallosCard = verificarCard();
+  console.log('');
   console.log('Herramientas publicadas en A2A:', getToolsDisponiblesA2A().length);
   console.log('Alcance simulado del token   :', CONCEDIDAS.join(', '));
   console.log('');
@@ -56,9 +86,10 @@ async function main() {
     }
   }
 
+  const total = fallos + fallosCard;
   console.log('');
-  console.log(fallos === 0 ? 'OK El guard de A2A funciona.' : `FALLO ${fallos} en el guard de A2A.`);
-  process.exit(fallos === 0 ? 0 : 1);
+  console.log(total === 0 ? 'OK card y permisos alineados.' : `FALLO ${total} problema(s).`);
+  process.exit(total === 0 ? 0 : 1);
 }
 
 main();
