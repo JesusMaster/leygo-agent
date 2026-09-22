@@ -44,6 +44,35 @@ export interface CustomWebhookLog {
   created_at: number;
 }
 
+export type ScheduledTaskKind = 'once' | 'interval' | 'daily' | 'cron';
+export type ScheduledTaskStatus = 'active' | 'paused' | 'done';
+
+export interface ScheduledTask {
+  id: string;
+  message: string;
+  autonomous: number;          // 0 = recordatorio simple por Telegram, 1 = el agente ejecuta la instrucción
+  kind: ScheduledTaskKind;
+  run_at: number | null;       // once
+  interval_minutes: number | null;
+  time_of_day: string | null;  // daily, "HH:MM"
+  cron_expr: string | null;
+  status: ScheduledTaskStatus;
+  created_at: number;
+  updated_at: number;
+  last_run_at: number | null;
+  next_run_at: number | null;
+}
+
+export interface ScheduledTaskRun {
+  id: number;
+  task_id: string;
+  started_at: number;
+  duration_ms: number;
+  status: 'success' | 'error';
+  trigger: 'scheduled' | 'manual';
+  result: string;
+}
+
 export interface UsageRecord {
   id?: number;
   timestamp: string;
@@ -234,6 +263,35 @@ export class SqliteReminderService {
         created_at INTEGER NOT NULL,
         last_used_at INTEGER
       );
+    `);
+
+    // Tareas programadas (reemplazan a los recordatorios sueltos)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduled_tasks (
+        id TEXT PRIMARY KEY,
+        message TEXT NOT NULL,
+        autonomous INTEGER NOT NULL DEFAULT 0,
+        kind TEXT NOT NULL,
+        run_at INTEGER,
+        interval_minutes INTEGER,
+        time_of_day TEXT,
+        cron_expr TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_run_at INTEGER,
+        next_run_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL DEFAULT 'scheduled',
+        result TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_runs ON scheduled_task_runs(task_id, started_at DESC);
     `);
 
     // 11. Migraciones de esquema sobre bases ya existentes
@@ -636,6 +694,80 @@ export class SqliteReminderService {
     if (!row) return null;
     this.db.prepare(`UPDATE a2a_tokens SET last_used_at = ? WHERE name = ?`).run(Date.now(), row.name);
     return { name: row.name, tools: JSON.parse(row.tools || '[]') };
+  }
+
+  // ─── Tareas programadas ────────────────────────────────────────────────────
+
+  public listScheduledTasks(): ScheduledTask[] {
+    return this.db.prepare(`SELECT * FROM scheduled_tasks ORDER BY created_at DESC`).all() as ScheduledTask[];
+  }
+
+  public getScheduledTask(id: string): ScheduledTask | null {
+    return (this.db.prepare(`SELECT * FROM scheduled_tasks WHERE id = ?`).get(id) as ScheduledTask) || null;
+  }
+
+  public createScheduledTask(t: Omit<ScheduledTask, 'created_at' | 'updated_at' | 'last_run_at'>): ScheduledTask {
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, created_at, updated_at, last_run_at, next_run_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    `).run(t.id, t.message, t.autonomous ? 1 : 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status, now, now, t.next_run_at ?? null);
+    return this.getScheduledTask(t.id)!;
+  }
+
+  public updateScheduledTask(id: string, cambios: Partial<Omit<ScheduledTask, 'id' | 'created_at'>>): ScheduledTask | null {
+    const actual = this.getScheduledTask(id);
+    if (!actual) return null;
+    const n = { ...actual, ...cambios, updated_at: Date.now() };
+    this.db.prepare(`
+      UPDATE scheduled_tasks SET message = ?, autonomous = ?, kind = ?, run_at = ?, interval_minutes = ?, time_of_day = ?, cron_expr = ?,
+        status = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
+      WHERE id = ?
+    `).run(n.message, n.autonomous ? 1 : 0, n.kind, n.run_at ?? null, n.interval_minutes ?? null, n.time_of_day ?? null, n.cron_expr ?? null,
+      n.status, n.updated_at, n.last_run_at ?? null, n.next_run_at ?? null, id);
+    return this.getScheduledTask(id);
+  }
+
+  public deleteScheduledTask(id: string): boolean {
+    this.db.prepare(`DELETE FROM scheduled_task_runs WHERE task_id = ?`).run(id);
+    const res = this.db.prepare(`DELETE FROM scheduled_tasks WHERE id = ?`).run(id) as any;
+    return (res?.changes ?? 0) > 0;
+  }
+
+  public addScheduledTaskRun(r: Omit<ScheduledTaskRun, 'id'>): void {
+    this.db.prepare(`INSERT INTO scheduled_task_runs (task_id, started_at, duration_ms, status, trigger, result) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(r.task_id, r.started_at, r.duration_ms, r.status, r.trigger, r.result ?? '');
+    // Se conservan las últimas 50 por tarea
+    this.db.prepare(`
+      DELETE FROM scheduled_task_runs WHERE task_id = ? AND id NOT IN (
+        SELECT id FROM scheduled_task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 50
+      )
+    `).run(r.task_id, r.task_id);
+  }
+
+  public listScheduledTaskRuns(taskId: string, limit: number = 20): ScheduledTaskRun[] {
+    return this.db.prepare(`SELECT * FROM scheduled_task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?`).all(taskId, limit) as ScheduledTaskRun[];
+  }
+
+  /**
+   * Los recordatorios sueltos de la tabla vieja pasan a ser tareas de una vez.
+   * Se marcan como migrados para no volver a importarlos.
+   */
+  public migrateRemindersToTasks(): number {
+    const pendientes = this.db.prepare(`SELECT * FROM reminders WHERE status = 'pending'`).all() as any[];
+    let n = 0;
+    for (const r of pendientes) {
+      if (!this.getScheduledTask(r.id)) {
+        this.createScheduledTask({
+          id: r.id, message: r.message, autonomous: 0, kind: 'once',
+          run_at: r.target_time, interval_minutes: null, time_of_day: null, cron_expr: null,
+          status: 'active', next_run_at: r.target_time,
+        });
+        n++;
+      }
+      this.db.prepare(`UPDATE reminders SET status = 'migrated' WHERE id = ?`).run(r.id);
+    }
+    return n;
   }
 
   // ─── Escalamientos (triage_agent) ──────────────────────────────────────────

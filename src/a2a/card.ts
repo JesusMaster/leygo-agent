@@ -102,6 +102,12 @@ const SKILLS_POR_TOOL: Record<string, any> = {
         tags:        ['reminders', 'scheduling', 'es'],
         examples:    ['Recuérdale revisar el deploy a las 18:00', 'Recuérdame en 20 minutos revisar el log del worker'],
     },
+    schedule_task: {
+        name:        'Programar Tareas Recurrentes o Autónomas',
+        description: 'Crea tareas diarias, cada N minutos, por cron o de una vez; si son autónomas, el agente ejecuta la instrucción con sus herramientas en cada corrida y reporta a Telegram.',
+        tags:        ['scheduling', 'automation', 'cron', 'es'],
+        examples:    ['Todos los días a las 8:45 revisa mi agenda y mándame un resumen', 'Cada lunes a las 9 recuérdame el comité'],
+    },
     list_scheduled_reminders: {
         name:        'Listar Recordatorios Programados',
         description: 'Consulta y lista los recordatorios activos y pendientes programados para Jesús.',

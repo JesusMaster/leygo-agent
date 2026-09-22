@@ -53,6 +53,22 @@ export interface Escalation {
 
 export interface Reminder { id: string; target_time: number; message: string; status: string; created_at: number; }
 
+export type TaskKind = 'once' | 'interval' | 'daily' | 'cron';
+export interface ScheduledTask {
+  id: string; message: string; autonomous: number; kind: TaskKind;
+  run_at: number | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
+  status: 'active' | 'paused' | 'done'; created_at: number; updated_at: number;
+  last_run_at: number | null; next_run_at: number | null; descripcion: string;
+}
+export interface TaskRun {
+  id: number; task_id: string; started_at: number; duration_ms: number;
+  status: 'success' | 'error'; trigger: 'scheduled' | 'manual'; result: string;
+}
+export type TaskInput = {
+  message: string; autonomous: boolean; kind: TaskKind;
+  run_at?: string | number | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
+};
+
 export interface CustomWebhook {
   id: string; titulo: string; instrucciones: string; modelo: string;
   paused: number; created_at?: number; updated_at?: number; url?: string;
@@ -154,6 +170,16 @@ export class ApiService {
   getReminders(): Observable<{ reminders: Reminder[] }> {
     return this.http.get<any>(`${this.baseUrl}/api/reminders`);
   }
+
+  // ─── Tareas programadas ───────────────────────────────────────────────
+  getTasks(): Observable<{ tasks: ScheduledTask[] }> { return this.http.get<any>(`${this.baseUrl}/api/tasks`); }
+  createTask(data: TaskInput): Observable<{ task: ScheduledTask }> { return this.http.post<any>(`${this.baseUrl}/api/tasks`, data); }
+  updateTask(id: string, data: Partial<TaskInput & { status: 'active' | 'paused' }>): Observable<{ task: ScheduledTask }> {
+    return this.http.put<any>(`${this.baseUrl}/api/tasks/${id}`, data);
+  }
+  deleteTask(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/tasks/${id}`); }
+  runTask(id: string): Observable<{ run: TaskRun }> { return this.http.post<any>(`${this.baseUrl}/api/tasks/${id}/run`, {}); }
+  getTaskRuns(id: string, limit = 20): Observable<{ runs: TaskRun[] }> { return this.http.get<any>(`${this.baseUrl}/api/tasks/${id}/runs?limit=${limit}`); }
 
   // ─── Webhooks con IA ──────────────────────────────────────────────────
   getWebhooks(): Observable<{ webhooks: CustomWebhook[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks`); }

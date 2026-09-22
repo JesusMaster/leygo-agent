@@ -7,23 +7,15 @@ import { meetingIngestService } from './meeting_ingest.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { tokenTrackerService } from './token_tracker.service.js';
 import { messageFormatter } from '../utils/message_formatter.js';
+import { scheduledTasksService } from './scheduled_tasks.service.js';
 
 dotenv.config();
-
-export interface ActiveReminder {
-  id: string;
-  targetTime: Date;
-  message: string;
-  createdAt: Date;
-  timerRef?: NodeJS.Timeout;
-}
 
 export class SchedulerService {
   private ai: GoogleGenAI;
   private timezone: string = 'America/Santiago';
   private morningDigestTask: ScheduledTask | null = null;
   private meetSyncTask: ScheduledTask | null = null;
-  private activeReminders: Map<string, ActiveReminder> = new Map();
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
@@ -35,8 +27,9 @@ export class SchedulerService {
   public start(): void {
     console.log(`⏰ [SchedulerService] Inicializando tareas programadas (Timezone: ${this.timezone})...`);
 
-    // 1. Restaurar recordatorios pendientes persistidos en SQLite
-    this.restorePendingReminders();
+    // 1. Tareas programadas del usuario (recordatorios, rutinas, acciones del agente).
+    //    Migra los recordatorios de la tabla vieja y programa las activas.
+    scheduledTasksService.start();
 
     // 2. Morning Digest: Lunes a Domingo a las 08:30 AM CLT
     const digestCronExpr = process.env.MORNING_DIGEST_CRON || '30 8 * * *';
@@ -123,73 +116,12 @@ export class SchedulerService {
   }
 
   /**
-   * Restaura desde SQLite los recordatorios que quedaron pendientes al reiniciar el servicio
-   */
-  private restorePendingReminders(): void {
-    try {
-      const pending = sqliteReminderService.getPendingReminders();
-      if (!pending || pending.length === 0) return;
-
-      console.log(`🔄 [SchedulerService] Restaurando ${pending.length} recordatorio(s) pendiente(s) desde SQLite...`);
-      const now = Date.now();
-
-      for (const r of pending) {
-        const diffMs = r.target_time - now;
-
-        if (diffMs <= 0) {
-          // Ya pasó la hora mientras el servidor estaba apagado (si fue hace menos de 24h)
-          const hoursAgo = Math.abs(diffMs) / (1000 * 60 * 60);
-          if (hoursAgo <= 24) {
-            console.log(`⏰ [SchedulerService] Disparando recordatorio atrasado tras reinicio: "${r.message}"`);
-            telegramBotService.sendDirectMessage(
-              `⏰ <b>RECORDATORIO PENDIENTE (Recuperado tras reinicio):</b>\n\n📌 ${r.message}\n\n<i>(Estaba programado para el ${new Date(r.target_time).toLocaleString('es-CL')})</i>`,
-              { parseMode: 'HTML' }
-            ).catch(() => {});
-          }
-          sqliteReminderService.markCompleted(r.id);
-        } else {
-          // Aún está en el futuro: volver a programar el temporizador
-          this.scheduleMemoryTimer(r.id, new Date(r.target_time), r.message, diffMs);
-        }
-      }
-    } catch (err: any) {
-      console.warn('⚠️ [SchedulerService] Error restaurando recordatorios desde SQLite:', err.message);
-    }
-  }
-
-  /**
-   * Programa el temporizador en memoria y actualiza SQLite al completarse
-   */
-  private scheduleMemoryTimer(id: string, targetTime: Date, message: string, delayMs: number): void {
-    const timerRef = setTimeout(async () => {
-      console.log(`⏰ [SchedulerService] Disparando recordatorio ${id}: "${message}"`);
-      await telegramBotService.sendDirectMessage(
-        `⏰ <b>RECORDATORIO PROGRAMADO:</b>\n\n📌 ${message}\n\n<i>(Programado para las ${targetTime.toLocaleTimeString('es-CL')})</i>`,
-        { parseMode: 'HTML' }
-      );
-      this.activeReminders.delete(id);
-      sqliteReminderService.markCompleted(id);
-    }, delayMs);
-
-    this.activeReminders.set(id, {
-      id,
-      targetTime,
-      message,
-      createdAt: new Date(),
-      timerRef,
-    });
-  }
-
-  /**
    * Detiene los crons activos
    */
   public stop(): void {
     if (this.morningDigestTask) this.morningDigestTask.stop();
     if (this.meetSyncTask) this.meetSyncTask.stop();
-    for (const reminder of this.activeReminders.values()) {
-      if (reminder.timerRef) clearTimeout(reminder.timerRef);
-    }
-    this.activeReminders.clear();
+    scheduledTasksService.stop();
     console.log('🛑 [SchedulerService] Tareas programadas detenidas.');
   }
 
@@ -290,63 +222,28 @@ Instrucciones de formato:
    * Programa un recordatorio para una fecha/hora específica y lo persiste en SQLite
    */
   public scheduleReminder(targetTime: Date, message: string): { id: string; scheduledFor: string; remainingMinutes: number } {
-    const now = Date.now();
-    const delayMs = targetTime.getTime() - now;
-
-    if (delayMs <= 0) {
-      throw new Error('La fecha/hora del recordatorio debe ser en el futuro.');
-    }
-
-    const id = Math.random().toString(36).substring(2, 9);
-    const remainingMinutes = Math.round(delayMs / 60000);
-
-    // 1. Persistir en SQLite local
-    sqliteReminderService.saveReminder(id, targetTime.getTime(), message);
-
-    // 2. Programar temporizador en memoria
-    this.scheduleMemoryTimer(id, targetTime, message, delayMs);
-
+    const tarea = scheduledTasksService.create({ message, autonomous: false, kind: 'once', run_at: targetTime.getTime() });
     return {
-      id,
-      scheduledFor: targetTime.toLocaleString('es-CL'),
-      remainingMinutes,
+      id: tarea.id,
+      scheduledFor: targetTime.toLocaleString('es-CL', { timeZone: this.timezone }),
+      remainingMinutes: Math.round((targetTime.getTime() - Date.now()) / 60000),
     };
   }
 
-  /**
-   * Cancela un recordatorio por su ID en SQLite y en memoria
-   */
   public cancelReminder(id: string): boolean {
-    const reminder = this.activeReminders.get(id);
-    if (reminder) {
-      if (reminder.timerRef) clearTimeout(reminder.timerRef);
-      this.activeReminders.delete(id);
-    }
-    return sqliteReminderService.cancel(id);
+    return scheduledTasksService.delete(id);
   }
 
-  /**
-   * Lista los recordatorios activos consultando SQLite
-   */
-  public listReminders(): Array<{ id: string; targetTime: string; message: string }> {
-    try {
-      const pending = sqliteReminderService.getPendingReminders();
-      if (pending && pending.length > 0) {
-        return pending.map(r => ({
-          id: r.id,
-          targetTime: new Date(r.target_time).toLocaleString('es-CL'),
-          message: r.message,
-        }));
-      }
-    } catch {
-      // Fallback a memoria
-    }
-
-    return Array.from(this.activeReminders.values()).map(r => ({
-      id: r.id,
-      targetTime: r.targetTime.toLocaleString('es-CL'),
-      message: r.message,
-    }));
+  /** Recordatorios y tareas activas (para la herramienta list_scheduled_reminders) */
+  public listReminders(): Array<{ id: string; targetTime: string; message: string; tipo: string }> {
+    return scheduledTasksService.list()
+      .filter((t) => t.status === 'active')
+      .map((t) => ({
+        id: t.id,
+        targetTime: t.next_run_at ? new Date(t.next_run_at).toLocaleString('es-CL', { timeZone: this.timezone }) : '—',
+        message: t.message,
+        tipo: (t.autonomous ? 'acción del agente · ' : 'recordatorio · ') + t.descripcion,
+      }));
   }
 }
 

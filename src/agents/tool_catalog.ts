@@ -4,7 +4,7 @@ import { accountAgent } from './account.agent.js';
 import { knowledgeAgent } from './knowledge.agent.js';
 import { triageAgent } from './triage.agent.js';
 import { publicKnowledgeAgent } from './public_knowledge.agent.js';
-import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool } from './tools/scheduler.tools.js';
+import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool, scheduleTaskTool } from './tools/scheduler.tools.js';
 import {
   getRecentWebhooksTool,
   createCustomWebhookTool,
@@ -32,6 +32,7 @@ export const TOOL_CATALOG: Record<string, any> = {
 
   // Recordatorios y digest
   schedule_reminder:        scheduleReminderTool,
+  schedule_task:            scheduleTaskTool,
   list_scheduled_reminders: listRemindersTool,
   trigger_morning_digest:   triggerMorningDigestTool,
 
@@ -62,7 +63,7 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   faq:        ['faq_agent'],
   workspace:  ['account_agent'],
   triage:     ['triage_agent'],
-  reminders:  ['schedule_reminder', 'list_scheduled_reminders', 'trigger_morning_digest'],
+  reminders:  ['schedule_reminder', 'schedule_task', 'list_scheduled_reminders', 'trigger_morning_digest'],
   webhooks:   ['get_recent_webhooks', 'create_custom_webhook', 'list_custom_webhooks', 'toggle_custom_webhook', 'get_custom_webhook_logs'],
   usage:      ['get_token_usage', 'set_monthly_budget', 'refresh_pricing_catalog'],
   buzz:       ['buzz_send_message', 'buzz_status'],

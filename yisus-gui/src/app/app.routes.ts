@@ -8,7 +8,8 @@ export const routes: Routes = [
   { path: 'tokens',       loadComponent: () => import('./components/tokens/tokens').then(m => m.TokensComponent) },
   { path: 'escalations',  loadComponent: () => import('./components/escalations/escalations').then(m => m.EscalationsComponent) },
   { path: 'webhooks',     loadComponent: () => import('./components/webhooks/webhooks').then(m => m.WebhooksComponent) },
-  { path: 'reminders',    loadComponent: () => import('./components/reminders/reminders').then(m => m.RemindersComponent) },
+  { path: 'tasks',        loadComponent: () => import('./components/tasks/tasks').then(m => m.TasksComponent) },
+  { path: 'reminders',    redirectTo: 'tasks' },
   { path: 'settings',     loadComponent: () => import('./components/settings/settings').then(m => m.SettingsComponent) },
   { path: '**', redirectTo: 'chat' },
 ];

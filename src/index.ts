@@ -11,6 +11,8 @@ import { buildPublicCoordinator } from './agents/public.agent.js';
 import { RedisSessionService } from './services/redis_session.service.js';
 import { telegramBotService } from './services/telegram_bot.service.js';
 import { schedulerService } from './services/scheduler.service.js';
+import { scheduledTasksService } from './services/scheduled_tasks.service.js';
+import { beginUsageScope, flushUsageScope } from './utils/usage_collector.js';
 import { mountA2A } from './a2a/index.js';
 import { nostrGatewayService } from './services/nostr_gateway.service.js';
 
@@ -94,6 +96,30 @@ server.start().then(async () => {
 
     // Iniciar servicios en segundo plano: Bot de Telegram interactivo, Scheduler de tareas y Bridge Nostr (Buzz)
     await telegramBotService.start(telegramRunner, sessionService);
+
+    // Las tareas autónomas corren con el mismo coordinator que Telegram (mismas
+    // herramientas, mismo 2FA) y se contabilizan en el canal "system".
+    scheduledTasksService.setAgentRunner(async (instruccion, taskId) => {
+        const appName = APP_NAME;
+        const userId = 'jesus';
+        const sessionId = `task-${taskId}`;
+        let session = await sessionService.getSession({ appName, userId, sessionId });
+        if (!session) session = await sessionService.createSession({ appName, userId, sessionId });
+
+        const hoy = new Date().toLocaleString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago', dateStyle: 'full', timeStyle: 'short' });
+        const prompt = `[Tarea programada — ${hoy}] ${instruccion}\n\nEjecuta la tarea ahora y responde con el resultado, sin pedir confirmación ni hacer preguntas.`;
+
+        beginUsageScope('system', sessionId, `[Tarea] ${instruccion.slice(0, 80)}`);
+        let texto = '';
+        for await (const event of telegramRunner.runAsync({ userId, sessionId: session.id, newMessage: { role: 'user', parts: [{ text: prompt }] } })) {
+            for (const part of event.content?.parts || []) {
+                if (part.text && event.author !== 'user') texto += part.text;
+            }
+        }
+        flushUsageScope().catch(() => {});
+        return texto.trim() || 'Listo. La tarea se ejecutó sin respuesta adicional.';
+    });
+
     schedulerService.start();
 
     if (process.env.NOSTR_ENABLED !== 'false') {

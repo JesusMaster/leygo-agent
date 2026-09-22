@@ -5,6 +5,7 @@ import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
 import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool } from '../agents/tool_catalog.js';
 import { describirTool } from '../a2a/card.js';
+import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { adminGuard } from './admin_guard.js';
 
@@ -29,7 +30,7 @@ export default function createAdminRoutes() {
   // OJO: el guard va montado por PREFIJO, no global. Antes se aplicaba a todo
   // Express y bloqueaba /.well-known/agent-card.json y /a2a/v1, que tienen su
   // propio esquema de autenticación (Bearer por token A2A) o son públicos por spec.
-  for (const prefijo of ['/api/admin', '/api/channels', '/api/a2a', '/api/escalations', '/api/reminders', '/api/budgets']) {
+  for (const prefijo of ['/api/admin', '/api/channels', '/api/a2a', '/api/escalations', '/api/reminders', '/api/tasks', '/api/budgets']) {
     app.use(prefijo, adminGuard);
   }
 
@@ -216,8 +217,60 @@ export default function createAdminRoutes() {
   });
 
   // ─── Recordatorios programados ───────────────────────────────────────────
+  /** Compatibilidad: los recordatorios ahora son tareas de una vez. */
   app.get('/api/reminders', (_req, res) => {
-    res.json({ reminders: sqliteReminderService.getPendingReminders() });
+    const reminders = scheduledTasksService.list()
+      .filter((t) => t.kind === 'once' && t.status === 'active')
+      .map((t) => ({ id: t.id, target_time: t.run_at, message: t.message, status: 'pending', created_at: t.created_at }));
+    res.json({ reminders });
+  });
+
+  // ─── Tareas programadas ──────────────────────────────────────────────────
+  app.get('/api/tasks', (_req, res) => {
+    res.json({ tasks: scheduledTasksService.list() });
+  });
+
+  app.post('/api/tasks', (req, res) => {
+    try {
+      const { message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr } = req.body || {};
+      if (!message || typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Falta el mensaje o instrucción' });
+      if (!kind) return res.status(400).json({ error: 'Falta el tipo de tarea (kind)' });
+      const tarea = scheduledTasksService.create({ message, autonomous: !!autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr });
+      res.status(201).json({ status: 'success', task: tarea });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/tasks/:id', (req, res) => {
+    try {
+      const tarea = scheduledTasksService.update(req.params.id, req.body || {});
+      if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' });
+      res.json({ status: 'success', task: tarea });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/tasks/:id', (req, res) => {
+    const ok = scheduledTasksService.delete(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Tarea no encontrada' });
+    res.json({ status: 'success' });
+  });
+
+  app.post('/api/tasks/:id/run', async (req, res) => {
+    try {
+      const run = await scheduledTasksService.runNow(req.params.id);
+      if (!run) return res.status(404).json({ error: 'Tarea no encontrada' });
+      res.json({ status: 'success', run });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/tasks/:id/runs', (req, res) => {
+    const limit = parseInt((req.query.limit as string) || '20', 10);
+    res.json({ runs: scheduledTasksService.runs(req.params.id, limit) });
   });
 
   // ─── Presupuestos por canal ──────────────────────────────────────────────
