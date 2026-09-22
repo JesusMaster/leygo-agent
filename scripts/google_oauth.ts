@@ -16,13 +16,13 @@ import { google } from 'googleapis';
 import readline from 'node:readline';
 
 export const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/calendar',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/chat.spaces.readonly',
-  'https://www.googleapis.com/auth/chat.messages',
+  // Totales por producto: cubren todo lo que el proyecto usa hoy y lo que agregue después
+  'https://mail.google.com/',                              // Gmail completo
+  'https://www.googleapis.com/auth/calendar',              // Calendar completo
+  'https://www.googleapis.com/auth/drive',                 // Drive completo
+  // Chat no tiene scope total: hay que pedir los cuatro
+  'https://www.googleapis.com/auth/chat.spaces',           // listar y encontrar espacios/DMs
+  'https://www.googleapis.com/auth/chat.messages',         // leer y enviar mensajes
   'https://www.googleapis.com/auth/chat.memberships.readonly',   // participantes de los DMs (chat_find_dm, nombres en la lista)
   'https://www.googleapis.com/auth/chat.users.readstate.readonly', // "hasta dónde leí" (mensajes sin leer)
 ];
