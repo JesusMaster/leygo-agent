@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskRun, ScheduledTaskChannel } from '../database/sqlite.service.js';
+import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskRun, ScheduledTaskChannel, TaskDelivery } from '../database/sqlite.service.js';
 import { telegramBotService } from './telegram_bot.service.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 
@@ -60,10 +60,10 @@ export class ScheduledTasksService {
   public create(input: {
     message: string; autonomous: boolean; kind: ScheduledTaskKind;
     run_at?: number | string | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
-    channel?: ScheduledTaskChannel | null; target?: string | null;
+    channel?: ScheduledTaskChannel | null; target?: string | null; delivery?: TaskDelivery[] | null;
   }): ScheduledTask {
     const base = this.normalizar(input);
-    const entrega = this.normalizarEntrega(input.channel, input.target);
+    const entrega = this.normalizarEntregas(input.delivery, input.channel, input.target);
     const id = Math.random().toString(36).substring(2, 9);
     const tarea = sqliteReminderService.createScheduledTask({
       id, message: input.message.trim(), autonomous: input.autonomous ? 1 : 0, kind: input.kind,
@@ -76,7 +76,7 @@ export class ScheduledTasksService {
   public update(id: string, cambios: Partial<{
     message: string; autonomous: boolean; kind: ScheduledTaskKind;
     run_at: number | string | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
-    status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null;
+    status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null; delivery: TaskDelivery[];
   }>): ScheduledTask | null {
     const actual = sqliteReminderService.getScheduledTask(id);
     if (!actual) return null;
@@ -91,10 +91,11 @@ export class ScheduledTasksService {
     });
 
     const status = cambios.status || (actual.status === 'done' ? 'active' : actual.status);
-    const entrega = this.normalizarEntrega(
-      cambios.channel !== undefined ? cambios.channel : actual.channel,
-      cambios.target !== undefined ? cambios.target : actual.target,
-    );
+    const entrega = cambios.delivery !== undefined
+      ? this.normalizarEntregas(cambios.delivery)
+      : (cambios.channel !== undefined || cambios.target !== undefined)
+        ? this.normalizarEntregas(null, cambios.channel ?? actual.channel, cambios.target !== undefined ? cambios.target : actual.target)
+        : this.normalizarEntregas(actual.delivery);
     const actualizada = sqliteReminderService.updateScheduledTask(id, {
       message: cambios.message !== undefined ? cambios.message.trim() : actual.message,
       autonomous: cambios.autonomous !== undefined ? (cambios.autonomous ? 1 : 0) : actual.autonomous,
@@ -136,14 +137,16 @@ export class ScheduledTasksService {
     let result = '';
 
     try {
+      let fallos: string[] = [];
       if (t.autonomous) {
         if (!this.runAgent) throw new Error('El agente no está disponible para ejecutar tareas autónomas.');
         result = await this.runAgent(t.message, t.id);
-        await this.entregar(t, result, true);
+        fallos = await this.entregar(t, result, true);
       } else {
         result = t.message;
-        await this.entregar(t, result, false);
+        fallos = await this.entregar(t, result, false);
       }
+      if (fallos.length) result += `\n\n⚠️ No se pudo entregar por: ${fallos.join(' · ')}`;
     } catch (err: any) {
       status = 'error';
       result = err?.message || String(err);
@@ -171,61 +174,84 @@ export class ScheduledTasksService {
   // ─── Entrega ─────────────────────────────────────────────────────────────
 
   /**
-   * Manda el resultado por el canal de la tarea. `autonoma` distingue el encabezado:
-   * el resultado del agente va con la instrucción de contexto; un recordatorio va solo.
+   * Entrega el resultado por TODOS los destinos de la tarea. Se manda solo el
+   * contenido: la instrucción de la tarea no viaja en el mensaje (el que la
+   * programó ya sabe qué pidió). Falla solo si fallan todos los destinos; si
+   * falla alguno, el error queda anotado en el resultado de la corrida.
    */
-  private async entregar(t: ScheduledTask, texto: string, autonoma: boolean): Promise<void> {
-    const encabezado = autonoma ? `Tarea programada: ${t.message.slice(0, 120)}${t.message.length > 120 ? '…' : ''}` : 'Recordatorio';
+  private async entregar(t: ScheduledTask, texto: string, autonoma: boolean): Promise<string[]> {
+    const destinos = t.delivery?.length ? t.delivery : [{ channel: t.channel || 'telegram', target: t.target }];
+    const fallos: string[] = [];
 
-    switch (t.channel || 'telegram') {
+    for (const d of destinos) {
+      try {
+        await this.entregarEn(d, texto, autonoma);
+      } catch (err: any) {
+        fallos.push(`${this.nombreCanal(d.channel)}: ${err?.message || err}`);
+      }
+    }
+    if (fallos.length === destinos.length) throw new Error(`No se pudo entregar por ningún canal — ${fallos.join(' · ')}`);
+    return fallos;
+  }
+
+  private async entregarEn(d: TaskDelivery, texto: string, autonoma: boolean): Promise<void> {
+    switch (d.channel) {
       case 'chat': {
-        if (!t.target) throw new Error('La tarea no tiene un espacio de Google Chat de destino.');
+        if (!d.target) throw new Error('falta el espacio de Google Chat');
         const { googleService } = await import('./google.service.js');
-        const cuerpo = autonoma ? `*${encabezado}*\n\n${texto}` : `⏰ *Recordatorio*\n\n${texto}`;
-        await googleService.sendChatMessage(t.target, messageFormatter.formatForGoogleChat(cuerpo));
+        await googleService.sendChatMessage(d.target, messageFormatter.formatForGoogleChat(autonoma ? texto : `⏰ ${texto}`));
         return;
       }
       case 'email': {
-        if (!t.target) throw new Error('La tarea no tiene un correo de destino.');
+        if (!d.target) throw new Error('falta el correo de destino');
         const { googleService } = await import('./google.service.js');
-        const asunto = autonoma ? `[Yisus] ${t.message.slice(0, 70)}${t.message.length > 70 ? '…' : ''}` : `[Yisus] Recordatorio: ${t.message.slice(0, 60)}${t.message.length > 60 ? '…' : ''}`;
-        const borrador = await googleService.createDraft(t.target, asunto, texto);
+        const asunto = autonoma ? `[Yisus] ${primeraLinea(texto)}` : `[Yisus] Recordatorio: ${primeraLinea(texto)}`;
+        const borrador = await googleService.createDraft(d.target, asunto, texto);
         await googleService.sendDraft(borrador.draftId!);
         return;
       }
       case 'buzz': {
         const { nostrGatewayService } = await import('./nostr_gateway.service.js');
-        const plano = messageFormatter.formatForPlainText(autonoma ? `${encabezado}\n\n${texto}` : `⏰ Recordatorio: ${texto}`);
-        const r = await nostrGatewayService.publishToChannel(plano, t.target || undefined);
-        if (r.status !== 'success') throw new Error(r.message || 'No se pudo publicar en Buzz.');
+        const r = await nostrGatewayService.publishToChannel(messageFormatter.formatForPlainText(autonoma ? texto : `⏰ ${texto}`), d.target || undefined);
+        if (r.status !== 'success') throw new Error(r.message || 'no se pudo publicar');
         return;
       }
       case 'telegram':
-      default: {
-        const html = autonoma
-          ? `🤖 <b>TAREA PROGRAMADA</b>\n<i>${escapar(t.message.slice(0, 120))}${t.message.length > 120 ? '…' : ''}</i>\n\n${formatear(texto)}`
-          : `⏰ <b>RECORDATORIO:</b>\n\n📌 ${escapar(texto)}`;
-        await telegramBotService.sendDirectMessage(html, { parseMode: 'HTML' });
-      }
+      default:
+        await telegramBotService.sendDirectMessage(autonoma ? formatear(texto) : `⏰ ${escapar(texto)}`, { parseMode: 'HTML' });
     }
   }
 
-  private normalizarEntrega(channel?: ScheduledTaskChannel | null, target?: string | null): { channel: ScheduledTaskChannel; target: string | null } {
-    const c = (channel || 'telegram') as ScheduledTaskChannel;
-    const tg = (target || '').trim() || null;
-    switch (c) {
-      case 'telegram': return { channel: c, target: null };
-      case 'chat':
-        if (!tg || !/^spaces\/[A-Za-z0-9_-]+$/.test(tg)) throw new Error('Para Google Chat indica el espacio de destino (spaces/…).');
-        return { channel: c, target: tg };
-      case 'email':
-        if (!tg || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tg)) throw new Error('Para email indica un correo de destino válido.');
-        return { channel: c, target: tg };
-      case 'buzz':
-        return { channel: c, target: tg }; // sin destino usa el canal configurado en el bridge
-      default:
-        throw new Error(`Canal desconocido: ${channel}`);
+  private nombreCanal(c: ScheduledTaskChannel): string {
+    return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email' }[c] || c;
+  }
+
+  /** Valida y normaliza la lista de destinos; acepta también el par channel/target antiguo. */
+  private normalizarEntregas(delivery?: TaskDelivery[] | null, channel?: ScheduledTaskChannel | null, target?: string | null): { channel: ScheduledTaskChannel; target: string | null; delivery: TaskDelivery[] } {
+    let lista: TaskDelivery[] = Array.isArray(delivery) && delivery.length ? delivery : [{ channel: channel || 'telegram', target }];
+    const vistos = new Set<string>();
+    const limpia: TaskDelivery[] = [];
+    for (const d of lista) {
+      const c = (d?.channel || 'telegram') as ScheduledTaskChannel;
+      const tg = (d?.target || '').trim() || null;
+      switch (c) {
+        case 'telegram': break;
+        case 'chat':
+          if (!tg || !/^spaces\/[A-Za-z0-9_-]+$/.test(tg)) throw new Error('Para Google Chat indica el espacio de destino (spaces/…).');
+          break;
+        case 'email':
+          if (!tg || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tg)) throw new Error('Para email indica un correo de destino válido.');
+          break;
+        case 'buzz': break;
+        default: throw new Error(`Canal desconocido: ${c}`);
+      }
+      const clave = `${c}|${c === 'telegram' ? '' : tg || ''}`;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
+      limpia.push({ channel: c, target: c === 'telegram' ? null : tg });
     }
+    if (!limpia.length) throw new Error('La tarea necesita al menos un canal de entrega.');
+    return { channel: limpia[0].channel, target: limpia[0].target ?? null, delivery: limpia };
   }
 
   // ─── Programación ────────────────────────────────────────────────────────
@@ -326,12 +352,16 @@ export class ScheduledTasksService {
   }
 
   private describirCanal(t: ScheduledTask): string {
-    switch (t.channel || 'telegram') {
-      case 'chat': return `por Google Chat (${t.target})`;
-      case 'email': return `por email a ${t.target}`;
-      case 'buzz': return t.target ? `por Buzz (${t.target.slice(0, 12)}…)` : 'por Buzz';
-      default: return 'por Telegram';
-    }
+    const destinos = t.delivery?.length ? t.delivery : [{ channel: t.channel || 'telegram', target: t.target }];
+    const partes = destinos.map((d) => {
+      switch (d.channel) {
+        case 'chat': return 'Google Chat';
+        case 'email': return `email a ${d.target}`;
+        case 'buzz': return 'Buzz';
+        default: return 'Telegram';
+      }
+    });
+    return `por ${partes.join(' + ')}`;
   }
 
   private describirHorario(t: ScheduledTask): string {
@@ -342,6 +372,11 @@ export class ScheduledTasksService {
       case 'cron': return `Cron: ${t.cron_expr}`;
     }
   }
+}
+
+function primeraLinea(t: string): string {
+  const l = (t || '').split('\n').map((x) => x.replace(/^[#*>\-\s]+/, '').trim()).find(Boolean) || 'Resultado';
+  return l.length > 70 ? l.slice(0, 70) + '…' : l;
 }
 
 function escapar(s: string): string {

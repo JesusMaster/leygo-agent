@@ -55,10 +55,11 @@ export interface Reminder { id: string; target_time: number; message: string; st
 
 export type TaskKind = 'once' | 'interval' | 'daily' | 'cron';
 export type TaskChannel = 'telegram' | 'chat' | 'buzz' | 'email';
+export interface TaskDelivery { channel: TaskChannel; target?: string | null; }
 export interface ScheduledTask {
   id: string; message: string; autonomous: number; kind: TaskKind;
   run_at: number | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
-  status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null;
+  status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null; delivery: TaskDelivery[];
   created_at: number; updated_at: number;
   last_run_at: number | null; next_run_at: number | null; descripcion: string;
 }
@@ -70,7 +71,7 @@ export interface TaskRun {
 export type TaskInput = {
   message: string; autonomous: boolean; kind: TaskKind;
   run_at?: string | number | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
-  channel?: TaskChannel; target?: string | null;
+  channel?: TaskChannel; target?: string | null; delivery?: TaskDelivery[];
 };
 
 export interface CustomWebhook {

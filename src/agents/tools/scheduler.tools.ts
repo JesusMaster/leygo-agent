@@ -84,8 +84,10 @@ export const scheduleTaskTool = new FunctionTool({
     intervalMinutes: z.number().optional().describe('Para interval: minutos entre ejecuciones.'),
     timeOfDay: z.string().optional().describe('Para daily: hora "HH:MM" en la zona de Jesús (America/Santiago).'),
     cronExpr: z.string().optional().describe('Para cron: expresión de 5 campos, ej "0 9 * * 1-5".'),
-    channel: z.enum(['telegram', 'chat', 'buzz', 'email']).optional().describe('Por dónde entregar el resultado. Por defecto telegram.'),
-    target: z.string().optional().describe('Destino según el canal: espacio de Google Chat (spaces/…, búscalo con chat_find_dm o chat_list_spaces), correo para email, o canal de Buzz (opcional).'),
+    delivery: z.array(z.object({
+      channel: z.enum(['telegram', 'chat', 'buzz', 'email']),
+      target: z.string().optional().describe('Espacio de Google Chat (spaces/…, búscalo con chat_find_dm o chat_list_spaces), correo para email, o canal de Buzz (opcional). Telegram no lleva.'),
+    })).optional().describe('Uno o más destinos de entrega. Por defecto solo Telegram. Ej: [{channel:"telegram"},{channel:"buzz"}].'),
   }) as any,
   execute: async (args: any) => {
     try {
@@ -97,8 +99,7 @@ export const scheduleTaskTool = new FunctionTool({
         interval_minutes: args.intervalMinutes,
         time_of_day: args.timeOfDay,
         cron_expr: args.cronExpr,
-        channel: args.channel,
-        target: args.target,
+        delivery: args.delivery,
       });
       const proxima = t.next_run_at ? new Date(t.next_run_at).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : 'sin calcular';
       return { status: 'success', result: `Tarea [${t.id}] programada (${t.autonomous ? 'acción del agente' : 'recordatorio'}). Próxima ejecución: ${proxima}.`, data: t };

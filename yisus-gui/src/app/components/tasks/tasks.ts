@@ -1,6 +1,7 @@
-import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, ScheduledTask, TaskRun, TaskKind, TaskInput, TaskChannel, TaskDestinos } from '../../services/api.service';
+import { ApiService, ScheduledTask, TaskRun, TaskKind, TaskInput, TaskChannel, TaskDelivery } from '../../services/api.service';
+import { DeliveryPickerComponent } from './delivery-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -11,7 +12,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
  */
 @Component({
   selector: 'app-tasks',
-  imports: [FormsModule, FriendlyDatePipe],
+  imports: [FormsModule, FriendlyDatePipe, DeliveryPickerComponent],
   template: `
     <div class="page">
       <div class="page-head">
@@ -38,7 +39,9 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <span class="tb kind"><i class="ph" [class]="'ph ' + iconoTipo(t.kind)"></i> {{ etiquetaTipo(t.kind) }}</span>
               @if (t.autonomous) { <span class="tb agent"><i class="ph ph-robot"></i> Acción de agente</span> }
               @else { <span class="tb plain"><i class="ph ph-bell"></i> Recordatorio</span> }
-              <span class="tb chan" [title]="t.target || ''"><i class="ph" [class]="'ph ' + iconoCanal(t.channel)"></i> {{ etiquetaCanal(t.channel) }}</span>
+              @for (d of t.delivery; track d.channel + (d.target || '')) {
+                <span class="tb chan" [title]="d.target || ''"><i class="ph" [class]="'ph ' + iconoCanal(d.channel)"></i> {{ etiquetaCanal(d.channel) }}</span>
+              }
               @if (t.status === 'paused') { <span class="badge warn">PAUSADA</span> }
               @if (t.status === 'done') { <span class="badge dim">EJECUTADA</span> }
             </div>
@@ -49,35 +52,8 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
                 @if (editando() === t.id) {
                   <textarea class="task-edit" rows="3" [(ngModel)]="editForm.message"></textarea>
-                  <div class="dos-col" style="margin-top:12px">
-                    <label class="field">
-                      <span>Entregar por</span>
-                      <select [(ngModel)]="editForm.channel" (ngModelChange)="alCambiarCanal(editForm)">
-                        <option value="telegram">Telegram</option>
-                        <option value="chat">Google Chat</option>
-                        <option value="buzz">Buzz (Nostr)</option>
-                        <option value="email">Email</option>
-                      </select>
-                    </label>
-                    @if (editForm.channel !== 'telegram') {
-                      <label class="field">
-                        <span>{{ etiquetaDestino(editForm.channel) }}</span>
-                        @if (editForm.channel === 'chat' && destinos()?.chat?.length) {
-                          <select [(ngModel)]="editForm.target">
-                            <option value="">Elige un espacio…</option>
-                            @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
-                          </select>
-                        } @else if (editForm.channel === 'buzz' && destinos()?.buzz?.length) {
-                          <select [(ngModel)]="editForm.target">
-                            <option value="">Canal por defecto del bridge</option>
-                            @for (c of destinos()!.buzz; track c) { <option [value]="c">{{ c }}</option> }
-                          </select>
-                        } @else {
-                          <input [type]="editForm.channel === 'email' ? 'email' : 'text'" [(ngModel)]="editForm.target" [placeholder]="placeholderDestino(editForm.channel)" />
-                        }
-                      </label>
-                    }
-                  </div>
+                  <div class="field" style="margin-top:12px"><span>Entregar por</span></div>
+                  <app-delivery-picker [value]="editForm.delivery" (valueChange)="editForm.delivery = $event" />
                   <div class="row" style="margin-top:12px">
                     <button class="btn-secondary" (click)="editando.set(null)">Cancelar</button>
                     <button class="btn-primary" [disabled]="!edicionValida(t)" (click)="guardarEdicion(t)">Guardar</button>
@@ -94,16 +70,16 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               </div>
 
               <div class="task-actions">
-                <button class="ta run" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
-                  <i class="ph" [class.ph-play-circle]="ejecutando() !== t.id" [class.ph-circle-notch]="ejecutando() === t.id" [class.spin]="ejecutando() === t.id"></i>
+                <button class="ta ejecutar" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
+                  @if (ejecutando() === t.id) { <span class="spinner"></span> } @else { <i class="ph ph-play"></i> }
                 </button>
                 <button class="ta hist" [class.on]="historial() === t.id" title="Historial de ejecuciones" (click)="toggleHistorial(t)"><i class="ph ph-clock-counter-clockwise"></i></button>
                 @if (t.status !== 'done') {
                   <button class="ta pause" [title]="t.status === 'paused' ? 'Reanudar' : 'Pausar'" (click)="alternar(t)">
-                    <i class="ph" [class.ph-pause]="t.status === 'active'" [class.ph-play]="t.status === 'paused'"></i>
+                    <i class="ph" [class.ph-pause]="t.status === 'active'" [class.ph-play-circle]="t.status === 'paused'"></i>
                   </button>
                 }
-                <button class="ta edit" title="Editar instrucción" (click)="editar(t)"><i class="ph ph-pencil-simple-line"></i></button>
+                <button class="ta edit" title="Editar" (click)="editar(t)"><i class="ph ph-pencil-simple"></i></button>
                 <button class="ta del" title="Eliminar" (click)="eliminar(t)"><i class="ph ph-trash"></i></button>
               </div>
             </div>
@@ -116,19 +92,19 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                 @else {
                   <div class="runs">
                     @for (r of runs(); track r.id + '-' + r.started_at) {
-                      <div class="run" [class.err]="r.status === 'error'">
-                        <div class="run-head">
+                      <div class="corrida" [class.err]="r.status === 'error'">
+                        <div class="corrida-head">
                           @if (r.status === 'success') { <span class="badge ok"><i class="ph ph-check-circle"></i> Éxito</span> }
                           @else { <span class="badge danger"><i class="ph ph-x-circle"></i> Error</span> }
-                          <span class="run-meta"><i class="ph" [class.ph-alarm]="r.trigger === 'scheduled'" [class.ph-hand-pointing]="r.trigger === 'manual'"></i> {{ r.trigger === 'manual' ? 'Manual' : 'Programado' }}</span>
-                          <span class="run-meta">{{ r.started_at | friendlyDate }}</span>
-                          <span class="run-meta dim">{{ r.duration_ms }}ms</span>
+                          <span class="corrida-meta"><i class="ph" [class.ph-alarm]="r.trigger === 'scheduled'" [class.ph-hand-pointing]="r.trigger === 'manual'"></i> {{ r.trigger === 'manual' ? 'Manual' : 'Programado' }}</span>
+                          <span class="corrida-meta">{{ r.started_at | friendlyDate }}</span>
+                          <span class="corrida-meta dim">{{ r.duration_ms }}ms</span>
                         </div>
-                        <div class="run-label">
+                        <div class="corrida-label">
                           <span>Resultado</span>
                           <button class="btn-link" (click)="toggleVer(r)">{{ abierto(r) ? 'Plegar' : 'Ver todo' }}</button>
                         </div>
-                        <pre class="run-pre" [class.open]="abierto(r)">{{ r.result || '—' }}</pre>
+                        <pre class="corrida-pre" [class.open]="abierto(r)">{{ r.result || '—' }}</pre>
                       </div>
                     }
                   </div>
@@ -189,37 +165,8 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <small class="hint">minuto · hora · día del mes · mes · día de la semana. <code>0 9 * * 1-5</code> = lunes a viernes a las 9:00.</small>
             }
 
-            <div class="dos-col" style="margin-top:14px">
-              <label class="field">
-                <span>Entregar por</span>
-                <select [(ngModel)]="form.channel" (ngModelChange)="alCambiarCanal(form)">
-                  <option value="telegram">Telegram</option>
-                  <option value="chat">Google Chat</option>
-                  <option value="buzz">Buzz (Nostr)</option>
-                  <option value="email">Email</option>
-                </select>
-              </label>
-              @if (form.channel !== 'telegram') {
-                <label class="field">
-                  <span>{{ etiquetaDestino(form.channel) }}</span>
-                  @if (form.channel === 'chat' && destinos()?.chat?.length) {
-                    <select [(ngModel)]="form.target">
-                      <option value="">Elige un espacio…</option>
-                      @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
-                    </select>
-                  } @else if (form.channel === 'buzz' && destinos()?.buzz?.length) {
-                    <select [(ngModel)]="form.target">
-                      <option value="">Canal por defecto del bridge</option>
-                      @for (c of destinos()!.buzz; track c) { <option [value]="c">{{ c }}</option> }
-                    </select>
-                  } @else {
-                    <input [type]="form.channel === 'email' ? 'email' : 'text'" [(ngModel)]="form.target" [placeholder]="placeholderDestino(form.channel)" />
-                  }
-                </label>
-              }
-            </div>
-            @if (form.channel === 'chat' && cargandoDestinos()) { <small class="hint">Cargando tus espacios de Google Chat…</small> }
-            @if (form.channel !== 'telegram' && destinos()?.errores?.length) { <small class="hint warn">{{ destinos()!.errores.join(' · ') }}</small> }
+            <label class="field" style="margin-top:14px"><span>Entregar por (uno o varios)</span></label>
+            <app-delivery-picker [value]="form.delivery" (valueChange)="form.delivery = $event" />
           </div>
           <div class="modal-foot">
             <button class="btn-secondary" (click)="cerrarModal()">Cancelar</button>
@@ -250,35 +197,35 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .task-when { margin-top: 12px; color: var(--text-dim); font-size: 13.5px; }
     .task-when strong { color: var(--text-main); font-weight: 500; }
 
-    .task-actions { display: flex; gap: 4px; flex: 0 0 auto; padding-top: 2px; }
-    .ta { width: 38px; height: 38px; border-radius: 9px; border: 0; background: transparent; cursor: pointer; font-size: 20px; display: grid; place-items: center; transition: background .12s; }
-    .ta:hover { background: var(--bg-input); }
-    .ta:disabled { opacity: .5; cursor: default; }
-    .ta.run { color: var(--ok); }
-    .ta.hist { color: var(--text-dim); }
-    .ta.hist.on { background: var(--bg-input); color: var(--accent-primary); }
+    .task-actions { display: flex; gap: 2px; flex: 0 0 auto; padding: 2px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border-light); align-self: flex-start; }
+    .ta { width: 34px; height: 34px; border-radius: 8px; border: 0; background: transparent; cursor: pointer; font-size: 18px; display: grid; place-items: center; color: var(--text-dim); transition: background .12s, color .12s; outline: none; }
+    .ta:hover { background: var(--bg-card); }
+    .ta:focus-visible { box-shadow: 0 0 0 2px var(--accent-primary) inset; }
+    .ta:disabled { cursor: default; }
+    .ta.ejecutar { color: var(--ok); }
+    .ta.hist.on { background: var(--bg-card); color: var(--accent-primary); }
     .ta.pause { color: var(--warn); }
     .ta.edit { color: var(--accent-primary); }
     .ta.del { color: var(--danger); }
-    .spin { animation: spin 1s linear infinite; }
+    .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(16,185,129,.25); border-top-color: var(--ok); animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .task-history { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-light); }
     .th-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; margin-bottom: 12px; }
     .th-title i { color: var(--accent-primary); }
     .runs { max-height: 520px; overflow: auto; padding-right: 6px; }
-    .run { border: 1px solid var(--border-light); border-left: 3px solid var(--ok); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: var(--bg-input); }
-    .run.err { border-left-color: var(--danger); }
-    .run-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-    .run-head .badge i { font-size: 13px; }
-    .run-meta { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text-dim); }
-    .run-meta.dim { opacity: .7; font-size: 12px; }
-    .run-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+    .corrida { border: 1px solid var(--border-light); border-left: 3px solid var(--ok); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: var(--bg-input); }
+    .corrida.err { border-left-color: var(--danger); }
+    .corrida-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .corrida-head .badge i { font-size: 13px; }
+    .corrida-meta { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text-dim); }
+    .corrida-meta.dim { opacity: .7; font-size: 12px; }
+    .corrida-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
     .btn-link { background: none; border: 0; padding: 0; color: var(--accent-primary); cursor: pointer; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
     .btn-link:hover { text-decoration: underline; }
-    .run-pre { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border-light); font-family: inherit; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text-main); max-height: 150px; overflow: hidden; position: relative; }
-    .run-pre:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, var(--bg-card)); }
-    .run-pre.open { max-height: none; overflow: auto; }
+    .corrida-pre { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border-light); font-family: inherit; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text-main); max-height: 150px; overflow: hidden; position: relative; }
+    .corrida-pre:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, var(--bg-card)); }
+    .corrida-pre.open { max-height: none; overflow: auto; }
 
     .empty-state { text-align: center; padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .empty-state > i { font-size: 40px; color: var(--accent-primary); }
@@ -303,15 +250,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 export class TasksComponent {
   private api = inject(ApiService);
   private toast = inject(ToastService);
-  // Zoneless: `form` y `editForm` son objetos planos; cuando un callback async los toca hay que avisar.
-  private cdr = inject(ChangeDetectorRef);
 
   items = signal<ScheduledTask[]>([]);
   cargado = signal(false);
   editando = signal<string | null>(null);
-  editForm: { message: string; channel: TaskChannel; target: string } = { message: '', channel: 'telegram', target: '' };
-  destinos = signal<TaskDestinos | null>(null);
-  cargandoDestinos = signal(false);
+  editForm: { message: string; delivery: TaskDelivery[] } = { message: '', delivery: [{ channel: 'telegram' }] };
   ejecutando = signal<string | null>(null);
   historial = signal<string | null>(null);
   runs = signal<TaskRun[] | null>(null);
@@ -319,7 +262,7 @@ export class TasksComponent {
 
   modal = signal(false);
   guardando = signal(false);
-  form: { message: string; autonomous: boolean; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; channel: TaskChannel; target: string } = this.formVacio();
+  form: { message: string; autonomous: boolean; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; delivery: TaskDelivery[] } = this.formVacio();
 
   constructor() { this.load(); }
 
@@ -338,33 +281,6 @@ export class TasksComponent {
   }
   etiquetaCanal(c: TaskChannel) { return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email' }[c || 'telegram']; }
   iconoCanal(c: TaskChannel) { return { telegram: 'ph-telegram-logo', chat: 'ph-chats-circle', buzz: 'ph-broadcast', email: 'ph-envelope-simple' }[c || 'telegram']; }
-  etiquetaDestino(c: TaskChannel) { return { telegram: '', chat: 'Espacio de Google Chat', buzz: 'Canal de Buzz (opcional)', email: 'Correo de destino' }[c]; }
-  placeholderDestino(c: TaskChannel) { return { telegram: '', chat: 'spaces/AAAA…', buzz: 'id del canal, o vacío para el configurado', email: 'alguien@dcanje.com' }[c]; }
-
-  /** Al elegir Chat o Buzz se cargan los destinos una sola vez; email propone tu propio correo. */
-  alCambiarCanal(f: { channel: TaskChannel; target: string }) {
-    f.target = '';
-    if (f.channel === 'email' && this.destinos()?.email) f.target = this.destinos()!.email!;
-    if (f.channel !== 'telegram') this.cargarDestinos(() => { if (f.channel === 'email' && !f.target && this.destinos()?.email) f.target = this.destinos()!.email!; });
-  }
-  private cargarDestinos(despues?: () => void) {
-    if (this.destinos()) { despues?.(); return; }
-    if (this.cargandoDestinos()) return;
-    this.cargandoDestinos.set(true);
-    this.api.getTaskDestinos().subscribe({
-      next: (d) => { this.destinos.set(d); this.cargandoDestinos.set(false); despues?.(); this.cdr.markForCheck(); },
-      error: () => { this.cargandoDestinos.set(false); this.destinos.set({ chat: [], buzz: [], email: null, errores: ['No se pudieron cargar los destinos'] }); },
-    });
-  }
-  destinoValido(channel: TaskChannel, target: string): boolean {
-    switch (channel) {
-      case 'telegram': return true;
-      case 'buzz': return true;
-      case 'chat': return /^spaces\/[A-Za-z0-9_-]+$/.test(target.trim());
-      case 'email': return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target.trim());
-    }
-  }
-
   etiquetaTipo(k: TaskKind) { return { once: 'Una vez', interval: 'Recurrente', daily: 'Diario', cron: 'Cron' }[k]; }
   iconoTipo(k: TaskKind) { return { once: 'ph-calendar-blank', interval: 'ph-arrows-clockwise', daily: 'ph-sun', cron: 'ph-code' }[k]; }
   fecha(ms: number) { return new Date(ms).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' }); }
@@ -375,7 +291,7 @@ export class TasksComponent {
     this.api.runTask(t.id).subscribe({
       next: (r) => {
         this.ejecutando.set(null);
-        r.run.status === 'success' ? this.toast.ok('Ejecutada. El resultado fue a Telegram.') : this.toast.error(`Falló: ${r.run.result?.slice(0, 120)}`);
+        r.run.status === 'success' ? this.toast.ok('Ejecutada. El resultado se entregó por ' + t.delivery.map((d) => this.etiquetaCanal(d.channel)).join(' + ') + '.') : this.toast.error(`Falló: ${r.run.result?.slice(0, 120)}`);
         this.load();
         if (this.historial() === t.id) this.cargarRuns(t.id);
       },
@@ -392,18 +308,18 @@ export class TasksComponent {
   }
 
   editar(t: ScheduledTask) {
-    this.editForm = { message: t.message, channel: t.channel || 'telegram', target: t.target || '' };
-    if (this.editForm.channel !== 'telegram') this.cargarDestinos();
+    this.editForm = { message: t.message, delivery: (t.delivery || []).map((d) => ({ ...d })) };
     this.editando.set(t.id);
   }
   edicionValida(t: ScheduledTask): boolean {
     const f = this.editForm;
-    if (!f.message.trim() || !this.destinoValido(f.channel, f.target)) return false;
-    return f.message.trim() !== t.message || f.channel !== (t.channel || 'telegram') || (f.target.trim() || null) !== (t.target || null);
+    if (!f.message.trim() || !DeliveryPickerComponent.valida(f.delivery)) return false;
+    return f.message.trim() !== t.message || JSON.stringify(this.limpia(f.delivery)) !== JSON.stringify(this.limpia(t.delivery || []));
   }
+  private limpia(d: TaskDelivery[]) { return d.map((x) => ({ channel: x.channel, target: x.channel === 'telegram' ? null : ((x.target || '').trim() || null) })); }
   guardarEdicion(t: ScheduledTask) {
     const f = this.editForm;
-    this.api.updateTask(t.id, { message: f.message.trim(), channel: f.channel, target: f.channel === 'telegram' ? null : (f.target.trim() || null) }).subscribe({
+    this.api.updateTask(t.id, { message: f.message.trim(), delivery: this.limpia(f.delivery) }).subscribe({
       next: () => { this.editando.set(null); this.load(); this.toast.ok('Instrucción actualizada'); },
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
     });
@@ -432,13 +348,13 @@ export class TasksComponent {
   abierto(r: TaskRun) { return this.abiertos.has(`${r.id}-${r.started_at}`); }
 
   // ─── Crear ───────────────────────────────────────────────────────────
-  private formVacio() { return { message: '', autonomous: false, kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', channel: 'telegram' as TaskChannel, target: '' }; }
+  private formVacio() { return { message: '', autonomous: false, kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', delivery: [{ channel: 'telegram' as TaskChannel }] as TaskDelivery[] }; }
   abrirNueva() { this.form = this.formVacio(); this.modal.set(true); }
   cerrarModal() { if (!this.guardando()) this.modal.set(false); }
 
   formValido(): boolean {
     const f = this.form;
-    if (!f.message.trim() || !this.destinoValido(f.channel, f.target)) return false;
+    if (!f.message.trim() || !DeliveryPickerComponent.valida(f.delivery)) return false;
     switch (f.kind) {
       case 'once': return !!f.run_at && new Date(f.run_at).getTime() > Date.now();
       case 'interval': return !!f.interval_minutes && f.interval_minutes >= 1;
@@ -449,7 +365,7 @@ export class TasksComponent {
 
   crear() {
     const f = this.form;
-    const datos: TaskInput = { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind, channel: f.channel, target: f.channel === 'telegram' ? null : (f.target.trim() || null) };
+    const datos: TaskInput = { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind, delivery: this.limpia(f.delivery) };
     if (f.kind === 'once') datos.run_at = new Date(f.run_at).toISOString();
     if (f.kind === 'interval') datos.interval_minutes = f.interval_minutes;
     if (f.kind === 'daily') datos.time_of_day = f.time_of_day;
