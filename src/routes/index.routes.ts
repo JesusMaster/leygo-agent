@@ -8,9 +8,16 @@ import { telegramBotService } from '../services/telegram_bot.service.js';
 import { webhookService } from '../services/webhook.service.js';
 import { customWebhookService } from '../services/custom_webhook.service.js';
 import { tokenTrackerService } from '../services/token_tracker.service.js';
+import { guardRutasInternas } from './admin_guard.js';
 
 export default function createIndexRoutes(runner: Runner, sessionService: RedisSessionService) {
     const app = Router();
+
+    // Antes de cualquier ruta: /run, /run_sse, /api/usage* y la administración de
+    // webhooks estaban abiertas a internet. /run_sse corre el coordinator interno
+    // completo (Gmail, Calendar, Drive), así que cualquiera con la URL podía
+    // manejar la cuenta. La recepción de webhooks externos sigue siendo pública.
+    app.use(guardRutasInternas);
 
     // Webhook de Telegram (Modo Webhook estilo Leygo)
     app.post('/webhook', express.json(), async (req, res) => {

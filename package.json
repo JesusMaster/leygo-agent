@@ -11,7 +11,9 @@
     "sync:obsidian": "tsx scripts/sync_obsidian.ts",
     "sync:meet": "tsx scripts/sync_meet_recordings.ts",
     "sync:context": "tsx scripts/sync_context.ts",
-    "nostr:id": "tsx scripts/nostr_identity.ts"
+    "nostr:id": "tsx scripts/nostr_identity.ts",
+    "check:rutas": "tsx scripts/verificar_rutas_publicas.ts",
+    "check:permisos": "tsx scripts/verificar_permisos_a2a.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "^1.2.0",

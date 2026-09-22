@@ -5,30 +5,22 @@ import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
 import { allToolNames, TOOL_GROUPS, expandToolSpec } from '../agents/tool_catalog.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
+import { adminGuard } from './admin_guard.js';
 
 /**
  * Endpoints que consume la GUI (yisus-gui).
  *
  * Protegidos por ADMIN_API_KEY: la GUI la envía en X-Admin-Key. Si la variable no
  * está definida se permite el paso (desarrollo local) pero se avisa fuerte, porque
- * acá se crean y revocan los tokens de A2A.
+ * acá se crean y revocan los tokens de A2A. El guard es el mismo que usa
+ * index.routes.ts, para que no se separen con el tiempo.
  */
-function adminGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const expected = process.env.ADMIN_API_KEY;
-  if (!expected) return next();
-
-  const presented = (req.headers['x-admin-key'] as string) ||
-    (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-
-  if (presented && presented === expected) return next();
-  res.status(401).json({ error: 'No autorizado: falta X-Admin-Key' });
-}
 
 export default function createAdminRoutes() {
   const app = Router();
 
   if (!process.env.ADMIN_API_KEY) {
-    console.warn('⚠️ [Admin] ADMIN_API_KEY no definida: los endpoints de administración quedan SIN autenticación. Defínela antes de exponer el puerto.');
+    console.warn('⚠️ [Admin] ADMIN_API_KEY no definida: /run, /run_sse, /api/usage* y la administración quedan SIN autenticación. Defínela antes de exponer el puerto.');
   }
 
   app.use(express.json());
