@@ -54,9 +54,16 @@ export interface Escalation {
 export interface Reminder { id: string; target_time: number; message: string; status: string; created_at: number; }
 
 export interface CustomWebhook {
-  id: string; title: string; instructions: string; model: string;
-  enabled?: boolean; active?: boolean; created_at?: number; url?: string;
+  id: string; titulo: string; instrucciones: string; modelo: string;
+  paused: number; created_at?: number; updated_at?: number; url?: string;
 }
+
+export interface CustomWebhookLog {
+  id: number; webhook_id: string; payload: string; response: string;
+  status: string; created_at: number; webhook_titulo?: string | null;
+}
+
+export interface WebhookModel { id: string; label: string; provider: 'ollama' | 'gemini'; }
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -149,11 +156,22 @@ export class ApiService {
   }
 
   // ─── Webhooks con IA ──────────────────────────────────────────────────
-  getWebhooks(): Observable<any> { return this.http.get<any>(`${this.baseUrl}/api/webhooks`); }
-  createWebhook(data: { title: string; instructions: string; model: string }): Observable<any> {
+  getWebhooks(): Observable<{ webhooks: CustomWebhook[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks`); }
+  createWebhook(data: { titulo: string; instrucciones: string; modelo: string }): Observable<any> {
     return this.http.post(`${this.baseUrl}/api/webhooks`, data);
   }
-  toggleWebhook(id: string): Observable<any> { return this.http.post(`${this.baseUrl}/api/webhooks/${id}/toggle`, {}); }
+  updateWebhook(id: string, fields: Partial<{ titulo: string; instrucciones: string; modelo: string; paused: number }>): Observable<any> {
+    return this.http.put(`${this.baseUrl}/api/webhooks/${id}`, fields);
+  }
   deleteWebhook(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/webhooks/${id}`); }
-  getWebhookLogs(id: string): Observable<any> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/${id}/logs`); }
+  getWebhookLogs(id: string, limit = 30): Observable<{ logs: CustomWebhookLog[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/webhooks/${id}/logs?limit=${limit}`);
+  }
+  getAllWebhookLogs(limit = 50): Observable<{ logs: CustomWebhookLog[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/webhooks/logs?limit=${limit}`);
+  }
+  deleteWebhookLog(webhookId: string, logId: number): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/api/webhooks/${webhookId}/logs/${logId}`);
+  }
+  getWebhookModels(): Observable<{ models: WebhookModel[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/models`); }
 }

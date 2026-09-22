@@ -26,6 +26,9 @@ const CASOS: Caso[] = [
   { metodo: 'POST',   ruta: '/api/webhooks',             debeExigirClave: true,  nota: 'crear webhook' },
   { metodo: 'DELETE', ruta: '/api/webhooks/abc',         debeExigirClave: true,  nota: 'borrar webhook' },
   { metodo: 'GET',    ruta: '/api/webhooks/abc/logs',    debeExigirClave: true,  nota: 'logs de un webhook' },
+  { metodo: 'DELETE', ruta: '/api/webhooks/abc/logs/12', debeExigirClave: true,  nota: 'borrar un log' },
+  { metodo: 'GET',    ruta: '/api/webhooks/models',      debeExigirClave: true,  nota: 'modelos disponibles' },
+  { metodo: 'GET',    ruta: '/api/webhooks/logs',        debeExigirClave: true,  nota: 'todas las ejecuciones' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },

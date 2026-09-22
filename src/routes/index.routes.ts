@@ -82,6 +82,34 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         }
     });
 
+    // Van ANTES de /api/webhooks/:id para que Express no los tome como un id.
+    app.get('/api/webhooks/models', async (_req, res) => {
+        try {
+            res.json({ models: await customWebhookService.listModels() });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.get('/api/webhooks/logs', async (req, res) => {
+        try {
+            const limit = parseInt((req.query.limit as string) || '50', 10);
+            res.json({ logs: customWebhookService.getAllLogs(limit) });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.delete('/api/webhooks/:id/logs/:logId', async (req, res) => {
+        try {
+            const ok = customWebhookService.deleteLog(parseInt(req.params.logId, 10));
+            if (!ok) return res.status(404).json({ error: 'Log no encontrado' });
+            res.json({ status: 'success' });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     // Obtener Webhook por ID
     app.get('/api/webhooks/:id', async (req, res) => {
         try {

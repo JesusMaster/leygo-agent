@@ -400,6 +400,22 @@ export class SqliteReminderService {
     stmt.run(webhookId, payload, response, status, Date.now());
   }
 
+  public deleteCustomWebhookLog(logId: number): boolean {
+    const res = this.db.prepare(`DELETE FROM custom_webhook_logs WHERE id = ?`).run(logId) as any;
+    return (res?.changes ?? 0) > 0;
+  }
+
+  /** Logs de todos los webhooks con el título de cada uno, para la vista "Ver ejecuciones". */
+  public getAllCustomWebhookLogs(limit: number = 50): Array<CustomWebhookLog & { webhook_titulo: string | null }> {
+    return this.db.prepare(`
+      SELECT l.id, l.webhook_id, l.payload, l.response, l.status, l.created_at, w.titulo as webhook_titulo
+      FROM custom_webhook_logs l
+      LEFT JOIN custom_webhooks w ON w.id = l.webhook_id
+      ORDER BY l.created_at DESC
+      LIMIT ?
+    `).all(limit) as any[];
+  }
+
   public getCustomWebhookLogs(webhookId?: string, limit: number = 20): CustomWebhookLog[] {
     if (webhookId) {
       const stmt = this.db.prepare(`

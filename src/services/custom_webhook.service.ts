@@ -98,6 +98,35 @@ export class CustomWebhookService {
   /**
    * Obtiene los logs de ejecución de un webhook
    */
+  public deleteLog(logId: number): boolean {
+    return sqliteReminderService.deleteCustomWebhookLog(logId);
+  }
+
+  public getAllLogs(limit: number = 50) {
+    return sqliteReminderService.getAllCustomWebhookLogs(limit);
+  }
+
+  /**
+   * Modelos que la GUI puede ofrecer: los de Ollama (consultando /api/tags) más
+   * los de Gemini que se usan en el proyecto. Si Ollama no responde, solo Gemini.
+   */
+  public async listModels(): Promise<Array<{ id: string; label: string; provider: 'ollama' | 'gemini' }>> {
+    const gemini = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro']
+      .map((id) => ({ id, label: id, provider: 'gemini' as const }));
+
+    let ollama: Array<{ id: string; label: string; provider: 'ollama' }> = [];
+    try {
+      const res = await axios.get(`${this.ollamaUrl.replace(/\/$/, '')}/api/tags`, { timeout: 4000 });
+      ollama = (res.data?.models || [])
+        .map((m: any) => m.name as string)
+        .filter((n: string) => n && !/embed/i.test(n)) // los de embeddings no generan texto
+        .map((n: string) => ({ id: `${n} (ollama)`, label: `${n} (ollama)`, provider: 'ollama' as const }));
+    } catch {
+      // Ollama caído o inalcanzable: se ofrece solo Gemini
+    }
+    return [...ollama, ...gemini];
+  }
+
   public getLogs(webhookId?: string, limit: number = 20): CustomWebhookLog[] {
     return sqliteReminderService.getCustomWebhookLogs(webhookId, limit);
   }

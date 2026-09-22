@@ -159,3 +159,31 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .empty { color: var(--text-dim); font-size: 14px; padding: 20px 0; text-align: center; }
 .row { display: flex; align-items: center; gap: 10px; }
 .spacer { flex: 1; }
+
+/* ─── Modal y drawer (compartidos) ─────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(2, 6, 23, .6); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.modal {
+  width: min(600px, 100%); background: var(--bg-card); border: 1px solid var(--border-light);
+  border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,.45); overflow: hidden;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border-light); }
+.modal-head h3 { margin: 0; font-size: 18px; }
+.modal-body { padding: 20px 24px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; background: var(--bg-main); border-top: 1px solid var(--border-light); }
+
+.drawer-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(2, 6, 23, .45); }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 85;
+  width: min(760px, 100%); background: var(--bg-main); border-left: 1px solid var(--border-light);
+  box-shadow: -16px 0 48px rgba(0,0,0,.35); display: flex; flex-direction: column;
+  animation: drawer-in .18s ease-out;
+}
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--border-light); background: var(--bg-card); }
+.drawer-head h3 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+.drawer-head .sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+.drawer-body { flex: 1; overflow: auto; padding: 20px 24px; }
