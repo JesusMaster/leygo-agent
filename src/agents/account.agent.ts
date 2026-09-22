@@ -14,6 +14,7 @@ import {
   driveReadFile,
   chatListSpaces,
   chatReadMessages,
+  chatFindDm,
   chatSendMessage
 } from "./tools/google.tools.js";
 import { episodicSearch, meetingIngest, consolidateContextTool } from "./tools/knowledge.tools.js";
@@ -54,9 +55,11 @@ export const accountAgent = new LlmAgent({
        - Usa 'consolidate_context' para consolidar acuerdos y decisiones de las conversaciones de chat y correos recientes hacia la memoria episódica.
 
     5. **Google Chat (Mensajes y Salas)**:
-       - Usa 'chat_list_spaces' para listar tus conversaciones, mensajes directos (DMs) y salas de equipo disponibles.
-       - Usa 'chat_read_messages' para leer mensajes de una conversación o sala. Si te solicitan el chat completo, analizar la evolución de una relación, perfiles o historiales extensos, utiliza 'limit: 200' o 'limit: 300' para obtener de un solo viaje (bulk) todo el historial ordenado cronológicamente.
-       - Usa 'chat_send_message' para enviar un mensaje o responder en una conversación o hilo específico de Google Chat.
+       - Para ESCRIBIRLE A UNA PERSONA: primero 'chat_find_dm' con su nombre o email (te da el spaceName), luego 'chat_send_message'. Son dos llamadas, nunca más.
+       - Usa 'chat_list_spaces' para listar conversaciones, DMs (ya vienen con el nombre de la persona) y salas de equipo.
+       - Usa 'chat_read_messages' SOLO cuando te pidan leer o analizar el contenido de una conversación concreta. Si te solicitan el chat completo o un historial extenso, utiliza 'limit: 200' o 'limit: 300' para traerlo de un solo viaje.
+       - PROHIBIDO abrir historiales para averiguar quién participa en una conversación o para buscar a alguien: cada lectura le pide autorización a Jesús por Telegram y eso lo inunda de solicitudes.
+       - Si una herramienta devuelve status 'unauthorized', DETENTE: no lo intentes con otra conversación ni con otra herramienta. Informa que Jesús no lo autorizó.
 
     POLÍTICAS Y ESTILO:
     - Hablas con el estilo natural, directo y ejecutivo de Jesús: respuestas concisas, sin rodeos ni fórmulas de servicio al cliente.
@@ -84,6 +87,7 @@ export const accountAgent = new LlmAgent({
     consolidateContextTool,
     chatListSpaces,
     chatReadMessages,
+    chatFindDm,
     chatSendMessage
   ]
 });

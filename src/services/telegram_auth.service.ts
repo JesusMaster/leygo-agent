@@ -8,6 +8,8 @@ interface PendingApproval {
   timer: NodeJS.Timeout;
   messageId: number;
   actionDescription: string;
+  /** Canal que pidió la acción. Se fija al pedir, no al responder. */
+  canal: string;
 }
 
 export class TelegramAuthService {
@@ -23,6 +25,18 @@ export class TelegramAuthService {
    * que das en un canal no debe habilitar a otro.
    */
   private ultimaAprobacionPorCanal: Map<string, number> = new Map();
+
+  /**
+   * Enfriamiento por canal tras un "no": hasta este instante, las peticiones
+   * sensibles de ese canal se rechazan sin mandar nada a Telegram.
+   *
+   * Sin esto, "denegar" solo cerraba UNA petición: el modelo probaba con la
+   * siguiente conversación, la siguiente herramienta, y cada intento era otra
+   * tarjeta en Telegram. Denegar debe significar "para".
+   */
+  private bloqueoHastaPorCanal: Map<string, number> = new Map();
+  private readonly bloqueoTrasDenegarMs = 5 * 60 * 1000;
+  private readonly bloqueoTrasExpirarMs = 60 * 1000;
 
   /** Canal que está pidiendo la acción (telegram, buzz, a2a, api, system) */
   private canalActual(): string {
@@ -102,8 +116,13 @@ export class TelegramAuthService {
     const timeStr = new Date().toLocaleTimeString('es-CL');
     console.log(`🛡️ [TelegramAuth] Callback query recibido para ${requestId}: ${isApproved ? 'APROBADO' : 'DENEGADO'}`);
 
+    // OJO: acá NO sirve canalActual(). Este código corre en el contexto del
+    // webhook de Telegram, no en el de la petición que pidió permiso: resolvía
+    // "telegram"/"system" y la ventana se abría para el canal equivocado, así que
+    // la siguiente acción del canal real volvía a preguntar.
     if (isApproved) {
-      this.ultimaAprobacionPorCanal.set(this.canalActual(), Date.now());
+      this.ultimaAprobacionPorCanal.set(pending.canal, Date.now());
+      this.bloqueoHastaPorCanal.delete(pending.canal);
       // 1. Responder a Telegram con un toast nativo (desaparece solo en 2 segundos en el teléfono)
       await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
         callback_query_id: callbackId,
@@ -118,7 +137,9 @@ export class TelegramAuthService {
 
       pending.resolve(true);
     } else {
-      this.ultimaAprobacionPorCanal.delete(this.canalActual());
+      this.ultimaAprobacionPorCanal.delete(pending.canal);
+      this.bloqueoHastaPorCanal.set(pending.canal, Date.now() + this.bloqueoTrasDenegarMs);
+      console.log(`🛡️ [TelegramAuth] Canal "${pending.canal}" bloqueado ${this.bloqueoTrasDenegarMs / 60000} min tras la denegación.`);
       await axios.post(`${this.baseUrl}/answerCallbackQuery`, {
         callback_query_id: callbackId,
         text: '❌ Acceso denegado.',
@@ -153,8 +174,17 @@ export class TelegramAuthService {
       return false;
     }
 
-    // 1. Si ya autorizó hace menos de 5 minutos, pasa directo
     const canal = this.canalActual();
+
+    // 0. Si hace poco dijo que no (o no contestó), no se le vuelve a preguntar
+    const bloqueadoHasta = this.bloqueoHastaPorCanal.get(canal) || 0;
+    if (Date.now() < bloqueadoHasta) {
+      const restante = Math.round((bloqueadoHasta - Date.now()) / 1000);
+      console.log(`🛡️ [TelegramAuth] Rechazado sin preguntar: el canal "${canal}" está en enfriamiento (${restante}s). Acción: ${actionDescription}`);
+      return false;
+    }
+
+    // 1. Si ya autorizó hace menos de 5 minutos, pasa directo
     if (this.hasActiveSession(canal)) {
       const last = this.ultimaAprobacionPorCanal.get(canal) || 0;
       const remainingSecs = Math.round((this.gracePeriodMs - (Date.now() - last)) / 1000);
@@ -200,6 +230,7 @@ export class TelegramAuthService {
       return new Promise<boolean>((resolve) => {
         const timer = setTimeout(async () => {
           this.pendingApprovals.delete(requestId);
+          this.bloqueoHastaPorCanal.set(canal, Date.now() + this.bloqueoTrasExpirarMs);
           // Actualizar mensaje de Telegram con timeout expirado
           await axios.post(`${this.baseUrl}/editMessageText`, {
             chat_id: this.chatId,
@@ -215,6 +246,7 @@ export class TelegramAuthService {
           timer,
           messageId,
           actionDescription,
+          canal,
         });
       });
     } catch (error: any) {

@@ -365,7 +365,7 @@ export const driveReadFile = new FunctionTool({
  */
 export const chatListSpaces = new FunctionTool({
   name: 'chat_list_spaces',
-  description: 'Lista las conversaciones, salas de equipo y mensajes directos (DMs) disponibles en Google Chat.',
+  description: 'Lista las conversaciones, salas de equipo y mensajes directos (DMs) de Google Chat. Cada DM incluye el nombre de la persona con la que es, así que NO hace falta leer mensajes para saber quién participa.',
   parameters: z.object({
     pageSize: z.number().optional().describe('Cantidad máxima de espacios a retornar (por defecto 20).')
   }) as any,
@@ -406,7 +406,7 @@ export const chatListSpaces = new FunctionTool({
  */
 export const chatReadMessages = new FunctionTool({
   name: 'chat_read_messages',
-  description: 'Lee el historial de mensajes de una conversación o sala específica en Google Chat en BULK (admite traer 50, 100, 200 o hasta 500 mensajes en una sola llamada para análisis de historial o contexto completo). Los mensajes se entregan ordenados cronológicamente (antiguos a recientes).',
+  description: 'Lee el historial de mensajes de una conversación o sala específica en Google Chat en BULK (admite traer 50, 100, 200 o hasta 500 mensajes en una sola llamada para análisis de historial o contexto completo). Los mensajes se entregan ordenados cronológicamente (antiguos a recientes). Cada llamada requiere autorización de Jesús por Telegram: NUNCA la uses para averiguar quién participa en una conversación ni para buscar a una persona; para eso está chat_find_dm.',
   parameters: z.object({
     spaceName: z.string().describe('ID o nombre del espacio en Google Chat (obtenido previamente con chat_list_spaces).'),
     limit: z.number().optional().describe('Cantidad de mensajes a leer en bulk (por defecto 100; usa 200 a 500 si te piden el chat completo o un análisis profundo).'),
@@ -450,13 +450,63 @@ export const chatReadMessages = new FunctionTool({
 });
 
 /**
+ * Encuentra el DM con una persona sin abrir ningún historial.
+ *
+ * Existe porque los DMs de Google Chat no tienen nombre: sin esta herramienta,
+ * para escribirle a alguien el modelo listaba los espacios y abría el historial
+ * de cada uno para ver quién era, con una autorización 2FA por cada lectura.
+ */
+export const chatFindDm = new FunctionTool({
+  name: 'chat_find_dm',
+  description: 'Encuentra el mensaje directo (DM) de Google Chat con una persona, por nombre o por email, SIN leer mensajes. Úsala SIEMPRE antes de chat_send_message cuando te pidan escribirle a alguien. Devuelve el ID del espacio para enviar el mensaje.',
+  parameters: z.object({
+    persona: z.string().describe('Nombre (ej: "Fabricio Figueroa") o email de la persona.'),
+  }) as any,
+  execute: async (args: any) => {
+    const { persona } = args;
+    try {
+      const { telegramAuthService } = await import('../../services/telegram_auth.service.js');
+      const isAuthorized = await telegramAuthService.requestApproval(`Buscar la conversación de Google Chat con "${persona}"`);
+      if (!isAuthorized) {
+        return {
+          status: 'unauthorized',
+          result: 'Acceso denegado: Jesús no autorizó el acceso a Google Chat. No insistas por otra vía; infórmalo.',
+        };
+      }
+
+      const { googleService } = await import('../../services/google.service.js');
+      const dm = await googleService.findChatDirectMessage(persona);
+
+      if (!dm) {
+        return {
+          status: 'not_found',
+          result: `No hay un mensaje directo previo con "${persona}". Si tienes su email, vuelve a intentar con él; si no, pídeselo a Jesús. No abras historiales de otras conversaciones para buscarla.`,
+        };
+      }
+
+      const aviso = dm.coincidencias
+        ? `\n⚠️ Hay más de una conversación que coincide: ${dm.coincidencias.join('; ')}. Confirma con el usuario cuál es antes de enviar.`
+        : '';
+
+      return {
+        status: 'success',
+        result: `${dm.displayName} → spaceName: ${dm.name}${aviso}`,
+        data: dm,
+      };
+    } catch (error: any) {
+      return { status: 'error', message: `Error al buscar la conversación en Google Chat: ${error.message}` };
+    }
+  },
+});
+
+/**
  * Herramienta para responder o enviar un mensaje en Google Chat
  */
 export const chatSendMessage = new FunctionTool({
   name: 'chat_send_message',
   description: 'Envía o responde un mensaje en una conversación o sala de Google Chat.',
   parameters: z.object({
-    spaceName: z.string().describe('ID del espacio en Google Chat (ej: "spaces/AAAAAAAAAA").'),
+    spaceName: z.string().describe('ID del espacio en Google Chat (ej: "spaces/AAAAAAAAAA"), obtenido con chat_find_dm (para una persona) o chat_list_spaces (para una sala).'),
     text: z.string().describe('Texto del mensaje a enviar.'),
     threadName: z.string().optional().describe('Nombre del hilo (threadName) si se desea responder directamente a un hilo específico dentro del chat.')
   }) as any,

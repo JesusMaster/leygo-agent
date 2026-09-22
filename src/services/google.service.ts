@@ -668,6 +668,27 @@ export class GoogleWorkspaceService {
   // ─────────────────────────────────────────────────────────────
   // GOOGLE CHAT
   // ─────────────────────────────────────────────────────────────
+  /**
+   * Participantes humanos de un espacio (nombre visible). Para los mensajes
+   * directos es la única forma de saber con quién es la conversación: la API no
+   * les pone displayName.
+   */
+  private async listChatHumanMembers(chat: any, spaceName: string): Promise<string[]> {
+    try {
+      const res = await chat.spaces.members.list({
+        parent: spaceName,
+        pageSize: 20,
+        filter: 'member.type = "HUMAN"',
+      });
+      const memberships: any[] = res.data.memberships || [];
+      return memberships
+        .map((m) => m.member?.displayName)
+        .filter((n): n is string => !!n);
+    } catch {
+      return [];
+    }
+  }
+
   async listChatSpaces(pageSize: number = 20) {
     const auth = this.getAuthClient();
     const chat = google.chat({ version: 'v1', auth });
@@ -677,12 +698,75 @@ export class GoogleWorkspaceService {
     });
 
     const spaces = res.data.spaces || [];
-    return spaces.map((s) => ({
-      name: s.name, // formato: spaces/AAAAAAAAAA
-      displayName: s.displayName || '(Mensaje Directo)',
-      spaceType: s.spaceType || s.type,
-      singleUserBotDm: s.singleUserBotDm,
-    }));
+
+    // Los DMs vienen sin nombre. Sin resolver los participantes, la única manera
+    // de saber con quién es cada uno era leer su historial, que es justo lo que
+    // no queremos: una lectura de mensajes (y una autorización 2FA) por cada DM.
+    return Promise.all(
+      spaces.map(async (s) => {
+        const esDm = (s.spaceType || s.type) === 'DIRECT_MESSAGE';
+        const participantes = esDm && s.name ? await this.listChatHumanMembers(chat, s.name) : [];
+        return {
+          name: s.name, // formato: spaces/AAAAAAAAAA
+          displayName: s.displayName || (participantes.length ? `DM con ${participantes.join(' y ')}` : '(Mensaje Directo)'),
+          spaceType: s.spaceType || s.type,
+          singleUserBotDm: s.singleUserBotDm,
+          participantes,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Encuentra el mensaje directo con una persona SIN leer mensajes.
+   *
+   * Por email usa spaces.findDirectMessage (exacto). Por nombre lista los DMs y
+   * compara contra los participantes. Devuelve null si no hay coincidencia.
+   */
+  async findChatDirectMessage(query: string): Promise<{ name: string; displayName: string; participantes: string[]; coincidencias?: string[] } | null> {
+    const q = query.trim();
+    if (!q) return null;
+
+    const auth = this.getAuthClient();
+    const chat = google.chat({ version: 'v1', auth });
+
+    if (q.includes('@')) {
+      try {
+        const res = await chat.spaces.findDirectMessage({ name: `users/${q}` });
+        if (res.data?.name) {
+          const participantes = await this.listChatHumanMembers(chat, res.data.name);
+          return { name: res.data.name, displayName: `DM con ${participantes.join(' y ') || q}`, participantes };
+        }
+      } catch {
+        // Sin DM previo con ese email; se intenta por nombre igual
+      }
+    }
+
+    const normalizar = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const terminos = normalizar(q.replace(/@.*$/, '')).split(/\s+/).filter(Boolean);
+
+    const espacios = await this.listChatSpaces(100);
+    const dms = espacios.filter((e) => e.spaceType === 'DIRECT_MESSAGE' && e.participantes.length);
+
+    const puntuados = dms
+      .map((dm) => {
+        const nombres = dm.participantes.map(normalizar).join(' | ');
+        const aciertos = terminos.filter((t) => nombres.includes(t)).length;
+        return { dm, aciertos };
+      })
+      .filter((x) => x.aciertos > 0)
+      .sort((a, b) => b.aciertos - a.aciertos);
+
+    if (puntuados.length === 0) return null;
+
+    const mejor = puntuados[0].dm;
+    const empatados = puntuados.filter((x) => x.aciertos === puntuados[0].aciertos);
+    return {
+      name: mejor.name!,
+      displayName: mejor.displayName,
+      participantes: mejor.participantes,
+      coincidencias: empatados.length > 1 ? empatados.map((x) => `${x.dm.displayName} (${x.dm.name})`) : undefined,
+    };
   }
 
   async readChatMessages(spaceName: string, maxMessages: number = 100) {
