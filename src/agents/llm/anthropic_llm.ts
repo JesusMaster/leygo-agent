@@ -1,6 +1,6 @@
 import { BaseLlm } from '@google/adk';
 import { recordModelUsage } from '../../utils/usage_collector.js';
-import { aMensajesAnthropic, toolsAnthropic, desdeRespuestaAnthropic } from './conversion.js';
+import { aMensajesAnthropic, toolsAnthropic, desdeRespuestaAnthropic , respuestaError } from './conversion.js';
 
 export interface AnthropicParams {
   model: string;
@@ -49,12 +49,12 @@ export class AnthropicLlm extends BaseLlm {
       });
       const texto = await res.text();
       if (!res.ok) {
-        yield { errorCode: String(res.status), errorMessage: `Anthropic respondió ${res.status}: ${texto.slice(0, 300)}`, content: { role: 'model', parts: [{ text: '' }] }, turnComplete: true };
+        yield respuestaError(this.p.agentName, this.model, String(res.status), `Anthropic respondió ${res.status}: ${texto.slice(0, 300)}`);
         return;
       }
       data = JSON.parse(texto);
     } catch (err: any) {
-      yield { errorCode: 'NETWORK', errorMessage: `No se pudo hablar con Anthropic: ${err?.message || err}`, content: { role: 'model', parts: [{ text: '' }] }, turnComplete: true };
+      yield respuestaError(this.p.agentName, this.model, 'NETWORK', `No se pudo hablar con Anthropic: ${err?.message || err}`);
       return;
     } finally {
       clearTimeout(timer);

@@ -450,6 +450,7 @@ export class TelegramBotService {
       }
 
       let accumulatedText = '';
+      let errorModelo = '';
       beginUsageScope('telegram', sessionId, userPrompt);
 
       for await (const event of this.runner.runAsync({
@@ -460,7 +461,7 @@ export class TelegramBotService {
           parts: [{ text: userPrompt }],
         },
       })) {
-
+        if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
         if (event.content?.parts) {
           for (const part of event.content.parts) {
             if (part.text && event.author !== 'user') {
@@ -474,7 +475,9 @@ export class TelegramBotService {
       flushUsageScope().catch(() => {});
 
       if (!accumulatedText.trim()) {
-        accumulatedText = 'Listo. Acción ejecutada sin respuesta adicional.';
+        accumulatedText = errorModelo
+          ? `⚠️ El modelo no pudo responder: ${errorModelo}`
+          : 'Listo. Acción ejecutada sin respuesta adicional.';
       }
 
       const formattedHtml = markdownToTelegramHtml(accumulatedText);

@@ -82,6 +82,7 @@ export class YisusAgentExecutor implements AgentExecutor {
             const pendiente = escalationDeliveryService.consumePendingFor(contextId);
             const newMessage = { role: 'user', parts: [{ text: pendiente + userText }] } as any;
             const replies: string[] = [];
+            let errorModelo = '';
 
             const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
             beginUsageScope('a2a', contextId, `[A2A:${scope.name}] ${userText}`);
@@ -90,6 +91,7 @@ export class YisusAgentExecutor implements AgentExecutor {
                 userId, sessionId: session.id, newMessage,
             })) {
                 if (this.cancelled.has(taskId)) break;
+                if ((event as any)?.errorMessage) errorModelo = (event as any).errorMessage;
                 const parts = (event as any)?.content?.parts;
                 const isPartial = (event as any)?.partial === true;
                 if (Array.isArray(parts) && !isPartial && (event as any)?.author !== 'user') {
@@ -116,7 +118,9 @@ export class YisusAgentExecutor implements AgentExecutor {
             // 4) Respuesta final → input-required (conversación multi-turno)
             const finalText = replies.length
                 ? replies[replies.length - 1]
-                : 'Lo siento, no pude generar una respuesta. ¿Puedes reformular tu consulta?';
+                : errorModelo
+                    ? `⚠️ El modelo no pudo responder: ${errorModelo}`
+                    : 'Lo siento, no pude generar una respuesta. ¿Puedes reformular tu consulta?';
 
             bus.publish(AgentEvent.statusUpdate({
                 taskId, contextId,

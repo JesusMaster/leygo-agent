@@ -111,12 +111,15 @@ server.start().then(async () => {
 
         beginUsageScope('system', sessionId, `[Tarea] ${instruccion.slice(0, 80)}`);
         let texto = '';
+        let errorModelo = '';
         for await (const event of telegramRunner.runAsync({ userId, sessionId: session.id, newMessage: { role: 'user', parts: [{ text: prompt }] } })) {
+            if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
             for (const part of event.content?.parts || []) {
                 if (part.text && event.author !== 'user') texto += part.text;
             }
         }
         flushUsageScope().catch(() => {});
+        if (!texto.trim() && errorModelo) throw new Error(`El modelo no pudo responder: ${errorModelo}`);
         return texto.trim() || 'Listo. La tarea se ejecutó sin respuesta adicional.';
     });
 

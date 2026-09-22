@@ -157,6 +157,13 @@ export class ChatService {
           }
           if (evento?.error) throw new Error(evento.error);
           if (evento?.author === 'user') continue;
+          // Error del modelo (clave sin crédito, proveedor caído…): el ADK lo manda
+          // como evento con errorMessage y, a veces, sin texto.
+          if (evento?.errorMessage && !(evento?.content?.parts || []).some((p: any) => p?.text)) {
+            textos.push(`⚠️ ${evento.errorMessage}`);
+            actualizar({ text: textos.join('\n\n'), error: true });
+            continue;
+          }
 
           const author = evento?.author || 'agente';
           const partsEv: any[] = evento?.content?.parts || [];

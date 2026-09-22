@@ -960,6 +960,7 @@ export class NostrGatewayService {
       } as any;
 
       const replies: string[] = [];
+      let errorModelo = '';
       const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
       beginUsageScope('buzz', sessionId, `[Buzz] ${prompt}`);
 
@@ -968,6 +969,7 @@ export class NostrGatewayService {
         sessionId,
         newMessage,
       })) {
+        if ((event as any)?.errorMessage) errorModelo = (event as any).errorMessage;
         const parts = (event as any)?.content?.parts;
         const isPartial = (event as any)?.partial === true;
         if (Array.isArray(parts) && !isPartial && (event as any)?.author !== 'user') {
@@ -981,6 +983,7 @@ export class NostrGatewayService {
 
       flushUsageScope().catch(() => {});
 
+      if (!replies.length && errorModelo) return `⚠️ El modelo no pudo responder: ${errorModelo}`;
       return replies[replies.length - 1] || 'Recibido.';
     } catch (err: any) {
       console.error('❌ [NostrGateway] Error invocando Runner:', err);

@@ -196,3 +196,29 @@ export function desdeRespuestaAnthropic(data: any): any {
   if (!parts.length) parts.push({ text: '' });
   return { role: 'model', parts };
 }
+
+/**
+ * Respuesta de error visible: el ADK convierte `errorCode` en un evento sin
+ * texto, y los canales (GUI, Telegram, Buzz, A2A) mostraban "(sin respuesta)".
+ * Se deja el mensaje también como texto, y se loguea, para que quede claro
+ * qué proveedor falló y por qué.
+ */
+export function respuestaError(agentName: string | undefined, model: string, errorCode: string, errorMessage: string) {
+  console.error(`❌ [LLM] ${agentName || 'agente'} · ${model}: ${errorMessage}`);
+  let detalle = errorMessage;
+  // Si el proveedor devolvió JSON, mostramos solo su mensaje.
+  const m = errorMessage.match(/\{.*\}$/s);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]);
+      const msg = j?.error?.message || j?.message || j?.error;
+      if (typeof msg === 'string') detalle = `${errorMessage.slice(0, errorMessage.indexOf(m[0])).trim()} ${msg}`;
+    } catch { /* se deja como venía */ }
+  }
+  return {
+    errorCode,
+    errorMessage,
+    content: { role: 'model', parts: [{ text: `⚠️ El modelo ${model} no pudo responder. ${detalle}` }] },
+    turnComplete: true,
+  };
+}

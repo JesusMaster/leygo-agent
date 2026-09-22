@@ -1,6 +1,6 @@
 import { BaseLlm } from '@google/adk';
 import { recordModelUsage } from '../../utils/usage_collector.js';
-import { aMensajesOpenAI, toolsOpenAI, desdeMensajeOpenAI } from './conversion.js';
+import { aMensajesOpenAI, toolsOpenAI, desdeMensajeOpenAI , respuestaError } from './conversion.js';
 
 export interface OpenAiCompatibleParams {
   model: string;
@@ -51,12 +51,12 @@ export class OpenAiCompatibleLlm extends BaseLlm {
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
       const texto = await res.text();
       if (!res.ok) {
-        yield { errorCode: String(res.status), errorMessage: `${this.p.baseUrl} respondió ${res.status}: ${texto.slice(0, 300)}`, content: { role: 'model', parts: [{ text: '' }] }, turnComplete: true };
+        yield respuestaError(this.p.agentName, this.model, String(res.status), `${this.p.baseUrl} respondió ${res.status}: ${texto.slice(0, 300)}`);
         return;
       }
       data = JSON.parse(texto);
     } catch (err: any) {
-      yield { errorCode: 'NETWORK', errorMessage: `No se pudo hablar con ${this.p.baseUrl}: ${err?.message || err}`, content: { role: 'model', parts: [{ text: '' }] }, turnComplete: true };
+      yield respuestaError(this.p.agentName, this.model, 'NETWORK', `No se pudo hablar con ${this.p.baseUrl}: ${err?.message || err}`);
       return;
     } finally {
       clearTimeout(timer);
