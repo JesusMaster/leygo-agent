@@ -65,7 +65,6 @@
       "knowledge_agent",
       "knowledge_public",
       "faq_agent",
-      "account_agent",
       "triage_agent",
       "schedule_reminder",
       "list_scheduled_reminders",
@@ -79,7 +78,8 @@
       "set_monthly_budget",
       "refresh_pricing_catalog",
       "buzz_send_message",
-      "buzz_status"
+      "buzz_status",
+      "account_agent"
     ]
   }
 }

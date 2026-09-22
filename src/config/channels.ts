@@ -127,13 +127,19 @@ export function resolveA2AScope(presented: string | undefined): A2AScope | null 
   const cfg = loadConfig();
 
   // 1) Tokens creados desde la GUI (SQLite). Van primero: son los que se revocan en caliente.
+  //
+  // El try envuelve SOLO la consulta. Antes abarcaba también el cálculo del
+  // alcance, así que un error ahí se tragaba en silencio y un token perfectamente
+  // válido terminaba devolviendo null, es decir un 401 de "no existe o fue
+  // revocado" que manda a buscar el problema al lado equivocado.
+  let fromDb: { name: string; tools: string[] } | null = null;
   try {
-    const fromDb = sqliteReminderService.findA2ATokenByValue(presented);
-    if (fromDb) {
-      return { name: fromDb.name, tools: limitarAlTecho(fromDb.name, expandToolSpec(fromDb.tools)) };
-    }
-  } catch {
-    // Si la base no está disponible se sigue con la config en archivo
+    fromDb = sqliteReminderService.findA2ATokenByValue(presented);
+  } catch (err: any) {
+    console.warn(`⚠️ [A2A] No se pudo consultar la tabla de tokens (${err.message}). Se sigue con config/channels.json.`);
+  }
+  if (fromDb) {
+    return { name: fromDb.name, tools: limitarAlTecho(fromDb.name, expandToolSpec(fromDb.tools)) };
   }
 
   // 2) Tokens declarados en config/channels.json
