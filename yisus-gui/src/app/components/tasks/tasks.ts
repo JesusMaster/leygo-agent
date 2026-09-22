@@ -245,8 +245,12 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .hint code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; }
 
     @media (max-width: 720px) {
+      .task { padding: 14px; }
       .task-head { flex-direction: column; }
       .task-actions { align-self: flex-end; }
+      .task-title { font-size: 15.5px; }
+      .task-msg { font-size: 13.5px; }
+      .runs { max-height: none; padding-right: 0; }
     }
   `],
 })

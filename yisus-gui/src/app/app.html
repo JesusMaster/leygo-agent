@@ -1,4 +1,5 @@
-<div class="layout-wrapper">
+<div class="layout-wrapper" [class.menu-open]="menuOpen()">
+  <div class="sidebar-backdrop" (click)="menuOpen.set(false)"></div>
   <aside class="sidebar">
     <div class="logo-section">
       <div class="logo-icon">
@@ -12,31 +13,32 @@
         </svg>
       </div>
       <h1 class="logo-text">yisus</h1>
+      <button type="button" class="btn-icon sidebar-close" aria-label="Cerrar menú" (click)="menuOpen.set(false)"><i class="ph ph-x"></i></button>
     </div>
 
     <nav class="nav-menu">
-      <a routerLink="/chat" routerLinkActive="active" class="nav-item">
+      <a routerLink="/chat" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-chat-circle-dots"></i></span><span class="label">Chat</span>
       </a>
-      <a routerLink="/usage" routerLinkActive="active" class="nav-item">
+      <a routerLink="/usage" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-chart-bar"></i></span><span class="label">Consumo</span>
       </a>
-      <a routerLink="/channels" routerLinkActive="active" class="nav-item">
+      <a routerLink="/channels" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-sliders-horizontal"></i></span><span class="label">Canales y tools</span>
       </a>
-      <a routerLink="/tokens" routerLinkActive="active" class="nav-item">
+      <a routerLink="/tokens" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-key"></i></span><span class="label">Tokens A2A</span>
       </a>
-      <a routerLink="/escalations" routerLinkActive="active" class="nav-item">
+      <a routerLink="/escalations" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-warning-octagon"></i></span><span class="label">Escalamientos</span>
       </a>
-      <a routerLink="/webhooks" routerLinkActive="active" class="nav-item">
+      <a routerLink="/webhooks" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-share-network"></i></span><span class="label">Webhooks</span>
       </a>
-      <a routerLink="/tasks" routerLinkActive="active" class="nav-item">
+      <a routerLink="/tasks" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-calendar-check"></i></span><span class="label">Tareas programadas</span>
       </a>
-      <a routerLink="/settings" routerLinkActive="active" class="nav-item">
+      <a routerLink="/settings" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-gear"></i></span><span class="label">Ajustes</span>
       </a>
     </nav>
@@ -56,6 +58,7 @@
 
   <main class="content-area">
     <header class="main-header">
+      <button type="button" class="btn-icon menu-toggle" aria-label="Abrir menú" (click)="menuOpen.set(true)"><i class="ph ph-list"></i></button>
       <div class="project-info">
         <h2 class="project-name">Yisus Agent</h2>
         <div class="status">

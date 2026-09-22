@@ -160,6 +160,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
   `,
   styles: [`
     .wh-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+    @media (max-width: 680px) { .wh-grid { grid-template-columns: 1fr; } .wh-actions { grid-template-columns: 1fr 1fr; } .wh-btn.logs { flex-direction: row; } }
     .wh-card {
       display: flex; flex-direction: column; gap: 14px; padding: 20px;
       background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 14px;

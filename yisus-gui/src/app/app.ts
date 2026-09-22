@@ -13,6 +13,8 @@ export class App {
   private api = inject(ApiService);
 
   isDarkMode = signal(false);
+  /** Menú lateral en pantallas chicas (off-canvas) */
+  menuOpen = signal(false);
   online = signal<boolean | null>(null);
   protegido = signal(false);
   claveOk = signal<boolean | null>(null);

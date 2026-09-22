@@ -220,6 +220,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     tr.editing td { border-bottom-color: transparent; }
     tr.editor-row > td { padding: 4px 12px 16px; background: rgba(129,140,248,.04); }
     .editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 8px 0 12px; }
+    @media (max-width: 720px) { .editor-head { flex-direction: column; } }
   `],
 })
 export class TokensComponent {

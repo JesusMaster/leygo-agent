@@ -216,3 +216,31 @@ input[type=time], input[type=date], input[type=datetime-local] { color-scheme: d
 .bubble.mine .md code { background: rgba(255,255,255,.2); }
 .bubble.mine .md a { color: #fff; }
 .bubble.mine .md blockquote { border-left-color: rgba(255,255,255,.6); color: rgba(255,255,255,.85); }
+
+/* ─── Responsive global ─────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .page { padding: 18px 16px 28px; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 18px; }
+  .page-head h2 { font-size: 21px; }
+  .page-head > .row, .page-head > .btn-primary, .page-head > .btn-secondary { width: 100%; }
+  .page-head > .row { flex-wrap: wrap; }
+  .page-head > .row > * { flex: 1 1 auto; }
+  .card { padding: 16px; }
+  .grid.cols-2, .grid.cols-4 { grid-template-columns: 1fr; }
+  /* Tablas: la tarjeta hace scroll horizontal en vez de aplastar las columnas */
+  .card { overflow-x: auto; }
+  .card > table { min-width: 560px; }
+  th, td { padding: 10px 8px; font-size: 13.5px; }
+  .modal-backdrop { padding: 10px; align-items: flex-end; }
+  .modal { width: 100%; max-height: 92dvh; display: flex; flex-direction: column; }
+  .modal-body { overflow: auto; }
+  .modal-head, .modal-body, .modal-foot { padding-left: 16px; padding-right: 16px; }
+  .drawer { width: 100%; }
+  .drawer-head, .drawer-body { padding: 14px 16px; }
+  .btn-primary, .btn-secondary { padding: 9px 14px; }
+}
+@media (max-width: 560px) {
+  .page { padding: 14px 12px 24px; }
+  .card { padding: 14px; border-radius: 10px; }
+  .stat .value { font-size: 22px; }
+}

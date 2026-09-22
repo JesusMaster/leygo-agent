@@ -181,6 +181,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     .pager-info { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
     .pager select { padding: 6px 8px; font-size: 12px; }
     .btn-icon[disabled] { opacity: .35; cursor: default; pointer-events: none; }
+    @media (max-width: 720px) { .pager { flex-direction: column; align-items: stretch; } .pager .row { flex-wrap: wrap; justify-content: center; } }
   `],
 })
 export class UsageComponent {

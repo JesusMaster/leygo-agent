@@ -19,7 +19,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
           <span class="sub">Sesión <code>{{ chat.sessionId() }}</code> · canal <span class="badge dim">api</span></span>
         </div>
         <span class="spacer"></span>
-        <button class="btn-secondary" (click)="chat.reset()"><i class="ph ph-plus"></i> Nueva sesión</button>
+        <button class="btn-secondary nueva" (click)="chat.reset()"><i class="ph ph-plus"></i> <span>Nueva sesión</span></button>
       </div>
 
       <div class="chat-body" #scroll>
@@ -98,7 +98,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
         }
         <div class="input-row">
           <textarea #ta rows="1" [(ngModel)]="texto" (input)="ajustar(ta)" (keydown.enter)="enviar($event)"
-            placeholder="Escribe un mensaje… (Enter envía, Shift+Enter salta línea)"></textarea>
+            [placeholder]="placeholder()"></textarea>
           @if (chat.thinking()) {
             <button class="btn-send stop" title="Detener" (click)="chat.cancelar()"><i class="ph-fill ph-stop"></i></button>
           } @else {
@@ -173,6 +173,24 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
     .btn-link:hover { color: var(--text-main); }
     .contador { font-variant-numeric: tabular-nums; }
     .contador.warn { color: var(--warn); }
+
+    @media (max-width: 900px) {
+      .chat-head { padding: 12px 16px; }
+      .chat-head .sub { display: none; }
+      .chat-head .nueva span { display: none; }
+      .chat-head .nueva { padding: 8px 10px; }
+      .chat-body { padding: 16px 12px; gap: 14px; }
+      .msg { max-width: 94%; }
+      .bubble { padding: 10px 13px; font-size: 14px; }
+      .bubble.agent { min-width: 0; }
+      .chat-input { padding: 10px 12px 10px; }
+      .input-row { padding: 6px 6px 6px 12px; border-radius: 12px; }
+      .input-row textarea { font-size: 16px; /* evita el zoom automático de iOS */ max-height: 160px; }
+      .btn-send { width: 38px; height: 38px; }
+      .input-foot { gap: 10px; font-size: 12px; }
+      .meta { font-size: 12px; gap: 6px; }
+      .uso { font-size: 11px; }
+    }
   `],
 })
 export class ChatComponent {
@@ -180,9 +198,13 @@ export class ChatComponent {
   private toast = inject(ToastService);
   texto = '';
   pendientes = signal<Adjunto[]>([]);
+  /** En móvil no cabe la ayuda de teclas en el placeholder */
+  placeholder = computed(() => this.angosto() ? 'Escribe un mensaje…' : 'Escribe un mensaje… (Enter envía, Shift+Enter salta línea)');
+  private angosto = signal(window.innerWidth < 640);
   private scroll = viewChild<ElementRef<HTMLDivElement>>('scroll');
 
   constructor() {
+    window.addEventListener('resize', () => this.angosto.set(window.innerWidth < 640), { passive: true });
     effect(() => {
       this.chat.messages();
       this.chat.pasoActual();
