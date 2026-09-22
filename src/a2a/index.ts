@@ -25,17 +25,30 @@ import { YisusAgentExecutor } from './executor.js';
  * únicamente con su set, que puede ser vacío (conversa, pero no ejecuta nada).
  */
 function a2aAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-    const header = req.headers.authorization || '';
-    const bearer = header.startsWith('Bearer ') ? header.slice(7) : undefined;
-    const xApiKey = req.headers['x-api-key'] as string | undefined;
+    // El esquema es case-insensitive (RFC 7235): "bearer x" y "Bearer x" valen igual.
+    const header = String(req.headers.authorization || '');
+    const m = header.match(/^\s*bearer\s+(.+?)\s*$/i);
+    const bearer = m ? m[1] : undefined;
+    const xApiKey = (req.headers['x-api-key'] as string | undefined)?.trim();
     const presented = bearer || xApiKey;
+
+    // Forma del token recibido, sin revelarlo: sirve para distinguir "copiado
+    // truncado", "con comillas" o "con basura" de "token de otra instancia".
+    const forma = presented
+        ? {
+            largo: presented.length,
+            prefijo: presented.slice(0, 12),
+            sufijo: presented.slice(-4),
+            conFormaValida: /^yisus_[0-9a-f]{48}$/.test(presented),
+          }
+        : undefined;
 
     const scope = resolveA2AScope(presented);
     if (!scope) {
         try {
             const activos = sqliteReminderService.listA2ATokens().filter((t) => t.enabled);
             console.warn(
-                `🔒 [A2A] Token rechazado (${presented ? presented.slice(0, 12) + '…' : 'ausente'}).\n` +
+                `🔒 [A2A] Token rechazado (${forma ? `${forma.prefijo}…${forma.sufijo}, ${forma.largo} caracteres${forma.conFormaValida ? '' : ', FORMA INVÁLIDA: se esperaba yisus_ + 48 hex = 54 caracteres'}` : 'ausente'}).\n` +
                 `         base de datos : ${sqliteReminderService.dbPath}\n` +
                 `         pid / cwd     : ${process.pid} — ${process.cwd()}\n` +
                 `         tokens activos: ${activos.length ? activos.map((t) => `${t.name} [${t.token.slice(0, 10)}…${t.token.slice(-4)}]`).join(', ') : 'ninguno'}\n` +
@@ -60,10 +73,17 @@ function a2aAuth(req: express.Request, res: express.Response, next: express.Next
             })()
             : undefined;
 
+        // Si el token llegó con forma inválida se dice siempre: no revela nada
+        // (el cliente ya tiene el valor) y ahorra perseguir un fantasma.
+        const detalle = forma && !forma.conFormaValida
+            ? `El token recibido tiene ${forma.largo} caracteres (${forma.prefijo}…${forma.sufijo}); un token válido es "yisus_" + 48 hex = 54 caracteres, sin comillas ni puntos suspensivos.`
+            : undefined;
+
         res.status(401).json({
             error: presented
                 ? 'Unauthorized: el token presentado no existe o fue revocado'
                 : 'Unauthorized: falta Authorization: Bearer <token> o X-API-Key',
+            ...(detalle ? { detalle } : {}),
             ...(pista ? { pista } : {}),
         });
         return;
