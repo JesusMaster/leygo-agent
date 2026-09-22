@@ -100,7 +100,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
           <textarea #ta rows="1" [(ngModel)]="texto" (input)="ajustar(ta)" (keydown.enter)="enviar($event)"
             placeholder="Escribe un mensaje… (Enter envía, Shift+Enter salta línea)"></textarea>
           @if (chat.thinking()) {
-            <button class="btn-send stop" title="Detener" (click)="chat.cancelar()"><i class="ph ph-stop-fill"></i></button>
+            <button class="btn-send stop" title="Detener" (click)="chat.cancelar()"><i class="ph-fill ph-stop"></i></button>
           } @else {
             <button class="btn-send" title="Enviar" [disabled]="!texto.trim() && !pendientes().length" (click)="enviar()"><i class="ph ph-arrow-right"></i></button>
           }
