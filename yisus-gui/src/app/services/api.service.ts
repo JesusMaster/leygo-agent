@@ -14,6 +14,11 @@ export interface UsageRecord {
   thread_id: string; channel?: string; agent?: string;
 }
 
+export interface UsageHistoryPage {
+  rows: UsageRecord[]; total: number; page: number; pageSize: number;
+  facets: { channels: string[]; agents: string[] };
+}
+
 export interface UsageSummary {
   allHistory: UsageRecord[];
   totalCost: number; totalTokens: number; inputTokens: number; outputTokens: number;
@@ -74,6 +79,14 @@ export class ApiService {
   // ─── Consumo ──────────────────────────────────────────────────────────
   getUsage(limit = 200): Observable<UsageSummary> {
     return this.http.get<UsageSummary>(`${this.baseUrl}/api/usage?limit=${limit}`);
+  }
+
+  /** Historial paginado con filtros; el servidor pagina, la GUI no trae de más. */
+  getUsageHistory(opts: { page: number; pageSize: number; channel?: string; agent?: string }): Observable<UsageHistoryPage> {
+    const q = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });
+    if (opts.channel) q.set('channel', opts.channel);
+    if (opts.agent) q.set('agent', opts.agent);
+    return this.http.get<UsageHistoryPage>(`${this.baseUrl}/api/usage/history?${q.toString()}`);
   }
   getBudgets(): Observable<{ global: BudgetStatus; canales: BudgetStatus[] }> {
     return this.http.get<any>(`${this.baseUrl}/api/budgets`);

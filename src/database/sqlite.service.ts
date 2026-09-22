@@ -533,6 +533,39 @@ export class SqliteReminderService {
     return rows.reverse(); // Cronológico como en Leygo
   }
 
+  /**
+   * Página del historial de consumo, más reciente primero.
+   * Filtros opcionales por canal y agente; `total` es el conteo con esos filtros.
+   */
+  public getUsageHistoryPage(opts: { page?: number; pageSize?: number; channel?: string; agent?: string } = {}): { rows: UsageRecord[]; total: number; page: number; pageSize: number } {
+    const pageSize = Math.min(Math.max(Number(opts.pageSize) || 25, 1), 200);
+    const page = Math.max(Number(opts.page) || 1, 1);
+
+    const where: string[] = [];
+    const params: any[] = [];
+    if (opts.channel) { where.push(`COALESCE(channel, 'unknown') = ?`); params.push(opts.channel); }
+    if (opts.agent)   { where.push(`COALESCE(agent, 'unknown') = ?`);   params.push(opts.agent); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const total = (this.db.prepare(`SELECT COUNT(*) as n FROM usage_history ${whereSql}`).get(...params) as any).n as number;
+    const rows = this.db.prepare(`
+      SELECT id, timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, COALESCE(channel, 'unknown') as channel, COALESCE(agent, 'unknown') as agent
+      FROM usage_history
+      ${whereSql}
+      ORDER BY id DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, pageSize, (page - 1) * pageSize) as UsageRecord[];
+
+    return { rows, total, page, pageSize };
+  }
+
+  /** Valores distintos de canal y agente presentes en el historial, para los filtros de la GUI. */
+  public getUsageFacets(): { channels: string[]; agents: string[] } {
+    const channels = (this.db.prepare(`SELECT DISTINCT COALESCE(channel, 'unknown') as v FROM usage_history ORDER BY v`).all() as any[]).map((r) => r.v);
+    const agents   = (this.db.prepare(`SELECT DISTINCT COALESCE(agent, 'unknown') as v FROM usage_history ORDER BY v`).all() as any[]).map((r) => r.v);
+    return { channels, agents };
+  }
+
   public getUsageByModel(monthStartIso: string): Array<{ model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number }> {
     const stmt = this.db.prepare(`
       SELECT 

@@ -160,6 +160,23 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         }
     });
 
+    // Historial paginado. La GUI antes traía 200 filas dentro del resumen y
+    // mostraba 50: ni paginaba ni filtraba. Protegido por el guard (/api/usage/*).
+    app.get('/api/usage/history', async (req, res) => {
+        try {
+            const { sqliteReminderService } = await import('../database/sqlite.service.js');
+            const pagina = sqliteReminderService.getUsageHistoryPage({
+                page:     parseInt((req.query.page as string) || '1', 10),
+                pageSize: parseInt((req.query.pageSize as string) || '25', 10),
+                channel:  (req.query.channel as string) || undefined,
+                agent:    (req.query.agent as string) || undefined,
+            });
+            res.json({ ...pagina, facets: sqliteReminderService.getUsageFacets() });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     app.get('/api/usage/budget', async (req, res) => {
         try {
             const channel = req.query.channel as any;

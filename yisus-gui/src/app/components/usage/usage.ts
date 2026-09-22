@@ -1,6 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, UsageSummary, BudgetStatus } from '../../services/api.service';
+import { ApiService, UsageSummary, BudgetStatus, UsageHistoryPage } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -121,29 +121,67 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
         </div>
 
         <div class="card">
-          <h3>Últimos turnos</h3>
-          <p class="card-sub">Un registro por combinación de agente y modelo en cada turno.</p>
-          @if (historial().length === 0) { <div class="empty">Sin registros</div> }
+          <div class="page-head" style="margin-bottom:12px">
+            <div>
+              <h3>Últimos turnos</h3>
+              <p class="card-sub" style="margin:0">Un registro por combinación de agente y modelo en cada turno.</p>
+            </div>
+            <div class="row">
+              <select [ngModel]="filtroCanal()" (ngModelChange)="cambiarFiltro('canal', $event)" title="Canal">
+                <option value="">Todos los canales</option>
+                @for (c of facets().channels; track c) { <option [value]="c">{{ c }}</option> }
+              </select>
+              <select [ngModel]="filtroAgente()" (ngModelChange)="cambiarFiltro('agente', $event)" title="Agente">
+                <option value="">Todos los agentes</option>
+                @for (a of facets().agents; track a) { <option [value]="a">{{ a }}</option> }
+              </select>
+            </div>
+          </div>
+
+          @if (!pagina()) { <div class="empty">Cargando historial…</div> }
+          @else if (pagina()!.total === 0) { <div class="empty">Sin registros{{ hayFiltro() ? ' con esos filtros' : '' }}</div> }
           @else {
             <table>
               <tr><th>Cuándo</th><th>Canal</th><th>Agente</th><th>Modelo</th><th>Entrada</th><th class="num">in / out</th><th class="num">Costo</th></tr>
-              @for (r of historial(); track r.id) {
+              @for (r of pagina()!.rows; track r.id) {
                 <tr>
                   <td style="color:var(--text-dim);white-space:nowrap">{{ r.timestamp | friendlyDate }}</td>
                   <td><span class="badge dim">{{ r.channel || '—' }}</span></td>
                   <td>{{ r.agent || '—' }}</td>
                   <td style="color:var(--text-dim)">{{ r.model }}</td>
-                  <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis">{{ r.user_input }}</td>
+                  <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" [title]="r.user_input">{{ r.user_input }}</td>
                   <td class="num">{{ r.input_tokens.toLocaleString('es-CL') }} / {{ r.output_tokens.toLocaleString('es-CL') }}</td>
                   <td class="num">{{ '$' + r.cost_usd.toFixed(4) }}</td>
                 </tr>
               }
             </table>
+
+            <div class="pager">
+              <span class="pager-info">
+                {{ desde() }}–{{ hasta() }} de {{ pagina()!.total.toLocaleString('es-CL') }}
+              </span>
+              <div class="row">
+                <select [ngModel]="tamano()" (ngModelChange)="cambiarTamano($event)" title="Filas por página">
+                  @for (n of tamanos; track n) { <option [value]="n">{{ n }} por página</option> }
+                </select>
+                <button class="btn-icon" title="Primera" [disabled]="pag() === 1" (click)="ir(1)"><i class="ph ph-caret-double-left"></i></button>
+                <button class="btn-icon" title="Anterior" [disabled]="pag() === 1" (click)="ir(pag() - 1)"><i class="ph ph-caret-left"></i></button>
+                <span class="pager-info">página {{ pag() }} de {{ totalPaginas() }}</span>
+                <button class="btn-icon" title="Siguiente" [disabled]="pag() >= totalPaginas()" (click)="ir(pag() + 1)"><i class="ph ph-caret-right"></i></button>
+                <button class="btn-icon" title="Última" [disabled]="pag() >= totalPaginas()" (click)="ir(totalPaginas())"><i class="ph ph-caret-double-right"></i></button>
+              </div>
+            </div>
           }
         </div>
       }
     </div>
   `,
+  styles: [`
+    .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; margin-top: 4px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .pager-info { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+    .pager select { padding: 6px 8px; font-size: 12px; }
+    .btn-icon[disabled] { opacity: .35; cursor: default; pointer-events: none; }
+  `],
 })
 export class UsageComponent {
   private api = inject(ApiService);
@@ -155,8 +193,25 @@ export class UsageComponent {
 
   constructor() { this.load(); }
 
+  // ─── Historial paginado ────────────────────────────────────────────────
+  pagina = signal<UsageHistoryPage | null>(null);
+  pag = signal(1);
+  tamano = signal(this.leerTamano());
+  filtroCanal = signal('');
+  filtroAgente = signal('');
+  readonly tamanos = [10, 25, 50, 100];
+
+  /** Las facetas se conservan aunque la página actual venga vacía por un filtro. */
+  facets = signal<{ channels: string[]; agents: string[] }>({ channels: [], agents: [] });
+
+  totalPaginas = computed(() => Math.max(1, Math.ceil((this.pagina()?.total || 0) / this.tamano())));
+  desde = computed(() => (this.pagina()?.total ? (this.pag() - 1) * this.tamano() + 1 : 0));
+  hasta = computed(() => Math.min(this.pag() * this.tamano(), this.pagina()?.total || 0));
+  hayFiltro = computed(() => !!(this.filtroCanal() || this.filtroAgente()));
+
   load() {
-    this.api.getUsage(200).subscribe({
+    // El resumen ya no arrastra el historial: eso lo sirve /api/usage/history paginado.
+    this.api.getUsage(1).subscribe({
       next: (d) => this.data.set(d),
       error: () => this.toast.error('No se pudo cargar el consumo'),
     });
@@ -164,10 +219,50 @@ export class UsageComponent {
       next: (b) => this.budgets.set(b),
       error: () => {},
     });
+    this.cargarHistorial();
   }
 
-  historial() {
-    return [...(this.data()?.allHistory || [])].reverse().slice(0, 50);
+  cargarHistorial() {
+    this.api.getUsageHistory({
+      page: this.pag(),
+      pageSize: this.tamano(),
+      channel: this.filtroCanal() || undefined,
+      agent: this.filtroAgente() || undefined,
+    }).subscribe({
+      next: (p) => {
+        // Si un filtro dejó la página fuera de rango (p. ej. cambió el total), vuelve a la última válida.
+        const ultima = Math.max(1, Math.ceil(p.total / p.pageSize));
+        if (p.page > ultima && p.total > 0) { this.pag.set(ultima); this.cargarHistorial(); return; }
+        this.pagina.set(p);
+        if (p.facets) this.facets.set(p.facets);
+      },
+      error: () => this.toast.error('No se pudo cargar el historial'),
+    });
+  }
+
+  ir(p: number) {
+    const destino = Math.min(Math.max(1, p), this.totalPaginas());
+    if (destino === this.pag()) return;
+    this.pag.set(destino);
+    this.cargarHistorial();
+  }
+
+  cambiarTamano(n: number | string) {
+    const v = Number(n) || 25;
+    this.tamano.set(v);
+    try { localStorage.setItem('yisus_usage_page_size', String(v)); } catch {}
+    this.pag.set(1);
+    this.cargarHistorial();
+  }
+
+  cambiarFiltro(cual: 'canal' | 'agente', valor: string) {
+    (cual === 'canal' ? this.filtroCanal : this.filtroAgente).set(valor || '');
+    this.pag.set(1);
+    this.cargarHistorial();
+  }
+
+  private leerTamano(): number {
+    try { const v = Number(localStorage.getItem('yisus_usage_page_size')); return [10, 25, 50, 100].includes(v) ? v : 25; } catch { return 25; }
   }
 
   todosLosPresupuestos(): BudgetStatus[] {
