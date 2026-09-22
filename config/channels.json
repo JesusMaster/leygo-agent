@@ -78,8 +78,7 @@
       "set_monthly_budget",
       "refresh_pricing_catalog",
       "buzz_send_message",
-      "buzz_status",
-      "account_agent"
+      "buzz_status"
     ]
   }
 }

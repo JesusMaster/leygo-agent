@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, A2AToken } from '../../services/api.service';
+import { ApiService, A2AToken, ToolDetalle } from '../../services/api.service';
+import { ToolPickerComponent } from '../tool-picker/tool-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -13,7 +14,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
  */
 @Component({
   selector: 'app-tokens',
-  imports: [FormsModule, FriendlyDatePipe],
+  imports: [FormsModule, FriendlyDatePipe, ToolPickerComponent],
   template: `
     <div class="page">
       <div class="page-head">
@@ -56,14 +57,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
             recibe una negativa explícita en vez de un silencio.
             Para publicar o retirar skills del canal, ve a <strong>Canales y tools</strong>.
           </p>
-          <div class="chips">
-            @for (t of catalogo(); track t) {
-              <span class="chip" [class.on]="toolsNuevo().includes(t)" (click)="toggleNuevo(t)">
-                @if (toolsNuevo().includes(t)) { <i class="ph ph-check"></i> }
-                {{ t }}
-              </span>
-            }
-          </div>
+          <app-tool-picker [catalogo]="detalle()" [seleccion]="toolsNuevo()" (seleccionChange)="toolsNuevo.set($event)" />
           <div class="row" style="margin-top:16px">
             <span class="spacer"></span>
             <button class="btn-secondary" (click)="creando.set(false)">Cancelar</button>
@@ -84,28 +78,18 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <th>Nombre</th><th>Token</th><th>Herramientas</th><th>Último uso</th><th>Estado</th><th></th>
             </tr>
             @for (t of tokens(); track t.name) {
-              <tr>
+              <tr [class.editing]="editando() === t.name">
                 <td><strong>{{ t.name }}</strong><br><span style="color:var(--text-dim);font-size:12px">creado {{ t.created_at | friendlyDate }}</span></td>
                 <td class="mono" style="color:var(--text-dim)">{{ t.preview }}</td>
                 <td>
-                  @if (editando() === t.name) {
+                  @if (t.tools.length === 0) {
+                    <span class="badge dim">sin herramientas</span>
+                  } @else {
                     <div class="chips">
-                      @for (tool of catalogo(); track tool) {
-                        <span class="chip" [class.on]="toolsEdit().includes(tool)" (click)="toggleEdit(tool)">{{ tool }}</span>
+                      @for (tool of t.tools; track tool) {
+                        <span class="chip readonly" [title]="tituloDe(tool)">{{ tool }}</span>
                       }
                     </div>
-                    <div class="row" style="margin-top:10px">
-                      <button class="btn-secondary" (click)="editando.set(null)">Cancelar</button>
-                      <button class="btn-primary" (click)="guardarAlcance(t)">Guardar alcance</button>
-                    </div>
-                  } @else {
-                    @if (t.tools.length === 0) {
-                      <span class="badge dim">sin herramientas</span>
-                    } @else {
-                      <div class="chips">
-                        @for (tool of t.tools; track tool) { <span class="chip readonly">{{ tool }}</span> }
-                      </div>
-                    }
                   }
                 </td>
                 <td style="color:var(--text-dim)">{{ t.last_used_at | friendlyDate }}</td>
@@ -122,6 +106,28 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                   </div>
                 </td>
               </tr>
+              @if (editando() === t.name) {
+                <tr class="editor-row">
+                  <td colspan="6">
+                    <div class="editor-head">
+                      <div>
+                        <strong>Alcance de "{{ t.name }}"</strong>
+                        <p class="card-sub" style="margin:2px 0 0">
+                          Todas las herramientas publicadas se montan en el agente público; este token solo puede <em>usar</em> las marcadas.
+                          Si intenta otra, recibe una negativa explícita.
+                        </p>
+                      </div>
+                      <div class="row">
+                        <button class="btn-secondary" (click)="editando.set(null)">Cancelar</button>
+                        <button class="btn-primary" [disabled]="!hayCambios(t)" (click)="guardarAlcance(t)">
+                          <i class="ph ph-floppy-disk"></i> Guardar alcance
+                        </button>
+                      </div>
+                    </div>
+                    <app-tool-picker [catalogo]="detalle()" [seleccion]="toolsEdit()" (seleccionChange)="toolsEdit.set($event)" />
+                  </td>
+                </tr>
+              }
             }
           </table>
         }
@@ -137,6 +143,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
       </div>
     </div>
   `,
+  styles: [`
+    tr.editing td { border-bottom-color: transparent; }
+    tr.editor-row > td { padding: 4px 12px 16px; background: rgba(129,140,248,.04); }
+    .editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 8px 0 12px; }
+  `],
 })
 export class TokensComponent {
   private api = inject(ApiService);
@@ -144,6 +155,7 @@ export class TokensComponent {
 
   tokens = signal<A2AToken[]>([]);
   catalogo = signal<string[]>([]);
+  detalle = signal<ToolDetalle[]>([]);
   creando = signal(false);
   nuevoToken = signal<string | null>(null);
   editando = signal<string | null>(null);
@@ -159,7 +171,16 @@ export class TokensComponent {
       error: () => this.toast.error('No se pudieron cargar los tokens'),
     });
     this.api.getDisponiblesA2A().subscribe({
-      next: (r) => this.catalogo.set(r.disponibles),
+      next: (r) => {
+        this.catalogo.set(r.disponibles);
+        // Solo las publicadas en el canal: el resto no se puede conceder.
+        const publicadas = new Set(r.disponibles);
+        const detalle = (r.detalle && r.detalle.length)
+          ? r.detalle
+          // Backend sin reiniciar (todavía no manda `detalle`): se muestra sin descripciones en vez de vacío.
+          : r.disponibles.map((name) => ({ name, titulo: name, descripcion: '', grupo: 'otros', etiqueta: 'Herramientas' }));
+        this.detalle.set(detalle.filter((d) => publicadas.has(d.name)));
+      },
       error: () => {},
     });
   }
@@ -170,11 +191,14 @@ export class TokensComponent {
     this.creando.set(true);
   }
 
-  toggleNuevo(t: string) {
-    this.toolsNuevo.update((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]));
+  tituloDe(tool: string): string {
+    return this.detalle().find((d) => d.name === tool)?.titulo || tool;
   }
-  toggleEdit(t: string) {
-    this.toolsEdit.update((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]));
+
+  hayCambios(t: A2AToken): boolean {
+    const a = [...t.tools].sort().join(',');
+    const b = [...this.toolsEdit()].sort().join(',');
+    return a !== b;
   }
 
   crear() {

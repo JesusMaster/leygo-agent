@@ -121,3 +121,23 @@ export function expandToolSpec(spec: string[]): string[] {
 export function resolveTools(spec: string[]): any[] {
   return expandToolSpec(spec).map((name) => TOOL_CATALOG[name]).filter(Boolean);
 }
+
+/** Etiquetas legibles para los grupos, en el orden en que se muestran en la GUI. */
+export const TOOL_GROUP_LABELS: Record<string, string> = {
+  publico:   'Conocimiento público',
+  knowledge: 'Conocimiento y memoria',
+  workspace: 'Google Workspace',
+  triage:    'Escalamiento',
+  reminders: 'Recordatorios y digest',
+  webhooks:  'Webhooks',
+  usage:     'Consumo y presupuesto',
+  buzz:      'Buzz / Nostr',
+};
+
+/** Primer grupo (según el orden de TOOL_GROUP_LABELS) al que pertenece la herramienta. */
+export function grupoDeTool(tool: string): { grupo: string; etiqueta: string } {
+  for (const g of Object.keys(TOOL_GROUP_LABELS)) {
+    if ((TOOL_GROUPS[g] || []).includes(tool)) return { grupo: g, etiqueta: TOOL_GROUP_LABELS[g] };
+  }
+  return { grupo: 'otros', etiqueta: 'Otros' };
+}

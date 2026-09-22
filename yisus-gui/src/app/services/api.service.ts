@@ -36,6 +36,10 @@ export interface ChannelsConfig {
   };
 }
 
+export interface ToolDetalle {
+  name: string; titulo: string; descripcion: string; grupo: string; etiqueta: string;
+}
+
 export interface A2AToken {
   name: string; tools: string[]; enabled: boolean;
   created_at: number; last_used_at?: number; preview: string;
@@ -111,8 +115,8 @@ export class ApiService {
 
   // ─── Tokens A2A ───────────────────────────────────────────────────────
   /** Techo del canal A2A: qué se monta en el agente público y se publica como skill */
-  getDisponiblesA2A(): Observable<{ disponibles: string[]; catalogo: string[] }> {
-    return this.http.get<any>(`${this.baseUrl}/api/a2a/disponibles`);
+  getDisponiblesA2A(): Observable<{ disponibles: string[]; catalogo: string[]; detalle: ToolDetalle[] }> {
+    return this.http.get<{ disponibles: string[]; catalogo: string[]; detalle: ToolDetalle[] }>(`${this.baseUrl}/api/a2a/disponibles`);
   }
   saveDisponiblesA2A(tools: string[]): Observable<any> {
     return this.http.put(`${this.baseUrl}/api/a2a/disponibles`, { tools });

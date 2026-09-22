@@ -182,6 +182,14 @@ const SKILLS_POR_TOOL: Record<string, any> = {
     },
 };
 
+/** Título y descripción legibles de una herramienta (los mismos que ve un cliente A2A en la card). */
+export function describirTool(tool: string): { titulo: string; descripcion: string } {
+    const d = SKILLS_POR_TOOL[tool];
+    return d
+        ? { titulo: d.name, descripcion: d.description }
+        : { titulo: tool.replace(/_/g, ' '), descripcion: `Herramienta de operaciones: ${tool}` };
+}
+
 /**
  * Construye dinámicamente la lista de skills según las herramientas disponibles
  * en el techo del canal A2A (config/channels.json).

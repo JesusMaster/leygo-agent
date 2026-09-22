@@ -3,7 +3,8 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
-import { allToolNames, TOOL_GROUPS, expandToolSpec } from '../agents/tool_catalog.js';
+import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool } from '../agents/tool_catalog.js';
+import { describirTool } from '../a2a/card.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { adminGuard } from './admin_guard.js';
 
@@ -92,7 +93,13 @@ export default function createAdminRoutes() {
    * Un token solo puede conceder algo que esté acá.
    */
   app.get('/api/a2a/disponibles', (_req, res) => {
-    res.json({ disponibles: getToolsDisponiblesA2A(), catalogo: allToolNames() });
+    const catalogo = allToolNames();
+    res.json({
+      disponibles: getToolsDisponiblesA2A(),
+      catalogo,
+      // Para que la GUI muestre una tabla con nombre y descripción en vez de chips.
+      detalle: catalogo.map((name) => ({ name, ...describirTool(name), ...grupoDeTool(name) })),
+    });
   });
 
   app.put('/api/a2a/disponibles', (req, res) => {
