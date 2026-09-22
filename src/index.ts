@@ -75,7 +75,7 @@ if (app) {
     next();
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' })); // adjuntos del chat viajan inline (base64)
   app.use(express.urlencoded({ extended: true }));
   app.use('/', createApiRoutes(runner, sessionService));
 }

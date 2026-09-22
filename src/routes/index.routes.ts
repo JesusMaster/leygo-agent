@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import express from 'express';
 import { Runner } from '@google/adk';
-import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
+import { beginUsageScope, flushUsageScope, summarizeUsageScope } from '../utils/usage_collector.js';
 import { USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { RedisSessionService } from '../services/redis_session.service.js';
 import { telegramBotService } from '../services/telegram_bot.service.js';
@@ -329,7 +329,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     });
 
     // Streaming SSE (equivalente a POST /run_sse)
-    app.post('/run_sse', express.json(), async (req, res) => {
+    app.post('/run_sse', express.json({ limit: '25mb' }), async (req, res) => {
         const { appName, userId, sessionId, newMessage } = req.body;
 
         res.setHeader('Content-Type',  'text/event-stream');
@@ -342,13 +342,15 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         }
 
         // el scope de uso se abre justo antes de correr el Runner
-        const promptText = newMessage?.parts?.[0]?.text || 'API /run_sse';
+        const promptText = (newMessage?.parts || []).map((p: any) => p?.text).filter(Boolean).join(' ').slice(0, 300) || 'API /run_sse (adjunto)';
 
         try {
             beginUsageScope('api', sessionId, promptText);
             for await (const event of runner.runAsync({ userId, sessionId: session.id, newMessage })) {
                 res.write(`data: ${JSON.stringify(event)}\n\n`);
             }
+            // Consumo del turno para la GUI (tokens y costo), antes de persistirlo
+            res.write(`data: ${JSON.stringify({ type: 'usage', ...summarizeUsageScope() })}\n\n`);
             flushUsageScope().catch(() => {});
             res.write('data: [DONE]\n\n');
         } catch (e: any) {
