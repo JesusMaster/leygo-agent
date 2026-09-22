@@ -24,11 +24,16 @@ export const escalateToJesus = new FunctionTool({
       const id = randomUUID().slice(0, 8);
       const channel = currentUsageScope()?.channel || 'system';
       const thread_id = currentUsageScope()?.threadId || null;
+      // Import perezoso: channels.ts importa el catálogo de herramientas, que importa esta; en
+      // estático es un ciclo y TOOLS_DISPONIBLES_A2A_POR_DEFECTO queda sin inicializar.
+      const { currentA2AScope } = await import('../../config/channels.js');
+      const a2a_token = currentA2AScope()?.name || null;
 
       sqliteReminderService.createEscalation({
         id,
         channel,
         thread_id,
+        a2a_token,
         requester: requester || 'desconocido',
         topic,
         summary,

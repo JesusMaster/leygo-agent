@@ -27,6 +27,11 @@ import { ApiService, TaskChannel, TaskDelivery, TaskDestinos } from '../../servi
                   <option value="">Elige un espacio…</option>
                   @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
                 </select>
+              } @else if (c.id === 'a2a' && destinos()?.peers?.length) {
+                <select [ngModel]="target(c.id)" (ngModelChange)="setTarget(c.id, $event)">
+                  <option value="">Elige un agente…</option>
+                  @for (p of destinos()!.peers; track p) { <option [value]="p">{{ p }}</option> }
+                </select>
               } @else if (c.id === 'buzz' && destinos()?.buzz?.length) {
                 <select [ngModel]="target(c.id)" (ngModelChange)="setTarget(c.id, $event)">
                   <option value="">Canal por defecto del bridge</option>
@@ -73,6 +78,7 @@ export class DeliveryPickerComponent {
     { id: 'chat',     nombre: 'Google Chat', icono: 'ph-chats-circle',    placeholder: 'spaces/AAAA…' },
     { id: 'buzz',     nombre: 'Buzz (Nostr)',icono: 'ph-broadcast',       placeholder: 'id del canal, o vacío para el configurado' },
     { id: 'email',    nombre: 'Email',       icono: 'ph-envelope-simple', placeholder: 'alguien@dcanje.com' },
+    { id: 'a2a',      nombre: 'Agente A2A',  icono: 'ph-robot',           placeholder: 'nombre del agente remoto' },
   ];
 
   activo(c: TaskChannel) { return this.value().some((d) => d.channel === c); }
@@ -100,7 +106,7 @@ export class DeliveryPickerComponent {
     this.cargando.set(true);
     this.api.getTaskDestinos().subscribe({
       next: (d) => { this.destinos.set(d); this.cargando.set(false); despues?.(); this.cdr.markForCheck(); },
-      error: () => { this.cargando.set(false); this.destinos.set({ chat: [], buzz: [], email: null, errores: ['No se pudieron cargar los destinos'] }); },
+      error: () => { this.cargando.set(false); this.destinos.set({ chat: [], buzz: [], email: null, peers: [], errores: ['No se pudieron cargar los destinos'] }); },
     });
   }
 
@@ -112,6 +118,7 @@ export class DeliveryPickerComponent {
       switch (d.channel) {
         case 'chat': return /^spaces\/[A-Za-z0-9_-]+$/.test(t);
         case 'email': return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+        case 'a2a': return t.length > 0;
         default: return true;
       }
     });

@@ -14,6 +14,7 @@ import {
 } from './tools/webhook.tools.js';
 import { getTokenUsageTool, setMonthlyBudgetTool, refreshPricingCatalogTool } from './tools/usage.tools.js';
 import { buzzSendMessage, buzzStatus } from './tools/nostr.tools.js';
+import { a2aSendMessageTool, a2aListPeersTool } from './tools/a2a.tools.js';
 
 /**
  * Catálogo único de herramientas expuestas al Coordinator.
@@ -51,6 +52,10 @@ export const TOOL_CATALOG: Record<string, any> = {
   // Buzz / Nostr
   buzz_send_message: buzzSendMessage,
   buzz_status:       buzzStatus,
+
+  // Otros agentes (Yisus como cliente A2A)
+  a2a_send_message: a2aSendMessageTool,
+  a2a_list_peers:   a2aListPeersTool,
 };
 
 /**
@@ -67,6 +72,7 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   webhooks:   ['get_recent_webhooks', 'create_custom_webhook', 'list_custom_webhooks', 'toggle_custom_webhook', 'get_custom_webhook_logs'],
   usage:      ['get_token_usage', 'set_monthly_budget', 'refresh_pricing_catalog'],
   buzz:       ['buzz_send_message', 'buzz_status'],
+  peers:      ['a2a_send_message', 'a2a_list_peers'],
 };
 
 /**
@@ -133,6 +139,7 @@ export const TOOL_GROUP_LABELS: Record<string, string> = {
   webhooks:  'Webhooks',
   usage:     'Consumo y presupuesto',
   buzz:      'Buzz / Nostr',
+  peers:     'Otros agentes (A2A saliente)',
 };
 
 /** Primer grupo (según el orden de TOOL_GROUP_LABELS) al que pertenece la herramienta. */

@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, A2AToken, ToolDetalle } from '../../services/api.service';
+import { ApiService, A2AToken, ToolDetalle, A2APeer } from '../../services/api.service';
 import { ToolPickerComponent } from '../tool-picker/tool-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
@@ -133,6 +133,75 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
         }
       </div>
 
+      <!-- ─── Agentes remotos: Yisus como cliente A2A ─────────────────────── -->
+      <div class="card">
+        <div class="page-head" style="margin-bottom:8px">
+          <div>
+            <h3>Agentes remotos</h3>
+            <p class="card-sub" style="margin:0">
+              A2A es de ida y vuelta: acá van los agentes a los que Yisus puede <em>escribir</em> (OpenClaw, por ejemplo).
+              Se usan desde el chat (<code>a2a_send_message</code>), como canal de entrega de tareas programadas,
+              y para devolverle a ese agente las resoluciones de lo que escaló.
+            </p>
+          </div>
+          <button class="btn-secondary" (click)="creandoPeer.set(!creandoPeer())"><i class="ph ph-plus"></i> Agregar agente</button>
+        </div>
+
+        @if (creandoPeer()) {
+          <div class="peer-form">
+            <label class="field"><span>Nombre</span><input type="text" [(ngModel)]="peerForm.name" placeholder="openclaw" /></label>
+            <label class="field"><span>URL de su Agent Card</span><input type="text" [(ngModel)]="peerForm.card_url" placeholder="https://openclaw.tu-dominio/.well-known/agent-card.json" /></label>
+            <label class="field"><span>Token que él nos pide (Bearer)</span><input type="password" [(ngModel)]="peerForm.token" placeholder="opcional" /></label>
+            <label class="field">
+              <span>Token con el que él nos escribe</span>
+              <select [(ngModel)]="peerForm.token_name">
+                <option value="">— sin asociar —</option>
+                @for (t of tokensEntrantes(); track t) { <option [value]="t">{{ t }}</option> }
+              </select>
+              <small class="hint">Sirve para reconocerlo: si escala algo por A2A, la resolución se le devuelve por este canal.</small>
+            </label>
+            <div class="row" style="grid-column: 1 / -1">
+              <span class="spacer"></span>
+              <button class="btn-secondary" (click)="creandoPeer.set(false)">Cancelar</button>
+              <button class="btn-primary" [disabled]="!peerForm.name.trim() || !peerForm.card_url.trim()" (click)="crearPeer()">Guardar</button>
+            </div>
+          </div>
+        }
+
+        @if (peers().length === 0) {
+          <div class="empty">Sin agentes remotos. Agrega la Agent Card de OpenClaw para que Yisus pueda hablarle.</div>
+        } @else {
+          <table>
+            <tr><th>Nombre</th><th>Agent Card</th><th>Nos escribe como</th><th>Último uso</th><th>Estado</th><th></th></tr>
+            @for (p of peers(); track p.name) {
+              <tr>
+                <td><strong>{{ p.name }}</strong>@if (p.tokenPreview) {<br><span class="mono" style="font-size:12px;color:var(--text-dim)">{{ p.tokenPreview }}</span>}</td>
+                <td><code style="font-size:12px;word-break:break-all">{{ p.card_url }}</code>
+                  @if (p.last_error) { <br><span style="font-size:12px;color:var(--danger)">{{ p.last_error }}</span> }
+                </td>
+                <td style="color:var(--text-dim)">{{ p.token_name || '—' }}</td>
+                <td style="color:var(--text-dim)">{{ p.last_used_at | friendlyDate }}</td>
+                <td>@if (p.enabled) { <span class="badge ok">activo</span> } @else { <span class="badge dim">deshabilitado</span> }</td>
+                <td>
+                  <div class="row">
+                    <button class="btn-icon" title="Probar conexión" [disabled]="probando() === p.name" (click)="probarPeer(p)"><i class="ph" [class.ph-plugs-connected]="probando() !== p.name" [class.ph-circle-notch]="probando() === p.name"></i></button>
+                    <button class="btn-icon" title="Enviar mensaje de prueba" (click)="mensajePeer(p)"><i class="ph ph-paper-plane-tilt"></i></button>
+                    <button class="btn-icon" [title]="p.enabled ? 'Deshabilitar' : 'Habilitar'" (click)="alternarPeer(p)"><i class="ph" [class.ph-prohibit]="p.enabled" [class.ph-check-circle]="!p.enabled"></i></button>
+                    <button class="btn-icon" title="Eliminar" (click)="eliminarPeer(p)"><i class="ph ph-trash"></i></button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </table>
+          @if (respuestaPeer()) {
+            <div style="margin-top:12px;padding:12px;background:var(--bg-input);border-radius:8px;border:1px solid var(--border-light)">
+              <span style="font-size:12px;color:var(--text-dim)">Respuesta de {{ respuestaPeer()!.peer }}</span>
+              <p style="white-space:pre-wrap;margin-top:4px;font-size:14px">{{ respuestaPeer()!.texto }}</p>
+            </div>
+          }
+        }
+      </div>
+
       <div class="card">
         <h3>Cómo se usa</h3>
         <p class="card-sub">El cliente A2A presenta el token en cualquiera de estas dos formas:</p>
@@ -144,6 +213,10 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     </div>
   `,
   styles: [`
+    .peer-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; padding: 14px; margin: 8px 0 16px; border: 1px solid var(--border-light); border-radius: 10px; background: var(--bg-input); }
+    .peer-form .field { margin: 0; }
+    .peer-form .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+    @media (max-width: 720px) { .peer-form { grid-template-columns: 1fr; } }
     tr.editing td { border-bottom-color: transparent; }
     tr.editor-row > td { padding: 4px 12px 16px; background: rgba(129,140,248,.04); }
     .editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 8px 0 12px; }
@@ -163,9 +236,21 @@ export class TokensComponent {
   toolsNuevo = signal<string[]>([]);
   nombre = '';
 
+  // ─── Agentes remotos ───────────────────────────────────────────────────
+  peers = signal<A2APeer[]>([]);
+  tokensEntrantes = signal<string[]>([]);
+  creandoPeer = signal(false);
+  probando = signal<string | null>(null);
+  respuestaPeer = signal<{ peer: string; texto: string } | null>(null);
+  peerForm = { name: '', card_url: '', token: '', token_name: '' };
+
   constructor() { this.load(); }
 
   load() {
+    this.api.getPeers().subscribe({
+      next: (r) => { this.peers.set(r.peers || []); this.tokensEntrantes.set(r.tokensEntrantes || []); },
+      error: () => {},
+    });
     this.api.getTokens().subscribe({
       next: (r) => this.tokens.set(r.tokens),
       error: () => this.toast.error('No se pudieron cargar los tokens'),
@@ -189,6 +274,40 @@ export class TokensComponent {
     this.nombre = '';
     this.toolsNuevo.set([]);
     this.creando.set(true);
+  }
+
+  crearPeer() {
+    const f = this.peerForm;
+    this.api.createPeer({ name: f.name.trim(), card_url: f.card_url.trim(), token: f.token.trim() || undefined, token_name: f.token_name || undefined }).subscribe({
+      next: () => { this.creandoPeer.set(false); this.peerForm = { name: '', card_url: '', token: '', token_name: '' }; this.load(); this.toast.ok('Agente remoto agregado'); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo agregar'),
+    });
+  }
+  probarPeer(p: A2APeer) {
+    this.probando.set(p.name);
+    this.api.testPeer(p.name).subscribe({
+      next: (r) => {
+        this.probando.set(null); this.load();
+        r.ok ? this.toast.ok(`Conectado: "${r.agente}" · ${r.skills} skills · protocolo ${r.version || '?'}`) : this.toast.error(`No conecta: ${r.error}`);
+      },
+      error: () => { this.probando.set(null); this.toast.error('No se pudo probar'); },
+    });
+  }
+  mensajePeer(p: A2APeer) {
+    const texto = prompt(`Mensaje para "${p.name}":`, 'Hola, soy Yisus. ¿Qué puedes hacer?');
+    if (!texto) return;
+    this.respuestaPeer.set({ peer: p.name, texto: '…' });
+    this.api.sendToPeer(p.name, texto, true).subscribe({
+      next: (r) => { this.respuestaPeer.set({ peer: p.name, texto: r.texto }); this.load(); },
+      error: (e) => { this.respuestaPeer.set(null); this.toast.error(e?.error?.error || 'No respondió'); this.load(); },
+    });
+  }
+  alternarPeer(p: A2APeer) {
+    this.api.updatePeer(p.name, { enabled: !p.enabled }).subscribe({ next: () => this.load(), error: () => this.toast.error('No se pudo cambiar') });
+  }
+  eliminarPeer(p: A2APeer) {
+    if (!confirm(`¿Eliminar el agente remoto "${p.name}"?`)) return;
+    this.api.deletePeer(p.name).subscribe({ next: () => { this.load(); this.toast.ok('Eliminado'); }, error: () => this.toast.error('No se pudo eliminar') });
   }
 
   tituloDe(tool: string): string {

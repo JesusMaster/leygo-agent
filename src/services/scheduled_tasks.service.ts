@@ -216,6 +216,12 @@ export class ScheduledTasksService {
         if (r.status !== 'success') throw new Error(r.message || 'no se pudo publicar');
         return;
       }
+      case 'a2a': {
+        if (!d.target) throw new Error('falta el agente remoto de destino');
+        const { a2aPeersService } = await import('./a2a_peers.service.js');
+        await a2aPeersService.send(d.target, autonoma ? texto : `Recordatorio: ${texto}`, { nuevaConversacion: true });
+        return;
+      }
       case 'telegram':
       default:
         await telegramBotService.sendDirectMessage(autonoma ? formatear(texto) : `⏰ ${escapar(texto)}`, { parseMode: 'HTML' });
@@ -223,7 +229,7 @@ export class ScheduledTasksService {
   }
 
   private nombreCanal(c: ScheduledTaskChannel): string {
-    return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email' }[c] || c;
+    return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email', a2a: 'Agente A2A' }[c] || c;
   }
 
   /** Valida y normaliza la lista de destinos; acepta también el par channel/target antiguo. */
@@ -243,6 +249,9 @@ export class ScheduledTasksService {
           if (!tg || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tg)) throw new Error('Para email indica un correo de destino válido.');
           break;
         case 'buzz': break;
+        case 'a2a':
+          if (!tg) throw new Error('Para A2A indica el agente remoto de destino.');
+          break;
         default: throw new Error(`Canal desconocido: ${c}`);
       }
       const clave = `${c}|${c === 'telegram' ? '' : tg || ''}`;
@@ -358,6 +367,7 @@ export class ScheduledTasksService {
         case 'chat': return 'Google Chat';
         case 'email': return `email a ${d.target}`;
         case 'buzz': return 'Buzz';
+        case 'a2a': return `agente ${d.target}`;
         default: return 'Telegram';
       }
     });

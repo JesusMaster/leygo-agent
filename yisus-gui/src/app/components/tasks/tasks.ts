@@ -282,8 +282,8 @@ export class TasksComponent {
     const corte = m.length > 60 ? m.slice(0, 60).replace(/\s\S*$/, '') + '…' : m;
     return (t.autonomous ? 'Rutina: ' : 'Recordatorio: ') + corte;
   }
-  etiquetaCanal(c: TaskChannel) { return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email' }[c || 'telegram']; }
-  iconoCanal(c: TaskChannel) { return { telegram: 'ph-telegram-logo', chat: 'ph-chats-circle', buzz: 'ph-broadcast', email: 'ph-envelope-simple' }[c || 'telegram']; }
+  etiquetaCanal(c: TaskChannel) { return { telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email', a2a: 'Agente A2A' }[c || 'telegram']; }
+  iconoCanal(c: TaskChannel) { return { telegram: 'ph-telegram-logo', chat: 'ph-chats-circle', buzz: 'ph-broadcast', email: 'ph-envelope-simple', a2a: 'ph-robot' }[c || 'telegram']; }
   etiquetaTipo(k: TaskKind) { return { once: 'Una vez', interval: 'Recurrente', daily: 'Diario', cron: 'Cron' }[k]; }
   iconoTipo(k: TaskKind) { return { once: 'ph-calendar-blank', interval: 'ph-arrows-clockwise', daily: 'ph-sun', cron: 'ph-code' }[k]; }
   fecha(ms: number) { return new Date(ms).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' }); }

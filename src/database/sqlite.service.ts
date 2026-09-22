@@ -44,9 +44,22 @@ export interface CustomWebhookLog {
   created_at: number;
 }
 
+export interface A2APeer {
+  name: string;
+  card_url: string;
+  token: string | null;
+  /** Nombre del token entrante con el que ese agente nos escribe, para reconocerlo (escalamientos). */
+  token_name: string | null;
+  enabled: boolean;
+  last_context_id: string | null;
+  created_at: number;
+  last_used_at: number | null;
+  last_error: string | null;
+}
+
 export type ScheduledTaskKind = 'once' | 'interval' | 'daily' | 'cron';
 export type ScheduledTaskStatus = 'active' | 'paused' | 'done';
-export type ScheduledTaskChannel = 'telegram' | 'chat' | 'buzz' | 'email';
+export type ScheduledTaskChannel = 'telegram' | 'chat' | 'buzz' | 'email' | 'a2a';
 /** Un destino de entrega. target: espacio de Chat, correo, o canal de Buzz (opcional). */
 export interface TaskDelivery { channel: ScheduledTaskChannel; target?: string | null; }
 
@@ -257,7 +270,8 @@ export class SqliteReminderService {
         resolution TEXT,
         thread_id TEXT,
         delivered_at INTEGER,
-        delivery_note TEXT
+        delivery_note TEXT,
+        a2a_token TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status, created_at DESC);
     `);
@@ -271,6 +285,21 @@ export class SqliteReminderService {
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL,
         last_used_at INTEGER
+      );
+    `);
+
+    // Agentes A2A remotos a los que Yisus puede escribir (lado cliente)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS a2a_peers (
+        name TEXT PRIMARY KEY,
+        card_url TEXT NOT NULL,
+        token TEXT,
+        token_name TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_context_id TEXT,
+        created_at INTEGER NOT NULL,
+        last_used_at INTEGER,
+        last_error TEXT
       );
     `);
 
@@ -710,6 +739,36 @@ export class SqliteReminderService {
     return { name: row.name, tools: JSON.parse(row.tools || '[]') };
   }
 
+  // ─── Agentes A2A remotos (peers) ───────────────────────────────────────────
+
+  public listA2APeers(): A2APeer[] {
+    return (this.db.prepare(`SELECT * FROM a2a_peers ORDER BY created_at ASC`).all() as any[]).map((r) => ({ ...r, enabled: !!r.enabled }));
+  }
+
+  public getA2APeer(name: string): A2APeer | null {
+    const r = this.db.prepare(`SELECT * FROM a2a_peers WHERE name = ?`).get(name) as any;
+    return r ? { ...r, enabled: !!r.enabled } : null;
+  }
+
+  public createA2APeer(p: { name: string; card_url: string; token?: string | null; token_name?: string | null }): void {
+    this.db.prepare(`INSERT INTO a2a_peers (name, card_url, token, token_name, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)`)
+      .run(p.name, p.card_url, p.token ?? null, p.token_name ?? null, Date.now());
+  }
+
+  public updateA2APeer(name: string, cambios: Partial<{ card_url: string; token: string | null; token_name: string | null; enabled: boolean; last_context_id: string | null; last_used_at: number; last_error: string | null }>): boolean {
+    const actual = this.getA2APeer(name);
+    if (!actual) return false;
+    const n: any = { ...actual, ...cambios };
+    this.db.prepare(`UPDATE a2a_peers SET card_url = ?, token = ?, token_name = ?, enabled = ?, last_context_id = ?, last_used_at = ?, last_error = ? WHERE name = ?`)
+      .run(n.card_url, n.token ?? null, n.token_name ?? null, n.enabled ? 1 : 0, n.last_context_id ?? null, n.last_used_at ?? null, n.last_error ?? null, name);
+    return true;
+  }
+
+  public deleteA2APeer(name: string): boolean {
+    const res = this.db.prepare(`DELETE FROM a2a_peers WHERE name = ?`).run(name) as any;
+    return (res?.changes ?? 0) > 0;
+  }
+
   // ─── Tareas programadas ────────────────────────────────────────────────────
 
   private migrateScheduledTasks(): void {
@@ -813,6 +872,7 @@ export class SqliteReminderService {
       if (!cols.includes('thread_id'))     this.db.exec(`ALTER TABLE escalations ADD COLUMN thread_id TEXT`);
       if (!cols.includes('delivered_at'))  this.db.exec(`ALTER TABLE escalations ADD COLUMN delivered_at INTEGER`);
       if (!cols.includes('delivery_note')) this.db.exec(`ALTER TABLE escalations ADD COLUMN delivery_note TEXT`);
+      if (!cols.includes('a2a_token'))     this.db.exec(`ALTER TABLE escalations ADD COLUMN a2a_token TEXT`);
       // El índice va DESPUÉS de garantizar la columna: en una base existente, crearlo en el
       // bloque inicial rompía el arranque con "no such column: thread_id".
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_escalations_thread ON escalations(thread_id)`);
@@ -822,13 +882,13 @@ export class SqliteReminderService {
   }
 
   public createEscalation(e: {
-    id: string; channel: string; requester: string; topic: string; summary: string; urgency: string; thread_id?: string | null;
+    id: string; channel: string; requester: string; topic: string; summary: string; urgency: string; thread_id?: string | null; a2a_token?: string | null;
   }): void {
     const stmt = this.db.prepare(`
-      INSERT INTO escalations (id, created_at, channel, requester, topic, summary, urgency, status, thread_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?)
+      INSERT INTO escalations (id, created_at, channel, requester, topic, summary, urgency, status, thread_id, a2a_token)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?)
     `);
-    stmt.run(e.id, Date.now(), e.channel, e.requester, e.topic, e.summary, e.urgency, e.thread_id ?? null);
+    stmt.run(e.id, Date.now(), e.channel, e.requester, e.topic, e.summary, e.urgency, e.thread_id ?? null, e.a2a_token ?? null);
   }
 
   public getEscalation(id: string): any | null {

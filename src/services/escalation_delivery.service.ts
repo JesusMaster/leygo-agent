@@ -42,8 +42,21 @@ export class EscalationDeliveryService {
           return this.dejarPendiente(id, `Buzz: ${err.message}. Se entregará cuando vuelva a escribir.`);
         }
       }
-      case 'a2a':
-        return this.dejarPendiente(id, 'A2A no admite avisos salientes: se le comunicará al agente cliente la próxima vez que escriba en esa conversación.');
+      case 'a2a': {
+        // Si el token con el que nos escribió está asociado a un peer, se le empuja por A2A saliente.
+        const { a2aPeersService } = await import('./a2a_peers.service.js');
+        const peer = e.a2a_token ? a2aPeersService.list().find((p) => p.token_name === e.a2a_token && p.enabled) : undefined;
+        if (!peer) return this.dejarPendiente(id, 'A2A: ese agente no tiene configurado un canal de vuelta (Agentes remotos); se le comunicará la próxima vez que escriba.');
+        try {
+          const texto = `Jesús respondió a lo que escalaste sobre "${e.topic}": ${e.resolution}`;
+          await a2aPeersService.send(peer.name, texto, { contextId: e.thread_id || undefined });
+          const note = `Enviado por A2A al agente "${peer.name}".`;
+          sqliteReminderService.markEscalationDelivered(id, note);
+          return { delivered: true, note };
+        } catch (err: any) {
+          return this.dejarPendiente(id, `A2A (${peer.name}): ${err.message}. Se le comunicará cuando vuelva a escribir.`);
+        }
+      }
       case 'telegram':
       case 'api': {
         // Quien preguntó eres tú: la resolución en la GUI es suficiente.

@@ -7,6 +7,7 @@ import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool } from '../agent
 import { describirTool } from '../a2a/card.js';
 import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
 import { escalationDeliveryService } from '../services/escalation_delivery.service.js';
+import { a2aPeersService } from '../services/a2a_peers.service.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { adminGuard } from './admin_guard.js';
 
@@ -171,6 +172,53 @@ export default function createAdminRoutes() {
     res.json({ status: 'success' });
   });
 
+  // ─── Agentes remotos (Yisus como cliente A2A) ────────────────────────────
+  app.get('/api/a2a/peers', (_req, res) => {
+    res.json({ peers: a2aPeersService.list(), tokensEntrantes: sqliteReminderService.listA2ATokens().map((t) => t.name) });
+  });
+
+  app.post('/api/a2a/peers', (req, res) => {
+    try {
+      const { name, card_url, token, token_name } = req.body || {};
+      const peer = a2aPeersService.create({ name, card_url, token, token_name });
+      res.status(201).json({ status: 'success', peer: { ...peer, token: undefined } });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/a2a/peers/:name', (req, res) => {
+    const { card_url, token, token_name, enabled } = req.body || {};
+    const cambios: any = {};
+    if (card_url !== undefined) cambios.card_url = card_url;
+    if (token !== undefined && token !== '') cambios.token = token;   // vacío = no cambiar
+    if (token_name !== undefined) cambios.token_name = token_name || null;
+    if (enabled !== undefined) cambios.enabled = !!enabled;
+    const peer = a2aPeersService.update(req.params.name, cambios);
+    if (!peer) return res.status(404).json({ error: 'Agente remoto no encontrado' });
+    res.json({ status: 'success', peer: { ...peer, token: undefined } });
+  });
+
+  app.delete('/api/a2a/peers/:name', (req, res) => {
+    const ok = a2aPeersService.delete(req.params.name);
+    if (!ok) return res.status(404).json({ error: 'Agente remoto no encontrado' });
+    res.json({ status: 'success' });
+  });
+
+  app.post('/api/a2a/peers/:name/test', async (req, res) => {
+    res.json(await a2aPeersService.probar(req.params.name));
+  });
+
+  app.post('/api/a2a/peers/:name/send', async (req, res) => {
+    try {
+      const { text, newConversation } = req.body || {};
+      if (!text) return res.status(400).json({ error: 'Falta text' });
+      res.json({ status: 'success', ...(await a2aPeersService.send(req.params.name, text, { nuevaConversacion: !!newConversation })) });
+    } catch (err: any) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   /**
    * Diagnóstico de A2A: responde QUÉ ve esta instancia concreta.
    *
@@ -277,8 +325,8 @@ export default function createAdminRoutes() {
    * herramientas: acá el que consulta es el administrador de la GUI).
    */
   app.get('/api/tasks/destinos', async (_req, res) => {
-    const out: { chat: Array<{ name: string; displayName: string }>; buzz: string[]; email: string | null; errores: string[] } =
-      { chat: [], buzz: [], email: process.env.GOOGLE_USER_EMAIL || process.env.USER_EMAIL || null, errores: [] };
+    const out: { chat: Array<{ name: string; displayName: string }>; buzz: string[]; email: string | null; peers: string[]; errores: string[] } =
+      { chat: [], buzz: [], email: process.env.GOOGLE_USER_EMAIL || process.env.USER_EMAIL || null, peers: a2aPeersService.list().filter((p) => p.enabled).map((p) => p.name), errores: [] };
     try {
       const { googleService } = await import('../services/google.service.js');
       const espacios = await googleService.listChatSpaces(50);

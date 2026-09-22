@@ -180,6 +180,18 @@ const SKILLS_POR_TOOL: Record<string, any> = {
         tags:        ['buzz', 'nostr', 'publish', 'channels', 'es'],
         examples:    ['Avisa en el canal de Buzz que el release quedó arriba'],
     },
+    a2a_send_message: {
+        name:        'Escribir a otro agente (A2A)',
+        description: 'Envía un mensaje a un agente remoto configurado (p. ej. OpenClaw) por el protocolo A2A y devuelve su respuesta.',
+        tags:        ['a2a', 'agents', 'outbound', 'es'],
+        examples:    ['Pregúntale a OpenClaw el estado del despliegue'],
+    },
+    a2a_list_peers: {
+        name:        'Listar agentes remotos',
+        description: 'Agentes A2A a los que Yisus puede escribir.',
+        tags:        ['a2a', 'agents', 'es'],
+        examples:    ['¿Con qué agentes puedes hablar?'],
+    },
     buzz_status: {
         name:        'Estado del Bridge de Buzz',
         description: 'Informa si el Gateway Nostr/Buzz está conectado al relay, con qué clave pública (npub/hex) y qué canales está escuchando.',

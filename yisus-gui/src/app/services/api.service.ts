@@ -40,6 +40,11 @@ export interface ToolDetalle {
   name: string; titulo: string; descripcion: string; grupo: string; etiqueta: string;
 }
 
+export interface A2APeer {
+  name: string; card_url: string; tokenPreview: string | null; token_name: string | null; enabled: boolean;
+  last_context_id: string | null; created_at: number; last_used_at: number | null; last_error: string | null;
+}
+
 export interface A2AToken {
   name: string; tools: string[]; enabled: boolean;
   created_at: number; last_used_at?: number; preview: string;
@@ -55,7 +60,7 @@ export interface Escalation {
 export interface Reminder { id: string; target_time: number; message: string; status: string; created_at: number; }
 
 export type TaskKind = 'once' | 'interval' | 'daily' | 'cron';
-export type TaskChannel = 'telegram' | 'chat' | 'buzz' | 'email';
+export type TaskChannel = 'telegram' | 'chat' | 'buzz' | 'email' | 'a2a';
 export interface TaskDelivery { channel: TaskChannel; target?: string | null; }
 export interface ScheduledTask {
   id: string; message: string; autonomous: number; kind: TaskKind;
@@ -64,7 +69,7 @@ export interface ScheduledTask {
   created_at: number; updated_at: number;
   last_run_at: number | null; next_run_at: number | null; descripcion: string;
 }
-export interface TaskDestinos { chat: { name: string; displayName: string }[]; buzz: string[]; email: string | null; errores: string[]; }
+export interface TaskDestinos { chat: { name: string; displayName: string }[]; buzz: string[]; email: string | null; peers: string[]; errores: string[]; }
 export interface TaskRun {
   id: number; task_id: string; started_at: number; duration_ms: number;
   status: 'success' | 'error'; trigger: 'scheduled' | 'manual'; result: string;
@@ -175,6 +180,20 @@ export class ApiService {
   // ─── Recordatorios ────────────────────────────────────────────────────
   getReminders(): Observable<{ reminders: Reminder[] }> {
     return this.http.get<any>(`${this.baseUrl}/api/reminders`);
+  }
+
+  // ─── Agentes remotos (Yisus como cliente A2A) ─────────────────────────
+  getPeers(): Observable<{ peers: A2APeer[]; tokensEntrantes: string[] }> { return this.http.get<any>(`${this.baseUrl}/api/a2a/peers`); }
+  createPeer(data: { name: string; card_url: string; token?: string; token_name?: string }): Observable<any> { return this.http.post(`${this.baseUrl}/api/a2a/peers`, data); }
+  updatePeer(name: string, data: Partial<{ card_url: string; token: string; token_name: string | null; enabled: boolean }>): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/api/a2a/peers/${encodeURIComponent(name)}`, data);
+  }
+  deletePeer(name: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/a2a/peers/${encodeURIComponent(name)}`); }
+  testPeer(name: string): Observable<{ ok: boolean; agente?: string; skills?: number; version?: string; url?: string; error?: string }> {
+    return this.http.post<any>(`${this.baseUrl}/api/a2a/peers/${encodeURIComponent(name)}/test`, {});
+  }
+  sendToPeer(name: string, text: string, newConversation = false): Observable<{ texto: string; contextId: string | null }> {
+    return this.http.post<any>(`${this.baseUrl}/api/a2a/peers/${encodeURIComponent(name)}/send`, { text, newConversation });
   }
 
   // ─── Tareas programadas ───────────────────────────────────────────────
