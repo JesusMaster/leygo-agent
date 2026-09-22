@@ -274,3 +274,19 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 - [x] **Doble arranque de servicios** ✅ ARREGLADO (21-09): adk.ts solo los levanta con `ADK_START_SERVICES=true`.: `src/adk.ts` y `src/index.ts` levantan ambos el bot de Telegram y el scheduler → dos pollers si se corre ADK Web junto al server.
 - [x] **`qdrant_storage/` fuera de `.gitignore`** ✅ ARREGLADO (21-09)..
 - [x] **Repositorio git** ✅ (ya existía; se agregó commit del estado actual).: no hay historial ni forma de revertir.
+
+---
+
+## 🔐 7. Superficie HTTP expuesta (auditoría 21-09-2026)
+
+### Resuelto ✅
+- [x] **`/run` y `/run_sse` estaban públicos**: ejecutaban `buildChannelCoordinator('api')`, que en `config/channels.json` tiene `["*"]` — el coordinator interno completo, con `account_agent` (Gmail, Calendar, Drive). Cualquiera con la URL del dominio podía conversar con el agente personal sin token. Cerrados con `adminGuard` (`src/routes/admin_guard.ts`).
+- [x] **`/api/usage`, `/api/usage/budget` y `/api/usage/refresh-pricing` estaban públicos**: exponían el gasto, el desglose por canal/agente/modelo y, en el POST, permitían cambiar los topes de presupuesto. Cerrados.
+- [x] **Administración de webhooks pública** (`GET /webhooks/recent`, CRUD de `/api/webhooks`). Cerrada. La *recepción* de webhooks externos sigue pública: la autentica su propio secreto.
+- [x] **Guard único compartido** entre `index.routes.ts` y `admin.routes.ts`, con test de regresión (`npm run check:rutas`).
+- [x] **Guard de permisos por token en A2A verificado** (`npm run check:permisos`): una herramienta publicada pero no concedida devuelve `sin_permiso` y no se ejecuta.
+
+### Pendiente ⏳
+- [ ] **Decidir el alcance de Buzz**: `config/channels.json` le da a Buzz las 17 herramientas, incluida `account_agent`. Buzz es un canal público de Nostr sin tokens; lo único que hoy frena una acción sobre la cuenta es la confirmación 2FA por Telegram. Propuesta: dejar `knowledge_public`, `faq_agent` y `triage_agent`.
+- [ ] **`setCurrentA2AScope` usa `AsyncLocalStorage.enterWith`**: muta el contexto actual en vez de envolver el resto de la petición. Si el alcance sobrevive a la petición (keep-alive), una llamada posterior podría verlo. La dirección del error es hacia *bloquear de más*, no hacia conceder, pero conviene pasarlo a `.run()` y verificarlo contra el servidor levantado.
+- [ ] **`ADMIN_API_KEY` sin definir desactiva el guard** (`return next()`), pensado para desarrollo local. Evaluar exigirla cuando `NODE_ENV=production`.
