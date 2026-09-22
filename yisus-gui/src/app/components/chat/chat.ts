@@ -155,22 +155,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
     .adjunto .quitar { background: none; border: 0; color: var(--text-dim); cursor: pointer; padding: 0; display: grid; place-items: center; }
     .adjunto .quitar:hover { color: var(--danger); }
 
-    /* markdown */
-    .md :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4) { margin: 0 0 10px; }
-    .md > :last-child { margin-bottom: 0; }
-    .md ul, .md ol { padding-left: 22px; }
-    .md li + li { margin-top: 3px; }
-    .md code { font-size: 13px; padding: 1px 5px; border-radius: 4px; background: rgba(127,127,127,.15); }
-    .md pre { padding: 12px 14px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-light); overflow: auto; }
-    .md pre code { background: none; padding: 0; font-size: 12.5px; }
-    .md blockquote { border-left: 3px solid var(--accent-primary); padding-left: 12px; color: var(--text-dim); }
-    .md table { border-collapse: collapse; font-size: 13px; }
-    .md th, .md td { border: 1px solid var(--border-light); padding: 6px 10px; text-align: left; }
-    .md h1 { font-size: 18px; } .md h2 { font-size: 16.5px; } .md h3 { font-size: 15px; }
-    .md a { color: var(--accent-primary); }
-    .md img { max-width: 100%; border-radius: 8px; }
-    .bubble.mine .md code { background: rgba(255,255,255,.2); }
-    .bubble.mine .md a { color: #fff; text-decoration: underline; }
+    /* markdown: en styles.css (el HTML inyectado no lleva el atributo de encapsulación) */
 
     /* input */
     .chat-input { display: flex; flex-direction: column; gap: 8px; padding: 14px 28px 12px; border-top: 1px solid var(--border-light); }
