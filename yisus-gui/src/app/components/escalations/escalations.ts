@@ -61,6 +61,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               <div style="margin-top:12px;padding:12px;background:var(--bg-main);border-radius:8px">
                 <span style="font-size:12px;color:var(--text-dim)">Resolución · {{ e.resolved_at | friendlyDate }}</span>
                 <p style="font-size:14px;margin-top:4px">{{ e.resolution }}</p>
+                <div style="margin-top:10px;font-size:12.5px;display:flex;align-items:center;gap:6px" [style.color]="e.delivered_at ? 'var(--ok)' : 'var(--warn)'">
+                  <i class="ph" [class.ph-check-circle]="e.delivered_at" [class.ph-clock]="!e.delivered_at"></i>
+                  @if (e.delivered_at) { Entregado al interlocutor · {{ e.delivered_at | friendlyDate }}{{ e.delivery_note ? ' · ' + e.delivery_note : '' }} }
+                  @else { Pendiente de entrega: se le comunicará cuando vuelva a escribir por {{ e.channel }}. }
+                </div>
               </div>
             }
           </div>
@@ -93,7 +98,11 @@ export class EscalationsComponent {
       return;
     }
     this.api.resolveEscalation(e.id, texto, status).subscribe({
-      next: () => { this.toast.ok(`Escalamiento ${e.id} ${status}`); this.load(); },
+      next: (r: any) => {
+        const nota = r?.entrega?.note ? ` — ${r.entrega.note}` : '';
+        r?.entrega?.delivered ? this.toast.ok(`Resuelto${nota}`) : this.toast.ok(`Resuelto. ${r?.entrega?.note || ''}`);
+        this.load();
+      },
       error: () => this.toast.error('No se pudo registrar la resolución'),
     });
   }

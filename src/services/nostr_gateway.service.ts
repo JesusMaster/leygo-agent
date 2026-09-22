@@ -950,9 +950,13 @@ export class NostrGatewayService {
         }
       }
 
+      // Respaldo del cierre de escalamientos: si al resolver no se pudo publicar, se entrega acá
+      const { escalationDeliveryService } = await import('./escalation_delivery.service.js');
+      const pendiente = escalationDeliveryService.consumePendingFor(sessionId);
+
       const newMessage = {
         role: 'user',
-        parts: [{ text: prompt }],
+        parts: [{ text: pendiente + prompt }],
       } as any;
 
       const replies: string[] = [];
@@ -1063,7 +1067,7 @@ export class NostrGatewayService {
    * Publica un mensaje nuevo en el canal (no es respuesta a nadie).
    * Es la pata de salida del bridge: la usan las herramientas del agente.
    */
-  public async publishToChannel(text: string, channelId?: string): Promise<{
+  public async publishToChannel(text: string, channelId?: string, mentionPubkey?: string): Promise<{
     status: 'success' | 'error';
     eventId?: string;
     channel?: string;
@@ -1085,10 +1089,12 @@ export class NostrGatewayService {
     }
 
     try {
+      const tags: string[][] = [['h', channel]];
+      if (mentionPubkey) tags.push(['p', mentionPubkey]); // notifica a la persona (Buzz avisa las menciones)
       const template = {
         kind: 9,
         created_at: Math.floor(Date.now() / 1000),
-        tags: [['h', channel]],
+        tags,
         content: text.trim(),
       };
       const signed = finalizeEvent(template, this.secretKey);

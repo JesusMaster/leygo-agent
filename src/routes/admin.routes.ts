@@ -6,6 +6,7 @@ import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDispon
 import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool } from '../agents/tool_catalog.js';
 import { describirTool } from '../a2a/card.js';
 import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
+import { escalationDeliveryService } from '../services/escalation_delivery.service.js';
 import { tokenTrackerService, USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { adminGuard } from './admin_guard.js';
 
@@ -209,11 +210,13 @@ export default function createAdminRoutes() {
     res.json({ escalations: sqliteReminderService.listEscalations(status, limit) });
   });
 
-  app.post('/api/escalations/:id/resolve', (req, res) => {
+  app.post('/api/escalations/:id/resolve', async (req, res) => {
     const { resolution, status } = req.body || {};
     const ok = sqliteReminderService.resolveEscalation(req.params.id, resolution || '', status || 'resuelto');
     if (!ok) return res.status(404).json({ error: 'Escalamiento no encontrado' });
-    res.json({ status: 'success' });
+    // Resolver no basta: la respuesta tiene que volver a quien preguntó.
+    const entrega = await escalationDeliveryService.notifyResolution(req.params.id);
+    res.json({ status: 'success', entrega });
   });
 
   // ─── Recordatorios programados ───────────────────────────────────────────

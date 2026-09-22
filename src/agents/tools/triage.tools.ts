@@ -23,10 +23,12 @@ export const escalateToJesus = new FunctionTool({
     try {
       const id = randomUUID().slice(0, 8);
       const channel = currentUsageScope()?.channel || 'system';
+      const thread_id = currentUsageScope()?.threadId || null;
 
       sqliteReminderService.createEscalation({
         id,
         channel,
+        thread_id,
         requester: requester || 'desconocido',
         topic,
         summary,

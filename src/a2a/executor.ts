@@ -77,7 +77,10 @@ export class YisusAgentExecutor implements AgentExecutor {
             }
 
             // 3) Ejecutar el multi-agente ADK (Coordinator → faq/account/support)
-            const newMessage = { role: 'user', parts: [{ text: userText }] } as any;
+            //    Si Jesús resolvió algo escalado desde esta conversación, se le dice primero.
+            const { escalationDeliveryService } = await import('../services/escalation_delivery.service.js');
+            const pendiente = escalationDeliveryService.consumePendingFor(contextId);
+            const newMessage = { role: 'user', parts: [{ text: pendiente + userText }] } as any;
             const replies: string[] = [];
 
             const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');

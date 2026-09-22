@@ -49,6 +49,7 @@ export interface Escalation {
   id: string; created_at: number; channel: string; requester: string;
   topic: string; summary: string; urgency: string; status: string;
   resolved_at?: number; resolution?: string;
+  thread_id?: string | null; delivered_at?: number | null; delivery_note?: string | null;
 }
 
 export interface Reminder { id: string; target_time: number; message: string; status: string; created_at: number; }

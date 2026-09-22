@@ -254,7 +254,10 @@ export class SqliteReminderService {
         urgency TEXT DEFAULT 'media',
         status TEXT DEFAULT 'pendiente',
         resolved_at INTEGER,
-        resolution TEXT
+        resolution TEXT,
+        thread_id TEXT,
+        delivered_at INTEGER,
+        delivery_note TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status, created_at DESC);
     `);
@@ -306,6 +309,7 @@ export class SqliteReminderService {
     // 11. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
     this.migrateScheduledTasks();
+    this.migrateEscalations();
   }
 
   // ─── Recordatorios ──────────────────────────────────────────────────────────
@@ -803,14 +807,45 @@ export class SqliteReminderService {
 
   // ─── Escalamientos (triage_agent) ──────────────────────────────────────────
 
+  private migrateEscalations(): void {
+    try {
+      const cols = (this.db.prepare(`PRAGMA table_info(escalations)`).all() as any[]).map((c) => c.name);
+      if (!cols.includes('thread_id'))     this.db.exec(`ALTER TABLE escalations ADD COLUMN thread_id TEXT`);
+      if (!cols.includes('delivered_at'))  this.db.exec(`ALTER TABLE escalations ADD COLUMN delivered_at INTEGER`);
+      if (!cols.includes('delivery_note')) this.db.exec(`ALTER TABLE escalations ADD COLUMN delivery_note TEXT`);
+      // El índice va DESPUÉS de garantizar la columna: en una base existente, crearlo en el
+      // bloque inicial rompía el arranque con "no such column: thread_id".
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_escalations_thread ON escalations(thread_id)`);
+    } catch (err: any) {
+      console.warn('⚠️ [SQLite] No se pudo migrar escalations:', err.message);
+    }
+  }
+
   public createEscalation(e: {
-    id: string; channel: string; requester: string; topic: string; summary: string; urgency: string;
+    id: string; channel: string; requester: string; topic: string; summary: string; urgency: string; thread_id?: string | null;
   }): void {
     const stmt = this.db.prepare(`
-      INSERT INTO escalations (id, created_at, channel, requester, topic, summary, urgency, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')
+      INSERT INTO escalations (id, created_at, channel, requester, topic, summary, urgency, status, thread_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?)
     `);
-    stmt.run(e.id, Date.now(), e.channel, e.requester, e.topic, e.summary, e.urgency);
+    stmt.run(e.id, Date.now(), e.channel, e.requester, e.topic, e.summary, e.urgency, e.thread_id ?? null);
+  }
+
+  public getEscalation(id: string): any | null {
+    return (this.db.prepare(`SELECT * FROM escalations WHERE id = ?`).get(id) as any) || null;
+  }
+
+  /** Resueltos que todavía no se le comunicaron a quien preguntó en esa conversación. */
+  public listResolvedUndelivered(threadId: string): any[] {
+    return this.db.prepare(`
+      SELECT * FROM escalations
+      WHERE thread_id = ? AND status IN ('resuelto', 'descartado') AND delivered_at IS NULL AND resolution IS NOT NULL AND resolution != ''
+      ORDER BY resolved_at ASC
+    `).all(threadId) as any[];
+  }
+
+  public markEscalationDelivered(id: string, note: string): void {
+    this.db.prepare(`UPDATE escalations SET delivered_at = ?, delivery_note = ? WHERE id = ?`).run(Date.now(), note, id);
   }
 
   public listEscalations(status?: string, limit: number = 20): any[] {
