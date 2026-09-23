@@ -32,6 +32,7 @@ body.dark-theme {
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
 
+html { height: 100%; overflow: hidden; }
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
@@ -39,6 +40,11 @@ body {
   line-height: 1.5;
   overflow: hidden;
   height: 100vh;
+  /* iOS: con el teclado abierto Safari desplaza el documento y deja la cabecera
+     fuera de la vista. Fijar el body impide ese scroll; el alto real lo pone
+     --app-h desde visualViewport (ver app.ts). */
+  position: fixed; inset: 0; width: 100%;
+  height: var(--app-h, 100dvh);
   transition: background-color .3s ease, color .3s ease;
 }
 

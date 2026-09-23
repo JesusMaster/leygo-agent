@@ -1,4 +1,4 @@
-.layout-wrapper { display: flex; height: 100vh; width: 100vw; background-color: var(--bg-main); }
+.layout-wrapper { display: flex; height: var(--app-h, 100vh); width: 100vw; background-color: var(--bg-main); }
 
 .sidebar {
   width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-light);
@@ -68,7 +68,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .status { flex-wrap: wrap; }
 
 @media (max-width: 900px) {
-  .layout-wrapper { height: 100dvh; }
+  .layout-wrapper { height: var(--app-h, 100dvh); }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: min(280px, 84vw);
     transform: translateX(-100%); transition: transform .22s ease;

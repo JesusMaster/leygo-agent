@@ -158,7 +158,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
     /* markdown: en styles.css (el HTML inyectado no lleva el atributo de encapsulación) */
 
     /* input */
-    .chat-input { display: flex; flex-direction: column; gap: 8px; padding: 14px 28px 12px; border-top: 1px solid var(--border-light); }
+    .chat-input { display: flex; flex-direction: column; gap: 8px; padding: 14px 28px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-light); }
     .input-row { display: flex; gap: 10px; align-items: flex-end; border: 1px solid var(--border-light); border-radius: 14px; background: var(--bg-input); padding: 8px 8px 8px 16px; transition: border-color .15s; }
     .input-row:focus-within { border-color: var(--accent-primary); }
     .input-row textarea { flex: 1; resize: none; border: 0; background: transparent; padding: 8px 0; font-size: 15px; line-height: 1.5; max-height: 220px; overflow-y: auto; min-height: 24px; }
@@ -183,7 +183,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
       .msg { max-width: 94%; }
       .bubble { padding: 10px 13px; font-size: 14px; }
       .bubble.agent { min-width: 0; }
-      .chat-input { padding: 10px 12px 10px; }
+      .chat-input { padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); }
       .input-row { padding: 6px 6px 6px 12px; border-radius: 12px; }
       .input-row textarea { font-size: 16px; /* evita el zoom automático de iOS */ max-height: 160px; }
       .btn-send { width: 38px; height: 38px; }

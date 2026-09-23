@@ -34,9 +34,30 @@ export class App {
 
     this.router.events.subscribe((e) => { if (e instanceof NavigationEnd) this.esLogin.set(e.urlAfterRedirects.startsWith('/login')); });
 
+    this.ajustarAltoVisual();
+
     // Al iniciar o cerrar sesión se revalida de inmediato (no esperar al siguiente ping)
     effect(() => { this.auth.token(); this.ping(); });
     setInterval(() => this.ping(), 30000);
+  }
+
+  /**
+   * iOS Safari no achica el layout cuando aparece el teclado: desplaza el
+   * documento y la cabecera queda arriba, inaccesible. Se mide el viewport
+   * visual y se usa como alto de la app; así el chat cabe sobre el teclado y
+   * la cabecera con el menú sigue a la vista.
+   */
+  private ajustarAltoVisual() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const aplicar = () => {
+      document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+      if (window.scrollY || vv.offsetTop) window.scrollTo(0, 0);
+    };
+    vv.addEventListener('resize', aplicar);
+    vv.addEventListener('scroll', aplicar);
+    window.addEventListener('orientationchange', () => setTimeout(aplicar, 300));
+    aplicar();
   }
 
   private ping() {
