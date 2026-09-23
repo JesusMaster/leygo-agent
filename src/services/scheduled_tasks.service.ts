@@ -255,6 +255,23 @@ export class ScheduledTasksService {
     return fallos;
   }
 
+  /**
+   * Entrega un texto por una lista de destinos (reutilizable fuera de las tareas:
+   * avisos de compromisos, etc.). Devuelve los fallos por canal.
+   */
+  public async entregarPor(destinos: TaskDelivery[], texto: string): Promise<string[]> {
+    const fallos: string[] = [];
+    for (const d of destinos) {
+      try { await this.entregarEn(d, texto, true); }
+      catch (err: any) { fallos.push(`${this.nombreCanal(d.channel)}: ${err?.message || err}`); }
+    }
+    return fallos;
+  }
+
+  public etiquetaDestino(d: TaskDelivery): string {
+    return `${this.nombreCanal(d.channel)}${d.target && d.channel !== 'telegram' ? ` (${d.target})` : ''}`;
+  }
+
   private async entregarEn(d: TaskDelivery, texto: string, autonoma: boolean): Promise<void> {
     switch (d.channel) {
       case 'chat': {

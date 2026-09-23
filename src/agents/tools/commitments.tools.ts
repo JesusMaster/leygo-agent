@@ -2,6 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { commitmentsService } from '../../services/commitments.service.js';
 import type { Commitment, CommitmentStatus } from '../../database/sqlite.service.js';
+import { currentUsageScope } from '../../utils/usage_collector.js';
 
 function hoy(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago' });
@@ -14,7 +15,13 @@ function fmt(c: Commitment): string {
   return `[${c.id}] ${c.title}\n   ${estado} · ${quien}${c.counterpart ? ` · con ${c.counterpart}` : ''} · ${fecha} · prioridad ${c.priority}${c.source_title ? `\n   origen: ${c.source_type} — ${c.source_title}` : ''}${c.detail ? `\n   ${c.detail}` : ''}`;
 }
 
-const cabecera = () => `Hoy es ${hoy()}.`;
+/** Buzz y A2A son terceros: pueden consultar lo suyo, no cambiar la lista de Jesús. */
+function externo(): boolean {
+  const ch = currentUsageScope()?.channel;
+  return ch === 'buzz' || ch === 'a2a';
+}
+const cabecera = () => `Hoy es ${hoy()}.${externo() ? ' (Canal externo: el interlocutor NO es Jesús; muestra solo lo que le concierne y no cambies nada.)' : ''}`;
+const SOLO_JESUS = { status: 'sin_permiso', result: 'Solo Jesús puede crear o cambiar compromisos. Registra el pedido como nota con commitment_note y dile que Jesús lo confirma.' };
 
 export const commitmentsList = new FunctionTool({
   name: 'commitments_list',
@@ -67,6 +74,7 @@ export const commitmentCreate = new FunctionTool({
     priority: z.enum(['alta', 'media', 'baja']).optional(),
   }) as any,
   execute: async (args: any) => {
+    if (externo()) return SOLO_JESUS;
     try {
       const c = await commitmentsService.crear(args, { type: 'manual' }, 'jesus');
       const fecha = c.due_date ? `con fecha ${c.due_date}` : `sin fecha; te sugiero ${c.proposed_due} — confírmala o dime otra`;
@@ -80,6 +88,7 @@ export const commitmentAccept = new FunctionTool({
   description: 'Acepta un compromiso propuesto (pasa a pendiente) y/o confirma su fecha. Si Jesús dice "acepta el abc123" sin fecha, se usa la sugerida. También sirve para fijar la fecha de uno pendiente sin fecha.',
   parameters: z.object({ id: z.string(), due: z.string().optional().describe('YYYY-MM-DD; omitir para usar la fecha sugerida.') }) as any,
   execute: async (args: any) => {
+    if (externo()) return SOLO_JESUS;
     const c = await commitmentsService.aceptar(args.id, args.due || null, 'jesus');
     if (!c) return { status: 'error', message: `No existe el compromiso ${args.id}` };
     return { status: 'success', result: `${cabecera()} [${c.id}] "${c.title}" queda ${c.status} para el ${c.due_date}.` };
@@ -100,6 +109,7 @@ export const commitmentUpdate = new FunctionTool({
     note: z.string().optional().describe('Feedback o contexto textual de Jesús, tal como lo dijo (resumido).'),
   }) as any,
   execute: async (args: any) => {
+    if (externo()) return SOLO_JESUS;
     const { id, status, due, owner, counterpart, priority, title, note } = args;
     const cambios: any = {};
     if (status) cambios.status = status as CommitmentStatus;
@@ -133,6 +143,24 @@ export const commitmentHistory = new FunctionTool({
     if (!c) return { status: 'error', message: `No existe el compromiso ${args.id}` };
     const h = commitmentsService.historial(args.id, 30);
     return { status: 'success', result: `${fmt(c)}\n\nHistorial:\n${h.map((u) => `• ${new Date(u.at).toLocaleString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago' })} (${u.by}) ${u.kind}: ${u.text}`).join('\n') || '(sin movimientos)'}` };
+  },
+});
+
+export const commitmentNotify = new FunctionTool({
+  name: 'commitment_notify',
+  description: 'Avisa a la contraparte de un compromiso por un canal: email (correo de la persona), chat (spaceName de Google Chat, p. ej. spaces/AAAA), buzz (canal por defecto), a2a (nombre del agente remoto) o telegram (Jesús). Úsala cuando Jesús diga "avísale a X que ya está" o "notifícalo por correo". Si no hay mensaje, se redacta uno en tono de Jesús según el estado.',
+  parameters: z.object({
+    id: z.string(),
+    channel: z.enum(['email', 'chat', 'buzz', 'a2a', 'telegram']),
+    target: z.string().optional().describe('Correo, spaceName de Chat, canal de Buzz o nombre del agente A2A. No aplica a telegram.'),
+    message: z.string().optional().describe('Texto a enviar. Omitir para usar el mensaje por defecto.'),
+  }) as any,
+  execute: async (args: any) => {
+    if (externo()) return SOLO_JESUS;
+    try {
+      const r = await commitmentsService.notificar(args.id, [{ channel: args.channel, target: args.target || null }], args.message, 'agente');
+      return { status: 'success', result: `Avisado por ${r.enviados.join(' + ')}${r.fallos.length ? ` (fallos: ${r.fallos.join(' · ')})` : ''}.` };
+    } catch (err: any) { return { status: 'error', message: err.message }; }
   },
 });
 

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
 import { modelFor } from './llm/model_factory.js';
-import { commitmentsList, commitmentSearch, commitmentCreate, commitmentAccept, commitmentUpdate, commitmentNote, commitmentHistory, commitmentsOverview } from './tools/commitments.tools.js';
+import { commitmentsList, commitmentSearch, commitmentCreate, commitmentAccept, commitmentUpdate, commitmentNote, commitmentHistory, commitmentsOverview, commitmentNotify } from './tools/commitments.tools.js';
 
 /**
  * commitments_agent — la lista viva de compromisos de Jesús.
@@ -32,6 +32,12 @@ export const commitmentsAgent = new LlmAgent({
     - "Acepta el abc123" / "sí, esa fecha" → 'commitment_accept'.
     - "Ya lo hice / se corre al lunes / cancélalo / lo hace Pablo" → 'commitment_update' con la nota.
     - Feedback sin cambio de estado → 'commitment_note'.
+    - "Avísale a X que ya está / notifícalo por correo" → 'commitment_notify' (email si tienes el correo,
+      chat si tienes el spaceName; si no tienes el destino, pídeselo a Jesús en vez de adivinar).
+
+    CANALES EXTERNOS (Buzz, A2A): si quien pregunta NO es Jesús, solo informa lo que le concierne a esa
+    persona (compromisos donde es contraparte o responsable); no listes la agenda completa de Jesús ni
+    cambies estados o fechas por pedido de terceros: registra el pedido como nota y dile que Jesús confirma.
     - Fechas relativas ("el viernes", "en dos semanas"): las herramientas te dicen la fecha de hoy;
       conviértelas a YYYY-MM-DD antes de llamar.
     - Nunca inventes ids: si Jesús describe el compromiso sin id, búscalo primero.
@@ -41,5 +47,5 @@ export const commitmentsAgent = new LlmAgent({
 
     ALCANCE: estás montado como herramienta del Coordinator: respondes tu parte y terminas el turno.
   `,
-  tools: [commitmentsList, commitmentSearch, commitmentCreate, commitmentAccept, commitmentUpdate, commitmentNote, commitmentHistory, commitmentsOverview],
+  tools: [commitmentsList, commitmentSearch, commitmentCreate, commitmentAccept, commitmentUpdate, commitmentNote, commitmentHistory, commitmentsOverview, commitmentNotify],
 });

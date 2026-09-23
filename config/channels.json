@@ -29,6 +29,7 @@
     "tools": [
       "faq_agent",
       "triage_agent",
+      "commitments_agent",
       "get_token_usage",
       "buzz_send_message",
       "buzz_status",
@@ -60,6 +61,7 @@
       "knowledge_public",
       "faq_agent",
       "triage_agent",
+      "commitments_agent",
       "schedule_reminder",
       "schedule_task",
       "list_scheduled_reminders",

@@ -77,6 +77,21 @@ export default function createCommitmentsRoutes() {
     res.json({ item: c });
   });
 
+  /** Avisa a la contraparte por los canales elegidos (chat, email, buzz, a2a, telegram). */
+  app.post('/api/commitments/:id/notify', async (req, res) => {
+    try {
+      const r = await commitmentsService.notificar(req.params.id, req.body?.delivery || [], req.body?.message, 'jesus');
+      res.json({ ...r, updates: commitmentsService.historial(req.params.id, 100) });
+    } catch (err: any) { res.status(400).json({ error: err.message }); }
+  });
+
+  app.get('/api/commitments/:id/default-message', (req, res) => {
+    const c = commitmentsService.obtener(req.params.id);
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    const status = (req.query.status as string) || c.status;
+    res.json({ message: commitmentsService.mensajePorDefecto({ ...c, status: status as any }) });
+  });
+
   app.post('/api/commitments/:id/notes', (req, res) => {
     const text = String(req.body?.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Falta el texto' });

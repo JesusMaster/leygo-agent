@@ -253,6 +253,34 @@ class CommitmentsService {
     return true;
   }
 
+  /**
+   * Notifica a la contraparte (o a quien sea) por uno o más canales y lo deja
+   * en el historial. `mensaje` vacío = texto por defecto según el estado.
+   */
+  async notificar(id: string, destinos: Array<{ channel: string; target?: string | null }>, mensaje?: string, by = 'jesus'): Promise<{ enviados: string[]; fallos: string[] }> {
+    const c = sqliteReminderService.getCommitment(id);
+    if (!c) throw new Error(`No existe el compromiso ${id}`);
+    if (!destinos?.length) throw new Error('Indica al menos un canal');
+    const { scheduledTasksService } = await import('./scheduled_tasks.service.js');
+    const texto = (mensaje || '').trim() || this.mensajePorDefecto(c);
+    const fallos = await scheduledTasksService.entregarPor(destinos as any, texto);
+    const enviados = destinos.map((d) => scheduledTasksService.etiquetaDestino(d as any)).filter((e) => !fallos.some((f) => f.startsWith(e.split(' (')[0])));
+    sqliteReminderService.addCommitmentUpdate({
+      commitment_id: id, at: Date.now(), kind: 'notificado',
+      text: `${enviados.length ? `Avisado por ${enviados.join(' + ')}` : 'No se pudo avisar'}${fallos.length ? ` · fallos: ${fallos.join(' · ')}` : ''}: "${texto.slice(0, 200)}"`, by,
+    });
+    if (fallos.length === destinos.length) throw new Error(`No se pudo notificar — ${fallos.join(' · ')}`);
+    return { enviados, fallos };
+  }
+
+  mensajePorDefecto(c: Commitment): string {
+    const quien = c.counterpart ? `${c.counterpart.split(' ')[0]}, ` : '';
+    if (c.status === 'hecho') return `${quien}listo lo de "${c.title}". Cualquier cosa me avisas.`;
+    if (c.status === 'cancelado') return `${quien}te aviso que "${c.title}" queda sin efecto por ahora. Te cuento si se retoma.`;
+    if (c.due_date) return `${quien}sobre "${c.title}": lo tengo para el ${c.due_date}. Te confirmo cuando esté.`;
+    return `${quien}sobre "${c.title}": lo tengo en la lista, te confirmo fecha en breve.`;
+  }
+
   async eliminar(id: string): Promise<boolean> {
     const ok = sqliteReminderService.deleteCommitment(id);
     if (ok) this.desindexar(id).catch(() => {});

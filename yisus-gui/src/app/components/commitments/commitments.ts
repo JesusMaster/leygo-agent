@@ -1,7 +1,8 @@
 import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService, BackfillEstado, Commitment, CommitmentStatus, CommitmentUpdate } from '../../services/api.service';
+import { ApiService, BackfillEstado, Commitment, CommitmentStatus, CommitmentUpdate, TaskDelivery } from '../../services/api.service';
+import { DeliveryPickerComponent } from '../tasks/delivery-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -16,7 +17,7 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
  */
 @Component({
   selector: 'app-commitments',
-  imports: [FormsModule, RouterLink, FriendlyDatePipe],
+  imports: [FormsModule, RouterLink, FriendlyDatePipe, DeliveryPickerComponent],
   template: `
     <div class="page">
       <div class="page-head">
@@ -83,8 +84,9 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                   <button class="btn-secondary sm" (click)="cambiarEstado(c, 'descartado')"><i class="ph ph-x"></i> Descartar</button>
                 } @else if (c.status === 'pendiente' || c.status === 'en_curso') {
                   @if (c.status === 'pendiente') { <button class="ta" title="Marcar en curso" (click)="cambiarEstado(c, 'en_curso')"><i class="ph ph-play"></i></button> }
-                  <button class="ta ok" title="Marcar hecho" (click)="cambiarEstado(c, 'hecho')"><i class="ph ph-check-circle"></i></button>
-                  <button class="ta" title="Cancelar" (click)="cambiarEstado(c, 'cancelado')"><i class="ph ph-prohibit"></i></button>
+                  <button class="ta ok" title="Marcar hecho (y avisar)" (click)="abrirCierre(c, 'hecho')"><i class="ph ph-check-circle"></i></button>
+                  <button class="ta" title="Avisar a la contraparte" (click)="abrirCierre(c, null)"><i class="ph ph-paper-plane-tilt"></i></button>
+                  <button class="ta" title="Cancelar (y avisar)" (click)="abrirCierre(c, 'cancelado')"><i class="ph ph-prohibit"></i></button>
                 } @else {
                   <button class="ta" title="Reabrir" (click)="cambiarEstado(c, 'pendiente')"><i class="ph ph-arrow-counter-clockwise"></i></button>
                 }
@@ -167,6 +169,32 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
           <div class="modal-foot">
             <button class="btn-secondary" (click)="modal.set(false)">Cancelar</button>
             <button class="btn-primary" [disabled]="!form.title.trim() || guardando()" (click)="crear()">Guardar</button>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (cierre(); as z) {
+      <div class="modal-backdrop" (click)="cierre.set(null)">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <div class="modal-head">
+            <h3>{{ z.status === 'hecho' ? 'Marcar como hecho' : z.status === 'cancelado' ? 'Cancelar compromiso' : 'Avisar a la contraparte' }}</h3>
+            <button class="btn-icon" (click)="cierre.set(null)"><i class="ph ph-x"></i></button>
+          </div>
+          <div class="modal-body">
+            <p class="card-sub"><strong>{{ z.c.title }}</strong>@if (z.c.counterpart) { · con {{ z.c.counterpart }} }</p>
+            <label class="field">
+              <span>Mensaje para {{ z.c.counterpart || 'la contraparte' }}</span>
+              <textarea rows="3" [(ngModel)]="z.message"></textarea>
+              <small class="hint">Se envía tal cual por los canales que marques. Sin canales, solo se cambia el estado.</small>
+            </label>
+            <label class="field"><span>Avisar por</span></label>
+            <app-delivery-picker [value]="z.delivery" (valueChange)="setDelivery($event)" />
+          </div>
+          <div class="modal-foot">
+            <button class="btn-secondary" (click)="cierre.set(null)">Cancelar</button>
+            @if (z.status) { <button class="btn-secondary" (click)="confirmarCierre(false)">Solo {{ z.status === 'hecho' ? 'marcar hecho' : 'cancelar' }}</button> }
+            <button class="btn-primary" [disabled]="!z.delivery.length || enviando()" (click)="confirmarCierre(true)"><i class="ph ph-paper-plane-tilt"></i> {{ z.status ? (z.status === 'hecho' ? 'Marcar y avisar' : 'Cancelar y avisar') : 'Enviar aviso' }}</button>
           </div>
         </div>
       </div>
@@ -268,6 +296,8 @@ export class CommitmentsComponent {
   modalBackfill = signal(false);
   backfill = signal<BackfillEstado | null>(null);
   guardando = signal(false);
+  enviando = signal(false);
+  cierre = signal<{ c: Commitment; status: CommitmentStatus | null; message: string; delivery: TaskDelivery[] } | null>(null);
   notaNueva = '';
   backfillDesde = '';
   pend: Record<string, Partial<Commitment>> = {};
@@ -329,6 +359,27 @@ export class CommitmentsComponent {
       next: () => { this.toast.ok(`${c.id}: ${ESTADO_LABEL[status]}`); this.load(); if (this.abierto() === c.id) this.cargarHistorial(c.id); },
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo cambiar'),
     });
+  }
+  abrirCierre(c: Commitment, status: CommitmentStatus | null) {
+    this.cierre.set({ c, status, message: '', delivery: [] });
+    this.api.getCommitmentDefaultMessage(c.id, status || undefined).subscribe({ next: (r) => { const z = this.cierre(); if (z && !z.message) { z.message = r.message; this.cierre.set({ ...z }); } }, error: () => {} });
+  }
+  setDelivery(d: TaskDelivery[]) { const z = this.cierre(); if (z) this.cierre.set({ ...z, delivery: d }); }
+  confirmarCierre(avisar: boolean) {
+    const z = this.cierre();
+    if (!z) return;
+    this.enviando.set(true);
+    const fin = () => { this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarHistorial(z.c.id); };
+    const notificar = () => this.api.notifyCommitment(z.c.id, z.delivery, z.message).subscribe({
+      next: (r) => { this.toast.ok(`Avisado por ${r.enviados.join(' + ')}${r.fallos.length ? ' · fallos: ' + r.fallos.join(' · ') : ''}`); fin(); },
+      error: (e) => { this.toast.error(e?.error?.error || 'No se pudo avisar'); fin(); },
+    });
+    if (z.status) {
+      this.api.updateCommitment(z.c.id, { status: z.status }).subscribe({
+        next: () => { if (avisar && z.delivery.length) notificar(); else { this.toast.ok(`${z.c.id}: ${ESTADO_LABEL[z.status!]}`); fin(); } },
+        error: (e) => { this.toast.error(e?.error?.error || 'No se pudo cambiar'); this.enviando.set(false); },
+      });
+    } else if (avisar) notificar();
   }
   cambiarFecha(c: Commitment, fecha: string) {
     if (!fecha || fecha === c.due_date) return;
