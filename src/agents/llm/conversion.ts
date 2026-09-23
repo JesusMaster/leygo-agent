@@ -222,3 +222,22 @@ export function respuestaError(agentName: string | undefined, model: string, err
     turnComplete: true,
   };
 }
+
+/**
+ * fetch con reintentos ante 429 (límite de RPM) y 5xx transitorios: espera lo
+ * que pida Retry-After o 2s/4s/8s. Devuelve la última respuesta si se agotan.
+ */
+export async function fetchConReintentos(url: string, init: RequestInit, intentos = 3, agentName?: string): Promise<Response> {
+  let res: Response | undefined;
+  for (let i = 0; i < intentos; i++) {
+    res = await fetch(url, init);
+    if (res.ok || ![429, 500, 502, 503, 529].includes(res.status) || i === intentos - 1) return res;
+    const retryAfter = Number(res.headers.get('retry-after')) || 0;
+    const espera = Math.min(15_000, retryAfter > 0 ? retryAfter * 1000 : 2000 * 2 ** i);
+    console.warn(`⏳ [LLM] ${agentName || 'agente'}: ${res.status} de ${new URL(url).host}, reintento ${i + 1}/${intentos - 1} en ${espera / 1000}s`);
+    await res.text().catch(() => {});
+    await new Promise((r) => setTimeout(r, espera));
+    if ((init.signal as AbortSignal | undefined)?.aborted) return res;
+  }
+  return res!;
+}

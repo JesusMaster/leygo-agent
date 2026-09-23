@@ -1,6 +1,6 @@
 import { BaseLlm } from '@google/adk';
 import { recordModelUsage } from '../../utils/usage_collector.js';
-import { aMensajesAnthropic, toolsAnthropic, desdeRespuestaAnthropic , respuestaError } from './conversion.js';
+import { aMensajesAnthropic, toolsAnthropic, desdeRespuestaAnthropic , respuestaError, fetchConReintentos } from './conversion.js';
 
 export interface AnthropicParams {
   model: string;
@@ -41,7 +41,7 @@ export class AnthropicLlm extends BaseLlm {
 
     let data: any;
     try {
-      const res = await fetch(url, {
+      const res = await fetchConReintentos(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': this.p.apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),

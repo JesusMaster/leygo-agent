@@ -1,6 +1,6 @@
 import { BaseLlm } from '@google/adk';
 import { recordModelUsage } from '../../utils/usage_collector.js';
-import { aMensajesOpenAI, toolsOpenAI, desdeMensajeOpenAI , respuestaError } from './conversion.js';
+import { aMensajesOpenAI, toolsOpenAI, desdeMensajeOpenAI , respuestaError, fetchConReintentos } from './conversion.js';
 
 export interface OpenAiCompatibleParams {
   model: string;
@@ -48,7 +48,7 @@ export class OpenAiCompatibleLlm extends BaseLlm {
 
     let data: any;
     try {
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
+      const res = await fetchConReintentos(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
       const texto = await res.text();
       if (!res.ok) {
         yield respuestaError(this.p.agentName, this.model, String(res.status), `${this.p.baseUrl} respondió ${res.status}: ${texto.slice(0, 300)}`);
