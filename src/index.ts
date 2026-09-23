@@ -6,6 +6,8 @@ import { createRedisConnector } from './database/redis.js';
 import express from 'express';
 import createApiRoutes from './routes/index.js';
 import { Runner, InMemoryArtifactService, InMemoryMemoryService } from '@google/adk';
+import { instalarLoggerAdk } from './utils/adk_logger.js';
+instalarLoggerAdk();
 import { buildChannelCoordinator } from './agents/agent.js';
 import { buildPublicCoordinator } from './agents/public.agent.js';
 import { conModelo } from './agents/llm/model_factory.js';
