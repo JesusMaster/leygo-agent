@@ -551,7 +551,10 @@ export const chatSendMessage = new FunctionTool({
       }
 
       const { googleService } = await import('../../services/google.service.js');
-      const res = await googleService.sendChatMessage(spaceName, text, threadName);
+      // Google Chat no entiende el markdown estándar (**negrita**, # títulos, listas con *):
+      // se convierte a su sintaxis (*negrita*, viñetas •, <url|texto>) antes de enviar.
+      const { messageFormatter } = await import('../../utils/message_formatter.js');
+      const res = await googleService.sendChatMessage(spaceName, messageFormatter.formatForGoogleChat(text), threadName);
 
       return {
         status: 'success',
