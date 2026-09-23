@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AgentTool, FunctionTool, LlmAgent } from '@google/adk';
 import { modelFor, construirLlm } from '../llm/model_factory.js';
 import { ejecutar, compilar, fetchSeguro, type SandboxCtx } from './sandbox.js';
@@ -83,6 +84,15 @@ function schemaGemini(json: any): any {
   if (tipo === 'ARRAY') out.items = schemaGemini(json?.items || { type: 'string' });
   if (Array.isArray(json?.enum)) out.enum = json.enum;
   return out;
+}
+
+/** Avisos de progreso (tests, montaje) hacia quien esté escuchando el turno del builder (SSE de la GUI). */
+const progreso = new AsyncLocalStorage<(msg: string, nivel?: 'info' | 'ok' | 'error') => void>();
+export function conProgreso<T>(cb: (msg: string, nivel?: 'info' | 'ok' | 'error') => void, fn: () => Promise<T>): Promise<T> {
+  return progreso.run(cb, fn);
+}
+function avisar(msg: string, nivel: 'info' | 'ok' | 'error' = 'info') {
+  try { progreso.getStore()?.(msg, nivel); } catch { /* el oyente no debe romper el flujo */ }
 }
 
 class CustomAgentsService {
@@ -227,13 +237,18 @@ class CustomAgentsService {
   async probarTools(m: CustomAgentManifest): Promise<string[]> {
     const fallos: string[] = [];
     for (const t of m.tools) {
-      for (const [i, caso] of (t.tests || []).entries()) {
+      const casos = t.tests || [];
+      avisar(`Probando ${t.name} (${casos.length} test${casos.length === 1 ? '' : 's'})…`);
+      let fallosTool = 0;
+      for (const [i, caso] of casos.entries()) {
         const r = await ejecutar(t.code, caso.args, this.ctxPara(m, t), t.name);
-        if (!r.ok) { fallos.push(`${t.name} test #${i + 1}: ${r.error}`); continue; }
+        if (!r.ok) { fallos.push(`${t.name} test #${i + 1}: ${r.error}`); fallosTool++; continue; }
         if (caso.expect !== undefined && JSON.stringify(r.result) !== JSON.stringify(caso.expect)) {
           fallos.push(`${t.name} test #${i + 1}: esperaba ${JSON.stringify(caso.expect)} y devolvió ${JSON.stringify(r.result).slice(0, 200)}`);
+          fallosTool++;
         }
       }
+      if (casos.length) avisar(fallosTool ? `${t.name}: ${fallosTool} test${fallosTool === 1 ? '' : 's'} fallaron` : `${t.name}: tests OK`, fallosTool ? 'error' : 'ok');
     }
     return fallos;
   }
@@ -293,7 +308,10 @@ class CustomAgentsService {
         if (!(coord.tools as any[]).some((t: any) => t?.name === m.name)) (coord.tools as any[]).push(wrap ? wrap(tool) : tool);
       }
     }
-    if (enCaliente) console.log(`🧩 [Agentes] "${m.displayName}" (${m.name}) montado en ${m.channels.join(', ') || 'ningún canal'}`);
+    if (enCaliente) {
+      console.log(`🧩 [Agentes] "${m.displayName}" (${m.name}) montado en ${m.channels.join(', ') || 'ningún canal'}`);
+      avisar(`${m.displayName} montado en ${m.channels.join(', ') || 'ningún canal'}`, 'ok');
+    }
   }
 
   private desmontar(name: string) {

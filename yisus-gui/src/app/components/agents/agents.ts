@@ -155,15 +155,41 @@ const CANALES: Array<{ id: CanalAgente; nombre: string }> = [
               <span>Describe el agente: nombre, personalidad y qué debe saber hacer</span>
               <textarea rows="6" [(ngModel)]="promptIA" placeholder="Crea un agente que me ayude en los estudios de vuelo. Debe convertir km a millas náuticas, pies a metros y calcular el top of descent (regla 3:1). Se llama Nami y tiene la personalidad de un instructor de vuelo: preciso y didáctico."></textarea>
             </label>
-            @if (generando()) { <div class="empty"><span class="spinner"></span> El agente programador está escribiendo las herramientas y corriendo sus tests… (30–90 s)</div> }
+            @if (estadosIA().length) {
+              <ol class="timeline">
+                @for (e of estadosIA(); track $index; let ultimo = $last) {
+                  <li [class]="'tl-' + e.nivel" [class.activo]="ultimo && generando()">
+                    <span class="tl-ico">
+                      @if (ultimo && generando()) { <span class="spinner"></span> }
+                      @else if (e.nivel === 'ok') { <i class="ph ph-check-circle"></i> }
+                      @else if (e.nivel === 'error') { <i class="ph ph-warning-circle"></i> }
+                      @else { <i class="ph ph-circle"></i> }
+                    </span>
+                    <span class="tl-txt">{{ e.texto }}</span>
+                    <span class="tl-t dim">{{ e.t }}</span>
+                  </li>
+                }
+              </ol>
+            }
             @if (resultadoIA(); as r) {
               <div class="md-out md" [innerHTML]="r.respuesta | markdown"></div>
               @if (r.pasos.length) { <details style="margin-top:10px"><summary class="dim">Pasos ({{ r.pasos.length }})</summary><pre class="out">{{ r.pasos.join('\n') }}</pre></details> }
             }
           </div>
           <div class="modal-foot">
-            <button class="btn-secondary" (click)="cerrarIA()">Cerrar</button>
-            <button class="btn-primary" [disabled]="!promptIA.trim() || generando()" (click)="generar()"><i class="ph ph-sparkle"></i> Crear</button>
+            @if (resultadoIA(); as r) {
+              <button class="btn-secondary" (click)="nuevaGeneracion()"><i class="ph ph-arrow-counter-clockwise"></i> Crear otro</button>
+              @if (r.nuevos.length) {
+                <button class="btn-primary" (click)="irAlAgente(r.nuevos[0])"><i class="ph ph-pencil-simple"></i> Ver {{ nombreVisible(r.nuevos[0]) }}</button>
+              } @else {
+                <button class="btn-primary" (click)="cerrarIA()">Cerrar</button>
+              }
+            } @else {
+              <button class="btn-secondary" (click)="cerrarIA()">{{ generando() ? 'Seguir en segundo plano' : 'Cerrar' }}</button>
+              <button class="btn-primary" [disabled]="!promptIA.trim() || generando()" (click)="generar()">
+                @if (generando()) { <span class="spinner"></span> Creando… } @else { <i class="ph ph-sparkle"></i> Crear }
+              </button>
+            }
           </div>
         </div>
       </div>
@@ -228,6 +254,15 @@ const CANALES: Array<{ id: CanalAgente; nombre: string }> = [
     .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 13.5px; margin: 6px 0 12px; }
     .check input { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--accent-primary); }
     .dim { color: var(--text-dim); font-size: 12.5px; font-weight: 400; }
+    .timeline { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .timeline li { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.4; }
+    .timeline .tl-ico { width: 18px; display: inline-flex; justify-content: center; flex: none; margin-top: 1px; color: var(--text-dim); }
+    .timeline .tl-ok .tl-ico { color: var(--ok); }
+    .timeline .tl-error .tl-ico { color: var(--warn); }
+    .timeline .tl-error .tl-txt { color: var(--warn); }
+    .timeline li.activo .tl-txt { color: var(--text-main); font-weight: 500; }
+    .timeline .tl-txt { flex: 1; }
+    .timeline .tl-t { font-size: 11px; font-variant-numeric: tabular-nums; }
     .md-out { font-size: 14px; padding: 12px 14px; border-radius: 10px; background: var(--bg-main); border: 1px solid var(--border-light); }
     .msg { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 10px; }
     .msg.yo { align-items: flex-end; }
@@ -251,7 +286,7 @@ export class AgentsComponent {
   guardando = signal(false);
   modalIA = signal(false);
   generando = signal(false);
-  resultadoIA = signal<{ respuesta: string; pasos: string[] } | null>(null);
+  resultadoIA = signal<{ respuesta: string; pasos: string[]; nuevos: string[] } | null>(null);
   prueba = signal<{ agent: CustomAgent; mensajes: Array<{ rol: 'yo' | 'agente'; texto: string; pasos?: string[] }> } | null>(null);
   probando = signal(false);
   canales = CANALES;
@@ -350,13 +385,69 @@ export class AgentsComponent {
     });
   }
 
-  cerrarIA() { if (!this.generando()) { this.modalIA.set(false); this.resultadoIA.set(null); } }
-  generar() {
-    this.generando.set(true); this.resultadoIA.set(null);
-    this.api.generateAgent(this.promptIA.trim()).subscribe({
-      next: (r) => { this.generando.set(false); this.resultadoIA.set({ respuesta: r.respuesta, pasos: r.pasos }); this.agents.set(r.agents); if (r.nuevos.length) this.toast.ok(`Agente creado: ${r.nuevos.join(', ')}`); this.cdr.markForCheck(); },
-      error: (e) => { this.generando.set(false); this.toast.error(e?.error?.error || 'No se pudo crear'); },
-    });
+  estadosIA = signal<{ texto: string; nivel: 'info' | 'ok' | 'error'; t: string }[]>([]);
+  private inicioIA = 0;
+
+  /** Cerrar mientras genera no cancela: el builder sigue y al terminar la lista se refresca sola. */
+  cerrarIA() { this.modalIA.set(false); if (!this.generando()) { this.resultadoIA.set(null); this.estadosIA.set([]); } }
+  nuevaGeneracion() { this.resultadoIA.set(null); this.estadosIA.set([]); this.promptIA = ''; }
+  nombreVisible(slug: string): string { return this.agents().find((a) => a.name === slug)?.displayName || slug; }
+  irAlAgente(slug: string) {
+    const a = this.agents().find((x) => x.name === slug);
+    this.cerrarIA(); this.resultadoIA.set(null); this.estadosIA.set([]);
+    if (a) setTimeout(() => this.toggle(a), 150);
+  }
+
+  private pushEstado(texto: string, nivel: 'info' | 'ok' | 'error' = 'info') {
+    const seg = Math.round((Date.now() - this.inicioIA) / 1000);
+    this.estadosIA.update((l) => [...l, { texto, nivel, t: `${seg}s` }]);
+    this.cdr.markForCheck();
+  }
+
+  async generar() {
+    const prompt = this.promptIA.trim();
+    if (!prompt || this.generando()) return;
+    this.generando.set(true); this.resultadoIA.set(null); this.estadosIA.set([]); this.inicioIA = Date.now();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const sesion = localStorage.getItem('yisus_auth_token');
+    const adminKey = localStorage.getItem('yisus_admin_key');
+    if (sesion) headers['Authorization'] = `Bearer ${sesion}`;
+    else if (adminKey) headers['X-Admin-Key'] = adminKey;
+    try {
+      const res = await fetch(`${this.api.baseUrl}/api/agents/generate/stream`, { method: 'POST', headers, body: JSON.stringify({ prompt }) });
+      if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let terminado = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const bloques = buf.split('\n\n'); buf = bloques.pop() || '';
+        for (const b of bloques) {
+          const linea = b.split('\n').find((l) => l.startsWith('data: '));
+          if (!linea) continue;
+          let ev: any; try { ev = JSON.parse(linea.slice(6)); } catch { continue; }
+          if (ev.type === 'estado') this.pushEstado(ev.texto, ev.nivel);
+          else if (ev.type === 'fin') {
+            terminado = true;
+            this.pushEstado(ev.nuevos.length ? `Listo en ${Math.round((Date.now() - this.inicioIA) / 1000)}s` : 'El programador terminó sin crear un agente nuevo (revisa su respuesta)', ev.nuevos.length ? 'ok' : 'error');
+            this.resultadoIA.set({ respuesta: ev.respuesta, pasos: ev.pasos, nuevos: ev.nuevos });
+            this.agents.set(ev.agents);
+            if (ev.nuevos.length) this.toast.ok(`Agente creado: ${ev.nuevos.join(', ')}`);
+          } else if (ev.type === 'error') throw new Error(ev.error);
+        }
+      }
+      if (!terminado) throw new Error('La conexión se cortó antes de terminar');
+    } catch (e: any) {
+      this.pushEstado(`Error: ${e?.message || 'No se pudo crear'}`, 'error');
+      this.toast.error(e?.message || 'No se pudo crear');
+      this.load();
+    } finally {
+      this.generando.set(false);
+      this.cdr.markForCheck();
+    }
   }
 
   abrirPrueba(a: CustomAgent) { this.prueba.set({ agent: a, mensajes: [] }); this.textoPrueba = ''; }
