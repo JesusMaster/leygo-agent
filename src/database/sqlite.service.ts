@@ -104,6 +104,10 @@ export interface UsageRecord {
   thread_id: string;
   channel?: string;
   agent?: string;
+  cached_tokens?: number;
+  thoughts_tokens?: number;
+  /** override | catalogo | local | familia | default (los dos últimos: costo aproximado) */
+  price_source?: string;
 }
 
 export type CommitmentStatus = 'propuesto' | 'pendiente' | 'en_curso' | 'hecho' | 'cancelado' | 'descartado';
@@ -634,6 +638,9 @@ export class SqliteReminderService {
           console.log(`🛠️ [SQLite] usage_history migrada: columna "${col}" agregada.`);
         }
       }
+      if (!existing.has('cached_tokens'))   this.db.exec(`ALTER TABLE usage_history ADD COLUMN cached_tokens INTEGER DEFAULT 0`);
+      if (!existing.has('thoughts_tokens')) this.db.exec(`ALTER TABLE usage_history ADD COLUMN thoughts_tokens INTEGER DEFAULT 0`);
+      if (!existing.has('price_source'))    this.db.exec(`ALTER TABLE usage_history ADD COLUMN price_source TEXT`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_channel ON usage_history(channel)`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_history(agent)`);
     } catch (err: any) {
@@ -643,8 +650,8 @@ export class SqliteReminderService {
 
   public logTokenUsage(record: Omit<UsageRecord, 'id'>): UsageRecord {
     const stmt = this.db.prepare(`
-      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent, cached_tokens, thoughts_tokens, price_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       record.timestamp,
@@ -655,9 +662,21 @@ export class SqliteReminderService {
       record.cost_usd,
       record.thread_id,
       record.channel || 'unknown',
-      record.agent || 'unknown'
+      record.agent || 'unknown',
+      record.cached_tokens || 0,
+      record.thoughts_tokens || 0,
+      record.price_source || null
     );
     return record;
+  }
+
+  /** Filas de consumo desde una fecha (para retarifar con los precios vigentes). */
+  public listUsageSince(sinceIso: string): Array<{ id: number; model: string; input_tokens: number; output_tokens: number; cached_tokens: number; cost_usd: number }> {
+    return this.db.prepare(`SELECT id, model, input_tokens, output_tokens, COALESCE(cached_tokens, 0) as cached_tokens, cost_usd FROM usage_history WHERE timestamp >= ?`).all(sinceIso) as any[];
+  }
+
+  public updateUsageCost(id: number, costUsd: number, priceSource: string): void {
+    this.db.prepare(`UPDATE usage_history SET cost_usd = ?, price_source = ? WHERE id = ?`).run(costUsd, priceSource, id);
   }
 
   public getCurrentMonthCost(monthStartIso: string, channel?: string): number {
@@ -763,14 +782,16 @@ export class SqliteReminderService {
     return { channels, agents };
   }
 
-  public getUsageByModel(monthStartIso: string): Array<{ model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number }> {
+  public getUsageByModel(monthStartIso: string): Array<{ model: string; count: number; input_tokens: number; output_tokens: number; cached_tokens: number; total_cost: number; aproximados: number }> {
     const stmt = this.db.prepare(`
       SELECT 
         model,
         COUNT(*) as count,
         COALESCE(SUM(input_tokens), 0) as input_tokens,
         COALESCE(SUM(output_tokens), 0) as output_tokens,
-        COALESCE(SUM(cost_usd), 0.0) as total_cost
+        COALESCE(SUM(cached_tokens), 0) as cached_tokens,
+        COALESCE(SUM(cost_usd), 0.0) as total_cost,
+        COALESCE(SUM(CASE WHEN price_source IN ('familia', 'default') OR price_source IS NULL THEN 1 ELSE 0 END), 0) as aproximados
       FROM usage_history
       WHERE timestamp >= ?
       GROUP BY model

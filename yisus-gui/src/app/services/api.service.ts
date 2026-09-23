@@ -3,7 +3,10 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 // ─── Tipos que devuelve el backend ──────────────────────────────────────────
-export interface UsageByModel   { model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
+export interface ModelPrice { input: number; output: number; cached: number | null; source: 'override' | 'catalogo' | 'local' | 'familia' | 'default'; key: string | null; }
+export interface UsageByModel   { model: string; count: number; input_tokens: number; output_tokens: number; cached_tokens: number; total_cost: number; aproximados: number; price: ModelPrice; }
+export interface PriceRow extends ModelPrice { model: string; override: { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number } | null; }
+export interface CatalogoInfo { modelos: number; actualizado: string | null; }
 export interface UsageByAgent   { agent: string; model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
 export interface UsageByChannel { channel: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
 export interface BudgetStatus   { channel: string; currentCost: number; budget: number; percentUsed: number; isExceeded: boolean; isNearLimit: boolean; }
@@ -24,6 +27,7 @@ export interface UsageSummary {
   totalCost: number; totalTokens: number; inputTokens: number; outputTokens: number;
   monthlyBudget: number; percentUsed: number; isExceeded: boolean;
   byModel: UsageByModel[]; byAgent: UsageByAgent[]; byChannel: UsageByChannel[];
+  catalogo?: CatalogoInfo;
   channelBudgets: BudgetStatus[];
 }
 
@@ -170,8 +174,13 @@ export class ApiService {
   setBudget(budgetUsd: number, channel?: string): Observable<any> {
     return this.http.post(`${this.baseUrl}/api/usage/budget`, channel ? { budgetUsd, channel } : { budgetUsd });
   }
-  refreshPricing(): Observable<any> {
-    return this.http.post(`${this.baseUrl}/api/usage/refresh-pricing`, {});
+  refreshPricing(): Observable<{ updated: boolean; catalogo: CatalogoInfo }> {
+    return this.http.post<any>(`${this.baseUrl}/api/usage/refresh-pricing`, {});
+  }
+  repriceUsage(since?: string): Observable<{ filas: number; antes: number; despues: number }> { return this.http.post<any>(`${this.baseUrl}/api/usage/reprice`, since ? { since } : {}); }
+  getPrices(): Observable<{ catalogo: CatalogoInfo; prices: PriceRow[] }> { return this.http.get<any>(`${this.baseUrl}/api/usage/prices`); }
+  setPrice(model: string, precio: { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number | null } | null): Observable<{ prices: PriceRow[] }> {
+    return this.http.post<any>(`${this.baseUrl}/api/usage/prices`, precio ? { model, ...precio } : { model, clear: true });
   }
 
   // ─── Canales y herramientas ───────────────────────────────────────────

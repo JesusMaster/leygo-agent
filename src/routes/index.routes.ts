@@ -243,10 +243,36 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         }
     });
 
+    // Tabla de precios por modelo (catálogo LiteLLM + overrides manuales)
+    app.get('/api/usage/prices', (_req, res) => {
+        try { res.json({ catalogo: tokenTrackerService.catalogInfo(), prices: tokenTrackerService.listPrices() }); }
+        catch (err: any) { res.status(500).json({ error: err.message }); }
+    });
+    // Fijar precio manual: { model, inputPricePer1M, outputPricePer1M, cachedPricePer1M? } · borrar: { model, clear: true }
+    app.post('/api/usage/prices', express.json(), (req, res) => {
+        try {
+            const { model, clear, inputPricePer1M, outputPricePer1M, cachedPricePer1M } = req.body || {};
+            if (!model) return res.status(400).json({ error: 'model requerido' });
+            tokenTrackerService.setOverride(String(model), clear ? null : {
+                inputPricePer1M: Number(inputPricePer1M), outputPricePer1M: Number(outputPricePer1M),
+                ...(cachedPricePer1M !== undefined && cachedPricePer1M !== null && cachedPricePer1M !== '' ? { cachedPricePer1M: Number(cachedPricePer1M) } : {}),
+            });
+            res.json({ status: 'success', prices: tokenTrackerService.listPrices() });
+        } catch (err: any) { res.status(400).json({ error: err.message }); }
+    });
+
+    // Retarifar el consumo registrado (mes en curso por defecto) con los precios vigentes
+    app.post('/api/usage/reprice', express.json(), (req, res) => {
+        try {
+            const desde = String(req.body?.since || '').trim() || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+            res.json({ status: 'success', since: desde, ...tokenTrackerService.reprice(desde) });
+        } catch (err: any) { res.status(500).json({ error: err.message }); }
+    });
+
     app.post('/api/usage/refresh-pricing', async (_req, res) => {
         try {
             const updated = await tokenTrackerService.checkAndUpdatePricingInBackground(true);
-            res.json({ status: 'success', updated });
+            res.json({ status: 'success', updated, catalogo: tokenTrackerService.catalogInfo() });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

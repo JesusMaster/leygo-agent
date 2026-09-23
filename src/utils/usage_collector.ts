@@ -19,7 +19,7 @@ export interface UsageScope {
   threadId: string;
   label: string;
   /** clave: "<agente>::<modelo>" */
-  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number; llamadas: number }>;
+  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number; cachedTokens: number; thoughtsTokens: number; llamadas: number }>;
 }
 
 const storage = new AsyncLocalStorage<UsageScope>();
@@ -49,37 +49,50 @@ export function currentUsageScope(): UsageScope | undefined {
  * Registra el consumo de UNA llamada al modelo. Si hay un scope abierto acumula
  * (se persiste al cerrar el turno); si no, persiste de inmediato como 'system'.
  */
-export function recordModelUsage(model: string, inputTokens: number, outputTokens: number, agent: string = 'unknown'): void {
+export function recordModelUsage(model: string, inputTokens: number, outputTokens: number, agent: string = 'unknown', extra: { cachedTokens?: number; thoughtsTokens?: number } = {}): void {
   if (inputTokens <= 0 && outputTokens <= 0) return;
+  const cachedTokens = Math.max(0, extra.cachedTokens || 0);
+  const thoughtsTokens = Math.max(0, extra.thoughtsTokens || 0);
 
   const scope = storage.getStore();
   if (!scope) {
     tokenTrackerService
-      .logUsage('(llamada fuera de un turno)', model, inputTokens, outputTokens, 'system', 'system', agent)
+      .logUsage('(llamada fuera de un turno)', model, inputTokens, outputTokens, 'system', 'system', agent, { cachedTokens, thoughtsTokens })
       .catch(() => {});
     return;
   }
 
   const key = `${agent}::${model}`;
-  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0, llamadas: 0 };
+  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0, cachedTokens: 0, thoughtsTokens: 0, llamadas: 0 };
   acc.llamadas += 1;
   acc.inputTokens += inputTokens;
   acc.outputTokens += outputTokens;
+  acc.cachedTokens += cachedTokens;
+  acc.thoughtsTokens += thoughtsTokens;
   scope.totals.set(key, acc);
 }
 
 /** Totales del turno en curso (tokens y costo estimado), para mostrarlos en la GUI antes de cerrar. */
-export function summarizeUsageScope(): { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; porAgente: Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas: number }> } {
+export interface UsageSummaryTurno {
+  inputTokens: number; outputTokens: number; cachedTokens: number; thoughtsTokens: number; totalTokens: number; costUsd: number;
+  /** true si algún modelo del turno se tarifó por familia/default (costo aproximado) */
+  aproximado: boolean;
+  porAgente: Array<{ agent: string; model: string; tokens: number; cachedTokens: number; costUsd: number; llamadas: number; source: string }>;
+}
+
+export function summarizeUsageScope(): UsageSummaryTurno {
   const scope = storage.getStore();
-  const out = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, porAgente: [] as Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas: number }> };
+  const out: UsageSummaryTurno = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, thoughtsTokens: 0, totalTokens: 0, costUsd: 0, aproximado: false, porAgente: [] };
   if (!scope) return out;
   for (const t of scope.totals.values()) {
-    const p = tokenTrackerService.getPrices(t.model);
-    const cost = (t.inputTokens / 1_000_000) * p.inputPricePer1M + (t.outputTokens / 1_000_000) * p.outputPricePer1M;
+    const { costUsd: cost, prices } = tokenTrackerService.costFor(t.model, t.inputTokens, t.outputTokens, t.cachedTokens);
     out.inputTokens += t.inputTokens;
     out.outputTokens += t.outputTokens;
+    out.cachedTokens += t.cachedTokens;
+    out.thoughtsTokens += t.thoughtsTokens;
     out.costUsd += cost;
-    out.porAgente.push({ agent: t.agent, model: t.model, tokens: t.inputTokens + t.outputTokens, costUsd: cost, llamadas: t.llamadas });
+    if (prices.source === 'familia' || prices.source === 'default') out.aproximado = true;
+    out.porAgente.push({ agent: t.agent, model: t.model, tokens: t.inputTokens + t.outputTokens, cachedTokens: t.cachedTokens, costUsd: cost, llamadas: t.llamadas, source: prices.source });
   }
   out.totalTokens = out.inputTokens + out.outputTokens;
   return out;
@@ -92,7 +105,7 @@ export async function flushUsageScope(): Promise<void> {
 
   for (const t of scope.totals.values()) {
     await tokenTrackerService
-      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent)
+      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent, { cachedTokens: t.cachedTokens, thoughtsTokens: t.thoughtsTokens })
       .catch(() => {});
   }
   scope.totals.clear();

@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, UsageSummary, BudgetStatus, UsageHistoryPage } from '../../services/api.service';
+import { ApiService, UsageSummary, BudgetStatus, UsageHistoryPage, PriceRow, CatalogoInfo } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
@@ -78,6 +78,51 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               </tr>
             }
           </table>
+        </div>
+
+        <div class="card">
+          <div class="page-head" style="margin-bottom:8px">
+            <div>
+              <h3>Precios por modelo</h3>
+              <p class="card-sub" style="margin:0">Lo que se usa para tarifar cada llamada, en USD por millón de tokens. Orden: precio manual → catálogo LiteLLM (se refresca a diario) → familia/default (≈ aproximado). El caché de prompt se cobra a su propia tarifa.</p>
+            </div>
+            <div class="row" style="align-items:center">
+              <span class="badge dim" style="white-space:nowrap">catálogo: {{ catalogo()?.modelos ?? '—' }} modelos · {{ catalogo()?.actualizado ? (catalogo()!.actualizado! | friendlyDate) : 'sin descargar' }}</span>
+              <button class="btn-secondary" title="Recalcula el costo del mes en curso con los precios de esta tabla" (click)="retarifar()"><i class="ph ph-calculator"></i> Retarifar mes</button>
+            </div>
+          </div>
+          @if (precios().length === 0) { <div class="empty">Aún no hay modelos usados</div> }
+          @else {
+            <table>
+              <tr><th>Modelo</th><th>Fuente</th><th class="num">Entrada</th><th class="num">Caché</th><th class="num">Salida</th><th class="num">Este mes</th><th style="width:300px">Precio manual (in / caché / out)</th></tr>
+              @for (p of precios(); track p.model) {
+                <tr>
+                  <td><code>{{ p.model }}</code></td>
+                  <td>
+                    @switch (p.source) {
+                      @case ('override') { <span class="badge ok" title="Precio fijado a mano">manual</span> }
+                      @case ('catalogo') { <span class="badge" [title]="'LiteLLM: ' + p.key">catálogo</span> }
+                      @case ('local') { <span class="badge dim">local $0</span> }
+                      @default { <span class="badge warn" title="No está en el catálogo: precio estimado por familia. Fíjalo a mano si lo conoces.">≈ aproximado</span> }
+                    }
+                  </td>
+                  <td class="num">{{ '$' + p.input.toFixed(3) }}</td>
+                  <td class="num">{{ p.cached != null ? ('$' + p.cached.toFixed(3)) : '—' }}</td>
+                  <td class="num">{{ '$' + p.output.toFixed(3) }}</td>
+                  <td class="num">{{ gastoModelo(p.model) }}</td>
+                  <td>
+                    <div class="row">
+                      <input type="number" step="0.01" min="0" style="width:70px" placeholder="in" [(ngModel)]="edicion[p.model].in" />
+                      <input type="number" step="0.01" min="0" style="width:70px" placeholder="caché" [(ngModel)]="edicion[p.model].cached" />
+                      <input type="number" step="0.01" min="0" style="width:70px" placeholder="out" [(ngModel)]="edicion[p.model].out" />
+                      <button class="btn-icon" title="Guardar precio manual" (click)="guardarPrecio(p)"><i class="ph ph-floppy-disk"></i></button>
+                      @if (p.override) { <button class="btn-icon" title="Volver al catálogo" (click)="quitarPrecio(p)"><i class="ph ph-arrow-counter-clockwise"></i></button> }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </table>
+          }
         </div>
 
         <div class="grid cols-2">
@@ -192,7 +237,7 @@ export class UsageComponent {
   budgets = signal<{ global: BudgetStatus; canales: BudgetStatus[] } | null>(null);
   nuevoTope: Record<string, number | null> = {};
 
-  constructor() { this.load(); }
+  constructor() { this.load(); this.cargarPrecios(); }
 
   // ─── Historial paginado ────────────────────────────────────────────────
   pagina = signal<UsageHistoryPage | null>(null);
@@ -295,8 +340,55 @@ export class UsageComponent {
 
   refrescarPrecios() {
     this.api.refreshPricing().subscribe({
-      next: (r: any) => this.toast.ok(r?.updated ? 'Catálogo de precios actualizado' : 'El catálogo ya estaba al día'),
+      next: (r) => { this.toast.ok(r?.updated ? 'Catálogo de precios actualizado' : 'El catálogo ya estaba al día'); if (r?.catalogo) this.catalogo.set(r.catalogo); this.cargarPrecios(); this.load(); },
       error: () => this.toast.error('No se pudo actualizar el catálogo'),
+    });
+  }
+
+  retarifar() {
+    this.api.repriceUsage().subscribe({
+      next: (r) => { this.toast.ok(`${r.filas} registros: $${r.antes.toFixed(4)} → $${r.despues.toFixed(4)}`); this.load(); },
+      error: (err) => this.toast.error(err?.error?.error || 'No se pudo retarifar'),
+    });
+  }
+
+  // ─── Precios por modelo ────────────────────────────────────────────────
+  precios = signal<PriceRow[]>([]);
+  catalogo = signal<CatalogoInfo | null>(null);
+  edicion: Record<string, { in: number | null; cached: number | null; out: number | null }> = {};
+
+  cargarPrecios() {
+    this.api.getPrices().subscribe({
+      next: (r) => { this.catalogo.set(r.catalogo); this.aplicarPrecios(r.prices); },
+      error: () => {},
+    });
+  }
+
+  private aplicarPrecios(lista: PriceRow[]) {
+    for (const p of lista) {
+      if (!this.edicion[p.model]) this.edicion[p.model] = { in: p.override?.inputPricePer1M ?? null, cached: p.override?.cachedPricePer1M ?? null, out: p.override?.outputPricePer1M ?? null };
+    }
+    this.precios.set(lista);
+  }
+
+  gastoModelo(model: string): string {
+    const m = this.data()?.byModel.find((x) => x.model === model);
+    return m ? `$${m.total_cost.toFixed(4)}${m.aproximados ? ' ≈' : ''}` : '—';
+  }
+
+  guardarPrecio(p: PriceRow) {
+    const e = this.edicion[p.model];
+    if (e.in == null || e.out == null) { this.toast.error('Indica al menos entrada y salida'); return; }
+    this.api.setPrice(p.model, { inputPricePer1M: Number(e.in), outputPricePer1M: Number(e.out), cachedPricePer1M: e.cached == null || e.cached === ('' as any) ? null : Number(e.cached) }).subscribe({
+      next: (r) => { this.aplicarPrecios(r.prices); this.toast.ok(`Precio manual fijado para ${p.model}`); },
+      error: (err) => this.toast.error(err?.error?.error || 'No se pudo guardar'),
+    });
+  }
+
+  quitarPrecio(p: PriceRow) {
+    this.api.setPrice(p.model, null).subscribe({
+      next: (r) => { delete this.edicion[p.model]; this.aplicarPrecios(r.prices); this.toast.ok(`${p.model} vuelve al catálogo`); },
+      error: (err) => this.toast.error(err?.error?.error || 'No se pudo quitar'),
     });
   }
 }

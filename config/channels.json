@@ -61,7 +61,8 @@
       "knowledge_public",
       "faq_agent",
       "triage_agent",
-      "get_token_usage"
+      "get_token_usage",
+      "nami"
     ]
   }
 }

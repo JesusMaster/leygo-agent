@@ -22,7 +22,10 @@ export interface Paso {
 
 export interface Uso {
   inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number;
-  porAgente?: Array<{ agent: string; model: string; tokens: number; costUsd: number; llamadas?: number }>;
+  cachedTokens?: number; thoughtsTokens?: number;
+  /** algún modelo del turno se tarifó por familia/default: costo aproximado */
+  aproximado?: boolean;
+  porAgente?: Array<{ agent: string; model: string; tokens: number; cachedTokens?: number; costUsd: number; llamadas?: number; source?: string }>;
 }
 
 export interface ChatMessage {
@@ -155,7 +158,7 @@ export class ChatService {
 
           if (evento?.type === 'directo') { actualizar({ directo: { name: evento.agent, displayName: evento.displayName } }); continue; }
           if (evento?.type === 'usage') {
-            actualizar({ uso: { inputTokens: evento.inputTokens, outputTokens: evento.outputTokens, totalTokens: evento.totalTokens, costUsd: evento.costUsd, porAgente: evento.porAgente } });
+            actualizar({ uso: { inputTokens: evento.inputTokens, outputTokens: evento.outputTokens, totalTokens: evento.totalTokens, costUsd: evento.costUsd, cachedTokens: evento.cachedTokens, thoughtsTokens: evento.thoughtsTokens, aproximado: !!evento.aproximado, porAgente: evento.porAgente } });
             continue;
           }
           if (evento?.error) throw new Error(evento.error);

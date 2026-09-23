@@ -31,7 +31,7 @@ export class TrackedGemini extends Gemini {
     } finally {
       if (lastUsage) {
         const u = tokenTrackerService.extractUsage(lastUsage);
-        recordModelUsage(this.model, u.inputTokens, u.outputTokens, this.agentName);
+        recordModelUsage(this.model, u.inputTokens, u.outputTokens, this.agentName, { cachedTokens: u.cachedTokens, thoughtsTokens: u.thoughtsTokens });
       }
     }
   }

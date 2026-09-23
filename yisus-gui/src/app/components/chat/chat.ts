@@ -46,7 +46,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
                 <span class="when">{{ m.at | friendlyDate }}</span>
                 @if (m.uso) {
                   <span class="uso" [title]="detalleUso(m)">
-                    <i class="ph ph-coins"></i> {{ m.uso.totalTokens.toLocaleString('es-CL') }} tokens · {{ '$' + m.uso.costUsd.toFixed(4) }}
+                    <i class="ph ph-coins"></i> {{ m.uso.totalTokens.toLocaleString('es-CL') }} tokens · {{ (m.uso.aproximado ? '≈ $' : '$') + m.uso.costUsd.toFixed(4) }}
                   </span>
                 }
               } @else {
@@ -346,8 +346,9 @@ export class ChatComponent {
   }
   detalleUso(m: ChatMessage): string {
     const u = m.uso!;
-    const lineas = [`Entrada: ${u.inputTokens.toLocaleString('es-CL')} · Salida: ${u.outputTokens.toLocaleString('es-CL')}`];
-    for (const a of u.porAgente || []) lineas.push(`${a.agent} (${a.model}): ${a.tokens.toLocaleString('es-CL')} tokens · $${a.costUsd.toFixed(4)}${a.llamadas ? ` · ${a.llamadas} llamada${a.llamadas === 1 ? '' : 's'}` : ''}`);
+    const lineas = [`Entrada: ${u.inputTokens.toLocaleString('es-CL')}${u.cachedTokens ? ` (${u.cachedTokens.toLocaleString('es-CL')} en caché)` : ''} · Salida: ${u.outputTokens.toLocaleString('es-CL')}${u.thoughtsTokens ? ` (${u.thoughtsTokens.toLocaleString('es-CL')} de razonamiento)` : ''}`];
+    for (const a of u.porAgente || []) lineas.push(`${a.agent} (${a.model}): ${a.tokens.toLocaleString('es-CL')} tokens · $${a.costUsd.toFixed(4)}${a.llamadas ? ` · ${a.llamadas} llamada${a.llamadas === 1 ? '' : 's'}` : ''}${a.source === 'familia' || a.source === 'default' ? ' · precio aproximado' : ''}`);
+    if (u.aproximado) lineas.push('≈ Algún modelo no está en el catálogo de precios: fíjale un precio en Consumo → Precios.');
     return lineas.join('\n');
   }
 }

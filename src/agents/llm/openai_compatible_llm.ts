@@ -69,8 +69,10 @@ export class OpenAiCompatibleLlm extends BaseLlm {
       candidatesTokenCount: usage.completion_tokens || 0,
       totalTokenCount: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
       thoughtsTokenCount: usage.completion_tokens_details?.reasoning_tokens || 0,
+      // OpenAI/xAI/Moonshot/DeepSeek informan el caché de prompt aquí (DeepSeek además como prompt_cache_hit_tokens)
+      cachedContentTokenCount: usage.prompt_tokens_details?.cached_tokens || usage.prompt_cache_hit_tokens || 0,
     };
-    recordModelUsage(this.p.pricingModel || this.model, usageMetadata.promptTokenCount, usageMetadata.candidatesTokenCount, this.p.agentName || 'unknown');
+    recordModelUsage(this.p.pricingModel || this.model, usageMetadata.promptTokenCount, usageMetadata.candidatesTokenCount, this.p.agentName || 'unknown', { cachedTokens: usageMetadata.cachedContentTokenCount, thoughtsTokens: usageMetadata.thoughtsTokenCount });
 
     yield {
       content: desdeMensajeOpenAI(choice?.message),

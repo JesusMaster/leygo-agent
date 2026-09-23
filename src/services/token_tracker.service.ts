@@ -9,12 +9,38 @@ import { messageFormatter } from '../utils/message_formatter.js';
 dotenv.config();
 
 const LITELLM_PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
-const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 días
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 día: LiteLLM agrega los modelos nuevos el mismo día
+const CONFIG_OVERRIDES = 'llm.prices';
+
+/** De dónde salió el precio. 'familia' y 'default' son aproximados. */
+export type PriceSource = 'override' | 'catalogo' | 'local' | 'familia' | 'default';
 
 export interface ModelPrices {
   inputPricePer1M: number;
   outputPricePer1M: number;
+  /** Tokens de entrada leídos desde caché (Gemini/OpenAI/Anthropic): ~10 % del input. Si falta, se cobran como input. */
+  cachedPricePer1M?: number;
+  source: PriceSource;
+  /** Clave del catálogo con la que calzó (o el modelo en overrides) */
+  key?: string;
 }
+
+export interface PriceOverride { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number; }
+
+/** Prefijos con los que LiteLLM publica cada proveedor (los presets de llm_settings) */
+const PREFIJOS_LITELLM: Record<string, string[]> = {
+  gemini: ['gemini/', ''],
+  google: ['gemini/', ''],
+  openai: ['', 'openai/'],
+  anthropic: ['', 'anthropic/'],
+  xai: ['xai/', ''],
+  moonshot: ['moonshot/', ''],
+  'moonshot-kimi': ['moonshot/', ''],
+  deepseek: ['deepseek/', ''],
+  groq: ['groq/', ''],
+  mistral: ['mistral/', ''],
+  openrouter: ['openrouter/', ''],
+};
 
 /** Canales desde los que se consume IA. Cada uno puede tener su propio presupuesto. */
 export type UsageChannel = 'telegram' | 'buzz' | 'a2a' | 'api' | 'system';
@@ -42,6 +68,8 @@ export class TokenTrackerService {
   private memoryPricingCache: Map<string, ModelPrices> = new Map();
   private isUpdatingPricing: boolean = false;
   private warnedUnknownModels: Set<string> = new Set();
+  private overrides: Map<string, PriceOverride> | null = null;
+  private catalogoMtime = 0;
 
   constructor() {
     const dataDir = path.resolve(process.cwd(), 'data');
@@ -59,8 +87,48 @@ export class TokenTrackerService {
     // 1. Cargar archivo local existente en memoria
     this.loadJsonToMemory();
 
-    // 2. Verificar si está vencido (> 7 días) o no existe, para descargarlo silenciosamente
+    // 2. Verificar si está vencido (> 1 día) o no existe, para descargarlo silenciosamente,
+    //    y volver a mirar cada 6 h mientras el proceso viva.
     this.checkAndUpdatePricingInBackground();
+    const timer = setInterval(() => this.checkAndUpdatePricingInBackground().catch(() => {}), 6 * 60 * 60 * 1000);
+    (timer as any).unref?.();
+  }
+
+  /** Fecha del catálogo local y cuántos modelos tiene (para la GUI). */
+  public catalogInfo(): { modelos: number; actualizado: string | null } {
+    return { modelos: this.memoryPricingCache.size, actualizado: this.catalogoMtime ? new Date(this.catalogoMtime).toISOString() : null };
+  }
+
+  // ─── Overrides manuales (system_config: llm.prices) ─────────────────────
+  private leerOverrides(): Map<string, PriceOverride> {
+    if (this.overrides) return this.overrides;
+    const mapa = new Map<string, PriceOverride>();
+    try {
+      const raw = sqliteReminderService.getConfig(CONFIG_OVERRIDES, '');
+      if (raw) for (const [k, v] of Object.entries<any>(JSON.parse(raw))) {
+        if (v && typeof v === 'object') mapa.set(k.toLowerCase(), { inputPricePer1M: Number(v.inputPricePer1M) || 0, outputPricePer1M: Number(v.outputPricePer1M) || 0, ...(v.cachedPricePer1M != null ? { cachedPricePer1M: Number(v.cachedPricePer1M) || 0 } : {}) });
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [TokenTracker] llm.prices inválido:', err.message);
+    }
+    this.overrides = mapa;
+    return mapa;
+  }
+
+  public listOverrides(): Record<string, PriceOverride> {
+    return Object.fromEntries(this.leerOverrides());
+  }
+
+  /** Fija (o borra, con null) el precio manual de un modelo. Manda sobre el catálogo. */
+  public setOverride(model: string, precio: PriceOverride | null): void {
+    const mapa = this.leerOverrides();
+    const k = (model || '').toLowerCase().trim();
+    if (!k) throw new Error('Modelo vacío');
+    if (precio) {
+      if (!(precio.inputPricePer1M >= 0) || !(precio.outputPricePer1M >= 0)) throw new Error('Precios inválidos');
+      mapa.set(k, precio);
+    } else mapa.delete(k);
+    sqliteReminderService.setConfig(CONFIG_OVERRIDES, JSON.stringify(Object.fromEntries(mapa)));
   }
 
   /**
@@ -78,12 +146,17 @@ export class TokenTrackerService {
         const inputCost = (val.input_cost_per_token || 0) * 1_000_000;
         const outputCost = (val.output_cost_per_token || 0) * 1_000_000;
         if (inputCost > 0 || outputCost > 0) {
+          const cached = val.cache_read_input_token_cost != null ? (val.cache_read_input_token_cost || 0) * 1_000_000 : undefined;
           this.memoryPricingCache.set(key.toLowerCase(), {
             inputPricePer1M: inputCost,
             outputPricePer1M: outputCost,
+            ...(cached != null ? { cachedPricePer1M: cached } : {}),
+            source: 'catalogo',
+            key: key.toLowerCase(),
           });
         }
       }
+      try { this.catalogoMtime = fs.statSync(this.jsonPath).mtimeMs; } catch { /* sin fecha */ }
       console.log(`📊 [TokenTracker] Precios cargados en memoria: ${this.memoryPricingCache.size} modelos registrados.`);
     } catch (err: any) {
       console.warn('⚠️ [TokenTracker] Error al parsear litellm_cost.json local:', err.message);
@@ -142,84 +215,94 @@ export class TokenTrackerService {
    */
   public getPrices(modelId: string = ''): ModelPrices {
     const raw = (modelId || '').toLowerCase().trim();
+    const cero = (source: PriceSource): ModelPrices => ({ inputPricePer1M: 0, outputPricePer1M: 0, cachedPricePer1M: 0, source });
+
+    // 0. Override manual (mandan sobre todo): se acepta con o sin prefijo de proveedor
+    const ov = this.leerOverrides();
+    const sinPrefijo = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    for (const k of [raw, sinPrefijo]) {
+      const o = ov.get(k);
+      if (o) return { ...o, source: 'override', key: k };
+    }
 
     // 1. Modelos locales / Ollama siempre tienen costo $0.00
     if (
+      raw.startsWith('ollama/') ||
       raw.includes('ollama') ||
       raw.startsWith('gemma') ||
       raw.startsWith('llama') ||
-      raw.startsWith('mistral') ||
       raw.startsWith('qwen') ||
       raw.startsWith('deepseek-r1') ||
       raw.includes(':latest')
     ) {
-      return { inputPricePer1M: 0.0, outputPricePer1M: 0.0 };
+      return cero('local');
     }
 
-    // 2. Normalizar clave para búsqueda en LiteLLM
-    const cleanKey = raw
-      .replace(/^models\//, '')
-      .replace(/^(google\/|openai\/|anthropic\/)/, '')
-      .trim();
-
-    // 3. Buscar en el mapa en memoria de LiteLLM
-    if (this.memoryPricingCache.has(cleanKey)) {
-      return this.memoryPricingCache.get(cleanKey)!;
+    // 2. Catálogo LiteLLM: "<preset>/<modelo>" → probar los prefijos con que LiteLLM publica ese proveedor,
+    //    luego el nombre pelado (y por sufijo, para "models/…", versiones con fecha, etc.)
+    const cleanKey = raw.replace(/^models\//, '').trim();
+    const barra = cleanKey.indexOf('/');
+    const preset = barra > 0 ? cleanKey.slice(0, barra) : '';
+    const modelo = barra > 0 ? cleanKey.slice(barra + 1) : cleanKey;
+    const candidatos: string[] = [];
+    if (preset) {
+      for (const pre of PREFIJOS_LITELLM[preset] || [`${preset}/`, '']) candidatos.push(`${pre}${modelo}`);
+      candidatos.push(cleanKey);
+    } else {
+      candidatos.push(modelo, `gemini/${modelo}`, `openai/${modelo}`, `anthropic/${modelo}`);
     }
-
-    // Probar variaciones comunes (ej: gemini-2.5-flash vs gemini/gemini-2.5-flash)
+    for (const c of candidatos) {
+      const hit = this.memoryPricingCache.get(c);
+      if (hit) return hit;
+    }
+    // Sufijos: "gemini-3.8-flash-001" ↔ "gemini/gemini-3.8-flash", etc. Se prefiere la clave más corta.
+    let mejor: ModelPrices | null = null;
     for (const [key, prices] of this.memoryPricingCache.entries()) {
-      if (key === cleanKey || key.endsWith(`/${cleanKey}`) || cleanKey.endsWith(`/${key}`)) {
-        return prices;
+      const k = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key;
+      if (k === modelo || modelo.startsWith(`${k}-`) || k.startsWith(`${modelo}-`)) {
+        if (!mejor || (mejor.key || '').length > key.length) mejor = prices;
       }
     }
+    if (mejor) return mejor;
 
-    // 4. Fallbacks estáticos. OJO CON EL ORDEN: las variantes 'flash' se evalúan
-    // ANTES que el genérico 'gemini-3', si no un gemini-3.x-flash termina tarifado
-    // como un Pro (2.50/10.00) y el costo se infla ~5x.
-    if (cleanKey.includes('flash-lite')) {
-      return { inputPricePer1M: 0.10, outputPricePer1M: 0.40 };
-    }
-    if (cleanKey.includes('gemini-3') && cleanKey.includes('flash')) {
-      // Tarifa de la familia gemini-3.x flash (referencia: gemini-3.1-flash del catálogo)
-      return { inputPricePer1M: 0.50, outputPricePer1M: 3.00 };
-    }
-    if (cleanKey.includes('gemini-2.5-flash')) {
-      return { inputPricePer1M: 0.30, outputPricePer1M: 2.50 };
-    }
-    if (cleanKey.includes('gemini-2.0-flash')) {
-      return { inputPricePer1M: 0.15, outputPricePer1M: 0.60 };
-    }
-    if (cleanKey.includes('gemini-2.5-pro') || cleanKey.includes('gemini-3')) {
-      return { inputPricePer1M: 2.50, outputPricePer1M: 10.00 };
-    }
-    if (cleanKey.includes('gemini-1.5-flash')) {
-      return { inputPricePer1M: 0.075, outputPricePer1M: 0.30 };
-    }
-    if (cleanKey.includes('gemini-1.5-pro')) {
-      return { inputPricePer1M: 1.25, outputPricePer1M: 5.00 };
-    }
-    if (cleanKey.includes('gpt-4o-mini')) {
-      return { inputPricePer1M: 0.15, outputPricePer1M: 0.60 };
-    }
-    if (cleanKey.includes('gpt-4o')) {
-      return { inputPricePer1M: 2.50, outputPricePer1M: 10.00 };
-    }
-    if (cleanKey.includes('claude-3-5-sonnet') || cleanKey.includes('claude-sonnet')) {
-      return { inputPricePer1M: 3.00, outputPricePer1M: 15.00 };
-    }
+    // 3. Fallbacks por familia (aproximados). OJO CON EL ORDEN: las variantes 'flash' se
+    //    evalúan ANTES que el genérico 'gemini-3', si no un flash termina tarifado como Pro.
+    const familia = (i: number, o: number, c?: number): ModelPrices => ({ inputPricePer1M: i, outputPricePer1M: o, ...(c != null ? { cachedPricePer1M: c } : {}), source: 'familia', key: modelo });
+    if (modelo.includes('flash-lite'))                          return familia(0.30, 2.50, 0.03);
+    if (modelo.includes('gemini-3') && modelo.includes('flash')) return familia(0.75, 3.75, 0.075);
+    if (modelo.includes('gemini-2.5-flash'))                    return familia(0.30, 2.50, 0.03);
+    if (modelo.includes('gemini-2.0-flash'))                    return familia(0.15, 0.60);
+    if (modelo.includes('gemini-2.5-pro') || modelo.includes('gemini-3')) return familia(2.50, 10.00, 0.25);
+    if (modelo.includes('gemini-1.5-flash'))                    return familia(0.075, 0.30);
+    if (modelo.includes('gemini-1.5-pro'))                      return familia(1.25, 5.00);
+    if (modelo.includes('kimi') || modelo.includes('moonshot')) return familia(0.95, 4.00, 0.16);
+    if (modelo.includes('gpt-4o-mini') || /gpt-\d(\.\d+)?-mini/.test(modelo)) return familia(0.25, 2.00, 0.025);
+    if (modelo.includes('gpt-4o') || /^gpt-\d/.test(modelo))   return familia(2.50, 10.00, 0.25);
+    if (modelo.includes('claude') && modelo.includes('haiku'))  return familia(1.00, 5.00, 0.10);
+    if (modelo.includes('claude') && modelo.includes('opus'))   return familia(15.00, 75.00, 1.50);
+    if (modelo.includes('claude'))                              return familia(3.00, 15.00, 0.30);
+    if (modelo.includes('grok'))                                return familia(3.00, 15.00, 0.75);
+    if (modelo.includes('deepseek'))                            return familia(0.28, 0.42, 0.028);
+    if (modelo.includes('gemini'))                              return familia(0.15, 0.60);
 
-    // Si es un modelo genérico de Gemini
-    if (cleanKey.includes('gemini')) {
-      return { inputPricePer1M: 0.15, outputPricePer1M: 0.60 };
-    }
-
-    // Default conservador para modelos cloud desconocidos (se avisa una sola vez por modelo)
+    // 4. Default conservador para modelos cloud desconocidos (se avisa una sola vez por modelo)
     if (!this.warnedUnknownModels.has(cleanKey)) {
       this.warnedUnknownModels.add(cleanKey);
-      console.warn(`⚠️ [TokenTracker] Modelo "${modelId}" sin precio en el catálogo ni en los fallbacks: se tarifa con el default 0.15/0.60 y el costo será aproximado.`);
+      console.warn(`⚠️ [TokenTracker] Modelo "${modelId}" sin precio en el catálogo ni en los fallbacks: se tarifa con el default 0.15/0.60 (aproximado). Fíjale un precio en Consumo → Precios.`);
     }
-    return { inputPricePer1M: 0.15, outputPricePer1M: 0.60 };
+    return { inputPricePer1M: 0.15, outputPricePer1M: 0.60, source: 'default', key: cleanKey };
+  }
+
+  /** Costo en USD de una llamada. Los tokens cacheados se descuentan del input y se cobran a su tarifa. */
+  public costFor(model: string, inputTokens: number, outputTokens: number, cachedTokens = 0): { costUsd: number; prices: ModelPrices } {
+    const prices = this.getPrices(model);
+    const cached = Math.min(Math.max(0, cachedTokens || 0), Math.max(0, inputTokens || 0));
+    const inputNormal = Math.max(0, (inputTokens || 0) - cached);
+    const tarifaCache = prices.cachedPricePer1M != null ? prices.cachedPricePer1M : prices.inputPricePer1M;
+    const costUsd = (inputNormal / 1_000_000) * prices.inputPricePer1M
+      + (cached / 1_000_000) * tarifaCache
+      + (Math.max(0, outputTokens || 0) / 1_000_000) * prices.outputPricePer1M;
+    return { costUsd, prices };
   }
 
   /**
@@ -263,15 +346,14 @@ export class TokenTrackerService {
     outputTokens: number,
     threadId: string = 'system',
     channel: UsageChannel = 'system',
-    agent: string = 'system'
+    agent: string = 'system',
+    extra: { cachedTokens?: number; thoughtsTokens?: number } = {}
   ): Promise<UsageRecord> {
     const inTokens = Math.max(0, inputTokens || 0);
     const outTokens = Math.max(0, outputTokens || 0);
-    const prices = this.getPrices(model);
-
-    const inputCost = (inTokens / 1_000_000) * prices.inputPricePer1M;
-    const outputCost = (outTokens / 1_000_000) * prices.outputPricePer1M;
-    const totalCost = inputCost + outputCost;
+    const cachedTokens = Math.max(0, extra.cachedTokens || 0);
+    const thoughtsTokens = Math.max(0, extra.thoughtsTokens || 0);
+    const { costUsd: totalCost, prices } = this.costFor(model, inTokens, outTokens, cachedTokens);
 
     const timestamp = new Date().toISOString();
     const truncatedInput = (userInput || '').length > 150 
@@ -288,6 +370,9 @@ export class TokenTrackerService {
       thread_id: threadId || 'system',
       channel,
       agent: agent || 'system',
+      cached_tokens: cachedTokens,
+      thoughts_tokens: thoughtsTokens,
+      price_source: prices.source,
     };
 
     const saved = sqliteReminderService.logTokenUsage(record);
@@ -443,8 +528,15 @@ export class TokenTrackerService {
       .map((ch) => this.getBudgetStatus(ch))
       .filter((st) => st.budget > 0 || st.currentCost > 0);
 
+    // Precio vigente y fuente por modelo, para que la GUI marque los aproximados
+    const byModelConPrecio = byModel.map((m) => {
+      const p = this.getPrices(m.model);
+      return { ...m, price: { input: p.inputPricePer1M, output: p.outputPricePer1M, cached: p.cachedPricePer1M ?? null, source: p.source, key: p.key || null } };
+    });
+
     return {
       allHistory,
+      catalogo: this.catalogInfo(),
       totalCost: totalMonthCost,
       totalTokens: tokenTotals.totalTokens,
       inputTokens: tokenTotals.inputTokens,
@@ -452,11 +544,48 @@ export class TokenTrackerService {
       monthlyBudget: budgetStatus.budget,
       percentUsed: budgetStatus.percentUsed,
       isExceeded: budgetStatus.isExceeded,
-      byModel,
+      byModel: byModelConPrecio,
       byAgent,
       byChannel,
       channelBudgets,
     };
+  }
+
+  /**
+   * Vuelve a calcular cost_usd de las filas desde `sinceIso` con los precios vigentes
+   * (catálogo nuevo, override manual). Las filas antiguas sin cached_tokens se tarifan
+   * sin caché (levemente por encima del real).
+   */
+  public reprice(sinceIso: string): { filas: number; antes: number; despues: number } {
+    const filas = sqliteReminderService.listUsageSince(sinceIso);
+    let antes = 0, despues = 0;
+    for (const f of filas) {
+      const { costUsd, prices } = this.costFor(f.model, f.input_tokens, f.output_tokens, f.cached_tokens);
+      antes += f.cost_usd || 0;
+      despues += costUsd;
+      const nuevo = parseFloat(costUsd.toFixed(6));
+      if (nuevo !== f.cost_usd) sqliteReminderService.updateUsageCost(f.id, nuevo, prices.source);
+      else sqliteReminderService.updateUsageCost(f.id, f.cost_usd, prices.source);
+    }
+    console.log(`💲 [TokenTracker] Retarifadas ${filas.length} filas desde ${sinceIso}: $${antes.toFixed(4)} → $${despues.toFixed(4)}`);
+    return { filas: filas.length, antes, despues };
+  }
+
+  /**
+   * Tabla de precios: modelos usados en los últimos 90 días + overrides, con el
+   * precio que se les aplica hoy y de dónde sale (para Consumo → Precios).
+   */
+  public listPrices(): Array<{ model: string; input: number; output: number; cached: number | null; source: PriceSource; key: string | null; override: PriceOverride | null }> {
+    const desde = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+    const usados = sqliteReminderService.getUsageByModel(desde).map((r) => r.model);
+    const modelos = new Set<string>([...usados, ...this.leerOverrides().keys()]);
+    const ov = this.leerOverrides();
+    return [...modelos].filter(Boolean).sort().map((model) => {
+      const p = this.getPrices(model);
+      const k = model.toLowerCase();
+      const sinPrefijo = k.includes('/') ? k.slice(k.lastIndexOf('/') + 1) : k;
+      return { model, input: p.inputPricePer1M, output: p.outputPricePer1M, cached: p.cachedPricePer1M ?? null, source: p.source, key: p.key || null, override: ov.get(k) || ov.get(sinPrefijo) || null };
+    });
   }
 }
 

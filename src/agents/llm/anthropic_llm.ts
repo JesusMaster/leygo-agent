@@ -66,7 +66,7 @@ export class AnthropicLlm extends BaseLlm {
       totalTokenCount: (data?.usage?.input_tokens || 0) + (data?.usage?.output_tokens || 0),
       cachedContentTokenCount: data?.usage?.cache_read_input_tokens || 0,
     };
-    recordModelUsage(this.model, usageMetadata.promptTokenCount, usageMetadata.candidatesTokenCount, this.p.agentName || 'unknown');
+    recordModelUsage(this.model, usageMetadata.promptTokenCount, usageMetadata.candidatesTokenCount, this.p.agentName || 'unknown', { cachedTokens: usageMetadata.cachedContentTokenCount });
 
     yield {
       content: desdeRespuestaAnthropic(data),

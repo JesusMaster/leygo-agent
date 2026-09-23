@@ -3,6 +3,7 @@ import { LlmAgent } from '@google/adk';
 import { modelFor } from './llm/model_factory.js';
 import { resolveTools } from './tool_catalog.js';
 import { getChannelTools } from '../config/channels.js';
+import { fechaHoraActual } from '../utils/fecha.js';
 import { customAgentsService, registrarCoordinadorVivo } from './custom/custom_agents.service.js';
 
 /**
@@ -154,7 +155,8 @@ export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram'
     model: modelFor('Coordinator', 'gemini-3.8-flash'),
     description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
     // Instrucción dinámica: la sección de agentes personalizados cambia sin reiniciar.
-    instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : ''),
+    // La fecha va al FINAL para no invalidar el caché de prompt (el prefijo largo queda estable).
+    instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : '') + '\n\n' + fechaHoraActual(),
     tools: [...resolveTools(toolNames), ...(canal ? customAgentsService.toolsParaCanal(canal) : [])],
   });
   if (canal) registrarCoordinadorVivo(canal, agente);
