@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import { googleService } from './google.service.js';
 import { qdrantService, QdrantKnowledgeService } from './qdrant.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
-import { tokenTrackerService } from './token_tracker.service.js';
+import { generarTexto } from '../agents/llm/model_factory.js';
+import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
 dotenv.config();
 
@@ -45,10 +45,8 @@ function generateDeterministicUuid(input: string): string {
 }
 
 export class ContextConsolidationService {
-  private ai: GoogleGenAI;
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
   }
 
   /**
@@ -96,24 +94,15 @@ Responde ÚNICAMENTE con el objeto JSON, sin formato markdown ni código alreded
 `;
 
     try {
-      const aiRes = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-      });
-
-      if (aiRes.usageMetadata) {
-        tokenTrackerService.logUsage(
-          `Consolidación de contexto: ${contextTitle}`,
-          'gemini-2.5-flash',
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).inputTokens,
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).outputTokens,
-          'context_consolidation',
-          'system',
-          'context_consolidation'
-        ).catch(() => {});
+      beginUsageScope('system', 'context_consolidation', `Consolidación de contexto: ${contextTitle}`);
+      let textoIA = '';
+      try {
+        textoIA = await generarTexto('context_consolidation', 'gemini-3.5-flash', prompt);
+      } finally {
+        flushUsageScope().catch(() => {});
       }
 
-      let raw = aiRes.text?.trim() || '{}';
+      let raw = textoIA || '{}';
       // Limpiar backticks si los devuelve
       raw = raw.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
 

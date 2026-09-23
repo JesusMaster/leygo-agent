@@ -114,16 +114,12 @@ export const scheduleTaskTool = new FunctionTool({
  */
 export const triggerMorningDigestTool = new FunctionTool({
   name: 'trigger_morning_digest',
-  description: 'Genera y envía de inmediato el Morning Digest (resumen ejecutivo de reuniones del día y correos pendientes) al Telegram de Jesús.',
+  description: 'Genera el Morning Digest ahora (agenda de hoy, correos sin leer y escalamientos pendientes). Devuelve el texto: entrégalo tal cual al usuario, no lo reescribas ni lo reenvíes por otro canal.',
   parameters: z.object({}) as any,
   execute: async () => {
     try {
       const digest = await schedulerService.runMorningDigest();
-      return {
-        status: 'success',
-        result: 'Morning Digest generado y enviado a Telegram exitosamente.',
-        preview: digest,
-      };
+      return { status: 'success', result: digest };
     } catch (err: any) {
       return { status: 'error', message: `Error ejecutando Morning Digest: ${err.message}` };
     }

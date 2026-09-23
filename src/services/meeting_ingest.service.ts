@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import { googleService } from './google.service.js';
 import { qdrantService, QdrantKnowledgeService, KnowledgePayload } from './qdrant.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
+import { generarTexto } from '../agents/llm/model_factory.js';
+import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
 dotenv.config();
 
@@ -51,10 +52,8 @@ function splitIntoChunks(text: string, maxChars: number = 3500): string[] {
 }
 
 export class MeetingIngestService {
-  private ai: GoogleGenAI;
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
   }
 
   /**
@@ -129,15 +128,15 @@ Contenido de la reunión:
 ${content.substring(0, 25000)}`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash-lite',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const parsed = JSON.parse(response.text || '{}');
+      beginUsageScope('system', 'meeting_ingest', `Ingesta de reunión: ${fileName}`);
+      let textoIA = '';
+      try {
+        textoIA = await generarTexto('meeting_ingest', 'gemini-3.5-flash-lite', prompt + '\n\nResponde ÚNICAMENTE con el objeto JSON, sin markdown ni texto alrededor.');
+      } finally {
+        flushUsageScope().catch(() => {});
+      }
+      textoIA = textoIA.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+      const parsed = JSON.parse(textoIA || '{}');
       return {
         title: detectedTitle || parsed.title || fileName,
         date: detectedDate || parsed.date || new Date().toISOString().split('T')[0],

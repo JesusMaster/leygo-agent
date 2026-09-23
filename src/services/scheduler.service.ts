@@ -1,25 +1,23 @@
-import cron, { ScheduledTask } from 'node-cron';
+import cron from 'node-cron';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 import { googleService } from './google.service.js';
-import { telegramBotService } from './telegram_bot.service.js';
 import { meetingIngestService } from './meeting_ingest.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { tokenTrackerService } from './token_tracker.service.js';
-import { messageFormatter } from '../utils/message_formatter.js';
 import { scheduledTasksService } from './scheduled_tasks.service.js';
+import { generarTexto } from '../agents/llm/model_factory.js';
+import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
 dotenv.config();
 
-export class SchedulerService {
-  private ai: GoogleGenAI;
-  private timezone: string = 'America/Santiago';
-  private morningDigestTask: ScheduledTask | null = null;
-  private meetSyncTask: ScheduledTask | null = null;
+/** "30 8 * * *" → "08:30" si es un cron diario simple; si no, null. */
+function horaDeCron(expr: string | undefined): string | null {
+  const m = (expr || '').trim().match(/^(\d{1,2}) (\d{1,2}) \* \* \*$/);
+  return m ? `${m[2].padStart(2, '0')}:${m[1].padStart(2, '0')}` : null;
+}
 
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-  }
+export class SchedulerService {
+  private timezone: string = process.env.SCHEDULER_TZ || 'America/Santiago';
 
   /**
    * Inicia los cron jobs configurados y recupera recordatorios pendientes desde SQLite
@@ -31,43 +29,42 @@ export class SchedulerService {
     //    Migra los recordatorios de la tabla vieja y programa las activas.
     scheduledTasksService.start();
 
-    // 2. Morning Digest: Lunes a Domingo a las 08:30 AM CLT
-    const digestCronExpr = process.env.MORNING_DIGEST_CRON || '30 8 * * *';
-    this.morningDigestTask = cron.schedule(
-      digestCronExpr,
-      async () => {
-        console.log('🌅 [SchedulerService] Ejecutando Morning Digest programado...');
-        await this.runMorningDigest();
-      },
-      {
-        timezone: this.timezone,
-      }
-    );
-    console.log(`✅ [SchedulerService] Morning Digest programado para: "${digestCronExpr}" (${this.timezone})`);
+    // 2. Rutinas del sistema como tareas programadas: se crean la primera vez y
+    //    desde ahí se editan (hora, canales, pausa) en la GUI como cualquier otra.
+    const digestHora = horaDeCron(process.env.MORNING_DIGEST_CRON) || '08:30';
+    scheduledTasksService.registrarIntegrada({
+      key: 'morning_digest',
+      titulo: 'Morning Digest',
+      descripcion: 'Agenda de hoy, correos sin leer y escalamientos pendientes, resumidos por la IA.',
+      run: () => this.runMorningDigest(),
+      defaults: process.env.MORNING_DIGEST_CRON && !horaDeCron(process.env.MORNING_DIGEST_CRON)
+        ? { kind: 'cron', cron_expr: process.env.MORNING_DIGEST_CRON }
+        : { kind: 'daily', time_of_day: digestHora },
+    });
 
-    // 3. Sincronización de grabaciones de Google Meet: 20:00 CLT Lunes a Viernes
-    const meetSyncCronExpr = process.env.MEET_SYNC_CRON || '0 20 * * 1-5';
-    this.meetSyncTask = cron.schedule(
-      meetSyncCronExpr,
-      async () => {
-        console.log('📹 [SchedulerService] Ejecutando sincronización nocturna de Google Meet...');
-        try {
-          const results = await meetingIngestService.syncMeetRecordings();
-          if (results.length > 0) {
-            await telegramBotService.sendDirectMessage(
-              `📹 <b>Sincronización Meet completada:</b> Se procesaron e indexaron <b>${results.length}</b> nueva(s) reunión(es) en la memoria episódica.`,
-              { parseMode: 'HTML' }
-            );
-          }
-        } catch (err: any) {
-          console.error('❌ [SchedulerService] Error en sync nocturno de Meet:', err.message);
-        }
+    scheduledTasksService.registrarIntegrada({
+      key: 'meet_sync',
+      titulo: 'Sincronizar grabaciones de Meet',
+      descripcion: 'Busca grabaciones nuevas de Google Meet en Drive y las indexa en la memoria episódica. Avisa solo si procesó algo.',
+      run: async () => {
+        const results = await meetingIngestService.syncMeetRecordings();
+        return results.length ? `📹 **Sincronización Meet:** se procesaron e indexaron **${results.length}** reunión(es) nueva(s) en la memoria episódica.` : '';
       },
-      {
-        timezone: this.timezone,
-      }
-    );
-    console.log(`✅ [SchedulerService] Sincronización nocturna de Meet programada para: "${meetSyncCronExpr}"`);
+      defaults: { kind: 'cron', cron_expr: process.env.MEET_SYNC_CRON || '0 20 * * 1-5' },
+    });
+
+    scheduledTasksService.registrarIntegrada({
+      key: 'context_sync',
+      titulo: 'Consolidar contexto (Chat + Gmail)',
+      descripcion: 'Extrae acuerdos y decisiones de las conversaciones de las últimas 24 h hacia la memoria episódica. Avisa solo si indexó algo.',
+      run: async () => {
+        const { contextConsolidationService } = await import('./context_consolidation.service.js');
+        const r = await contextConsolidationService.consolidateAll(24);
+        if (r.totalIndexed <= 0) return '';
+        return `🧠 **Consolidación de memoria episódica**\n\nSe indexaron **${r.totalIndexed}** decisiones/acuerdos nuevos:\n• Google Chat: ${r.chat.indexed} acuerdos (${r.chat.processed} hilos analizados)\n• Gmail: ${r.gmail.indexed} acuerdos (${r.gmail.processed} hilos analizados)`;
+      },
+      defaults: { kind: 'cron', cron_expr: process.env.CONTEXT_SYNC_CRON || '0 21 * * 1-5' },
+    });
 
     // 4. Actualización semanal de catálogo de precios de LiteLLM: Domingos 03:00 CLT
     cron.schedule(
@@ -86,41 +83,12 @@ export class SchedulerService {
     );
     console.log(`✅ [SchedulerService] Actualización semanal de precios LiteLLM programada (Domingos 03:00 CLT)`);
 
-    // 5. Consolidación nocturna de contexto (Chat y Gmail): 21:00 CLT Lunes a Viernes
-    const contextSyncCronExpr = process.env.CONTEXT_SYNC_CRON || '0 21 * * 1-5';
-    cron.schedule(
-      contextSyncCronExpr,
-      async () => {
-        console.log('🧠 [SchedulerService] Ejecutando consolidación nocturna de contexto (Chat + Gmail)...');
-        try {
-          const { contextConsolidationService } = await import('./context_consolidation.service.js');
-          const result = await contextConsolidationService.consolidateAll(24);
-          if (result.totalIndexed > 0) {
-            await telegramBotService.sendDirectMessage(
-              `🧠 <b>Consolidación Nocturna de Memoria Episódica</b>\n\n` +
-              `Se indexaron <b>${result.totalIndexed}</b> nuevas decisiones/acuerdos en Qdrant:\n` +
-              `• Google Chat: ${result.chat.indexed} acuerdos (${result.chat.processed} hilos analizados)\n` +
-              `• Gmail: ${result.gmail.indexed} acuerdos (${result.gmail.processed} hilos analizados)`,
-              { parseMode: 'HTML' }
-            );
-          }
-        } catch (err: any) {
-          console.error('❌ [SchedulerService] Error en consolidación nocturna de contexto:', err.message);
-        }
-      },
-      {
-        timezone: this.timezone,
-      }
-    );
-    console.log(`✅ [SchedulerService] Consolidación nocturna de contexto programada para: "${contextSyncCronExpr}"`);
   }
 
   /**
    * Detiene los crons activos
    */
   public stop(): void {
-    if (this.morningDigestTask) this.morningDigestTask.stop();
-    if (this.meetSyncTask) this.meetSyncTask.stop();
     scheduledTasksService.stop();
     console.log('🛑 [SchedulerService] Tareas programadas detenidas.');
   }
@@ -129,6 +97,7 @@ export class SchedulerService {
    * Ejecuta el Morning Digest (disponible bajo demanda o por cron)
    */
   public async runMorningDigest(): Promise<string> {
+    beginUsageScope('system', 'morning_digest', 'Morning Digest diario');
     try {
       // 1. Obtener eventos de hoy
       const now = new Date();
@@ -158,7 +127,7 @@ export class SchedulerService {
         console.warn('⚠️ [SchedulerService] No se pudieron leer los escalamientos:', escErr.message);
       }
 
-      // 4. Sintetizar con Gemini 2.5 Flash
+      // 4. Sintetizar con el modelo asignado a 'morning_digest' en Ajustes
       const contextPrompt = `
 Eres el clon digital y asistente ejecutivo de Jesús Leiva (CTO de Apprecio).
 Hoy es ${now.toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
@@ -176,6 +145,7 @@ ${unreadEmails.length === 0 ? 'Bandeja al día sin correos sin leer recientes.' 
 ${pendingEscalations.length === 0 ? 'Nada pendiente de decisión.' : pendingEscalations.map((e: any) => `- [${e.id}] (${e.urgency}) ${e.topic} — pidió ${e.requester} por ${e.channel}: ${String(e.summary).slice(0, 180)}`).join('\n')}
 
 Instrucciones de formato:
+- No pongas título ni fecha al inicio (ya van en el encabezado del mensaje): parte directo por la agenda.
 - Usa encabezados claros y viñetas concisas.
 - Resalta en negrita horas y nombres clave.
 - Si hay escalamientos pendientes, ábrelos en su propia sección al final con su ID entre corchetes: son decisiones que solo Jesús puede tomar y son lo más importante del digest.
@@ -183,38 +153,14 @@ Instrucciones de formato:
 - Máximo 300 palabras.
 `;
 
-      const aiRes = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: contextPrompt,
-      });
-
-      if (aiRes.usageMetadata) {
-        tokenTrackerService.logUsage(
-          'Morning Digest diario',
-          'gemini-2.5-flash',
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).inputTokens,
-          tokenTrackerService.extractUsage(aiRes.usageMetadata).outputTokens,
-          'morning_digest',
-          'system',
-          'morning_digest'
-        ).catch(() => {});
-      }
-
-      const digestText = aiRes.text?.trim() || 'No se pudo generar el texto del Morning Digest.';
-      const formattedHtml = messageFormatter.formatForTelegram(digestText);
-
-      // 5. Enviar a Telegram
-      await telegramBotService.sendDirectMessage(
-        `🌅 <b>MORNING DIGEST — ${now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}</b>\n\n${formattedHtml}`,
-        { parseMode: 'HTML' }
-      );
-
-      return digestText;
+      const digestText = await generarTexto('morning_digest', 'gemini-3.5-flash-lite', contextPrompt);
+      const fecha = now.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
+      return `🌅 **MORNING DIGEST — ${fecha}**\n\n${digestText || 'No se pudo generar el texto del Morning Digest.'}`;
     } catch (err: any) {
       console.error('❌ [SchedulerService] Error generando Morning Digest:', err.message);
-      const errAlert = `⚠️ Error al generar tu Morning Digest matutino: ${err.message}`;
-      await telegramBotService.sendDirectMessage(errAlert);
-      return errAlert;
+      throw err;
+    } finally {
+      flushUsageScope().catch(() => {});
     }
   }
 

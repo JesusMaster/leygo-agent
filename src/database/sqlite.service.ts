@@ -66,7 +66,7 @@ export interface TaskDelivery { channel: ScheduledTaskChannel; target?: string |
 export interface ScheduledTask {
   id: string;
   message: string;
-  autonomous: number;          // 0 = recordatorio simple por Telegram, 1 = el agente ejecuta la instrucción
+  autonomous: number;          // 0 = recordatorio simple, 1 = el agente ejecuta la instrucción, 2 = rutina integrada (message = clave)
   kind: ScheduledTaskKind;
   run_at: number | null;       // once
   interval_minutes: number | null;
@@ -832,7 +832,7 @@ export class SqliteReminderService {
     this.db.prepare(`
       INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, channel, target, delivery, created_at, updated_at, last_run_at, next_run_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    `).run(t.id, t.message, t.autonomous ? 1 : 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status,
+    `).run(t.id, t.message, Number(t.autonomous) || 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status,
       t.delivery?.[0]?.channel || t.channel || 'telegram', t.delivery?.[0]?.target ?? t.target ?? null, JSON.stringify(t.delivery || []), now, now, t.next_run_at ?? null);
     return this.getScheduledTask(t.id)!;
   }
@@ -845,7 +845,7 @@ export class SqliteReminderService {
       UPDATE scheduled_tasks SET message = ?, autonomous = ?, kind = ?, run_at = ?, interval_minutes = ?, time_of_day = ?, cron_expr = ?,
         status = ?, channel = ?, target = ?, delivery = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
       WHERE id = ?
-    `).run(n.message, n.autonomous ? 1 : 0, n.kind, n.run_at ?? null, n.interval_minutes ?? null, n.time_of_day ?? null, n.cron_expr ?? null,
+    `).run(n.message, Number(n.autonomous) || 0, n.kind, n.run_at ?? null, n.interval_minutes ?? null, n.time_of_day ?? null, n.cron_expr ?? null,
       n.status, n.delivery?.[0]?.channel || n.channel || 'telegram', n.delivery?.[0]?.target ?? n.target ?? null, JSON.stringify(n.delivery || []),
       n.updated_at, n.last_run_at ?? null, n.next_run_at ?? null, id);
     return this.getScheduledTask(id);

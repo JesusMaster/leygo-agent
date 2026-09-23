@@ -304,7 +304,7 @@ export default function createAdminRoutes() {
 
   // ─── Tareas programadas ──────────────────────────────────────────────────
   app.get('/api/tasks', (_req, res) => {
-    res.json({ tasks: scheduledTasksService.list() });
+    res.json({ tasks: scheduledTasksService.list(), integradas: scheduledTasksService.listIntegradas() });
   });
 
   app.post('/api/tasks', (req, res) => {
@@ -312,7 +312,7 @@ export default function createAdminRoutes() {
       const { message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, channel, target, delivery } = req.body || {};
       if (!message || typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Falta el mensaje o instrucción' });
       if (!kind) return res.status(400).json({ error: 'Falta el tipo de tarea (kind)' });
-      const tarea = scheduledTasksService.create({ message, autonomous: !!autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, channel, target, delivery });
+      const tarea = scheduledTasksService.create({ message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, channel, target, delivery });
       res.status(201).json({ status: 'success', task: tarea });
     } catch (err: any) {
       res.status(400).json({ error: err.message });

@@ -114,3 +114,24 @@ export async function probarModelo(providerId: string, model: string): Promise<{
     return { ok: false, ms: Date.now() - t0, error: err?.message || String(err) };
   }
 }
+
+const dinamicos = new Map<string, DynamicLlm>();
+
+/**
+ * Generación de texto de un solo turno para rutinas del sistema (digest,
+ * consolidación, webhooks). Respeta la asignación de modelo del "agente" en
+ * Ajustes y contabiliza el consumo en el scope de uso abierto por el llamador.
+ */
+export async function generarTexto(agentName: string, fallbackModel: string, prompt: string, opts: { maxOutputTokens?: number } = {}): Promise<string> {
+  let llm = dinamicos.get(agentName);
+  if (!llm) { llm = new DynamicLlm({ agentName, fallbackModel }); dinamicos.set(agentName, llm); }
+  const req: any = { contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { ...(opts.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}) } };
+  let texto = '';
+  let error: string | undefined;
+  for await (const r of llm.generateContentAsync(req, false)) {
+    if (r?.errorMessage) error = r.errorMessage;
+    for (const p of r?.content?.parts || []) if (p.text) texto += p.text;
+  }
+  if (error) throw new Error(error);
+  return texto.trim();
+}

@@ -17,6 +17,23 @@ import { messageFormatter } from '../utils/message_formatter.js';
 
 type RunAgent = (instruction: string, taskId: string) => Promise<string>;
 
+/**
+ * Tarea integrada: rutina del sistema (Morning Digest, sync de Meet…) que se
+ * programa y entrega como cualquier otra tarea, pero cuya lógica vive en el
+ * código. En la tabla va con autonomous = 2 y `message` = la clave.
+ * `run` devuelve el texto a entregar; si devuelve '' no se manda nada.
+ */
+export interface TareaIntegrada {
+  key: string;
+  titulo: string;
+  descripcion: string;
+  run: () => Promise<string>;
+  /** Programación con la que se crea la primera vez */
+  defaults: { kind: ScheduledTaskKind; time_of_day?: string; cron_expr?: string; interval_minutes?: number; delivery?: TaskDelivery[] };
+}
+
+export type ModoTarea = 0 | 1 | 2; // recordatorio · agente · integrada
+
 interface Programada {
   cronTask?: ReturnType<typeof cron.schedule>;
   timer?: NodeJS.Timeout;
@@ -27,6 +44,34 @@ export class ScheduledTasksService {
   private programadas = new Map<string, Programada>();
   private runAgent: RunAgent | null = null;
   private enCurso = new Set<string>();
+  private integradas = new Map<string, TareaIntegrada>();
+
+  /** Registra una rutina del sistema y, la primera vez, la crea como tarea editable. */
+  public registrarIntegrada(def: TareaIntegrada): void {
+    this.integradas.set(def.key, def);
+    const flag = `tasks.seeded.${def.key}`;
+    if (sqliteReminderService.getConfig(flag, '')) return;
+    const yaExiste = sqliteReminderService.listScheduledTasks().some((t) => t.autonomous === 2 && t.message === def.key);
+    if (!yaExiste) {
+      const d = def.defaults;
+      this.create({ message: def.key, autonomous: 2, kind: d.kind, time_of_day: d.time_of_day, cron_expr: d.cron_expr, interval_minutes: d.interval_minutes, delivery: d.delivery || [{ channel: 'telegram' }] });
+      console.log(`🧩 [Tareas] Rutina "${def.titulo}" creada como tarea programada (edítala desde la GUI).`);
+    }
+    sqliteReminderService.setConfig(flag, new Date().toISOString());
+  }
+
+  public listIntegradas(): Array<{ key: string; titulo: string; descripcion: string }> {
+    return [...this.integradas.values()].map((d) => ({ key: d.key, titulo: d.titulo, descripcion: d.descripcion }));
+  }
+
+  private integradaDe(t: ScheduledTask): TareaIntegrada | undefined {
+    return t.autonomous === 2 ? this.integradas.get(t.message) : undefined;
+  }
+
+  private modo(v: unknown): ModoTarea {
+    if (v === 2 || v === '2' || v === 'integrada') return 2;
+    return v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0;
+  }
 
   /** index.ts inyecta cómo correr una instrucción por el agente (necesita el Runner). */
   public setAgentRunner(fn: RunAgent) { this.runAgent = fn; }
@@ -51,22 +96,27 @@ export class ScheduledTasksService {
 
   // ─── CRUD ────────────────────────────────────────────────────────────────
 
-  public list(): Array<ScheduledTask & { descripcion: string }> {
-    return sqliteReminderService.listScheduledTasks().map((t) => ({ ...t, descripcion: this.describir(t) }));
+  public list(): Array<ScheduledTask & { descripcion: string; integrada?: { key: string; titulo: string; descripcion: string } }> {
+    return sqliteReminderService.listScheduledTasks().map((t) => {
+      const def = this.integradaDe(t);
+      return { ...t, descripcion: this.describir(t), ...(def ? { integrada: { key: def.key, titulo: def.titulo, descripcion: def.descripcion } } : {}) };
+    });
   }
 
   public get(id: string) { return sqliteReminderService.getScheduledTask(id); }
 
   public create(input: {
-    message: string; autonomous: boolean; kind: ScheduledTaskKind;
+    message: string; autonomous: boolean | number; kind: ScheduledTaskKind;
     run_at?: number | string | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
     channel?: ScheduledTaskChannel | null; target?: string | null; delivery?: TaskDelivery[] | null;
   }): ScheduledTask {
     const base = this.normalizar(input);
     const entrega = this.normalizarEntregas(input.delivery, input.channel, input.target);
+    const modo = this.modo(input.autonomous);
+    if (modo === 2 && !this.integradas.has(input.message.trim())) throw new Error(`Rutina integrada desconocida: ${input.message}`);
     const id = Math.random().toString(36).substring(2, 9);
     const tarea = sqliteReminderService.createScheduledTask({
-      id, message: input.message.trim(), autonomous: input.autonomous ? 1 : 0, kind: input.kind,
+      id, message: input.message.trim(), autonomous: modo, kind: input.kind,
       ...base, ...entrega, status: 'active', next_run_at: this.proximaEjecucion({ ...base, kind: input.kind } as any),
     });
     this.programar(tarea);
@@ -74,7 +124,7 @@ export class ScheduledTasksService {
   }
 
   public update(id: string, cambios: Partial<{
-    message: string; autonomous: boolean; kind: ScheduledTaskKind;
+    message: string; autonomous: boolean | number; kind: ScheduledTaskKind;
     run_at: number | string | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
     status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null; delivery: TaskDelivery[];
   }>): ScheduledTask | null {
@@ -96,9 +146,12 @@ export class ScheduledTasksService {
       : (cambios.channel !== undefined || cambios.target !== undefined)
         ? this.normalizarEntregas(null, cambios.channel ?? actual.channel, cambios.target !== undefined ? cambios.target : actual.target)
         : this.normalizarEntregas(actual.delivery);
+    const modo = cambios.autonomous !== undefined ? this.modo(cambios.autonomous) : (actual.autonomous as ModoTarea);
+    const message = cambios.message !== undefined ? cambios.message.trim() : actual.message;
+    if (modo === 2 && !this.integradas.has(message)) throw new Error(`Rutina integrada desconocida: ${message}`);
     const actualizada = sqliteReminderService.updateScheduledTask(id, {
-      message: cambios.message !== undefined ? cambios.message.trim() : actual.message,
-      autonomous: cambios.autonomous !== undefined ? (cambios.autonomous ? 1 : 0) : actual.autonomous,
+      message,
+      autonomous: modo,
       kind, ...horario, ...entrega, status,
       next_run_at: status === 'active' ? this.proximaEjecucion({ ...horario, kind } as any) : null,
     });
@@ -138,7 +191,13 @@ export class ScheduledTasksService {
 
     try {
       let fallos: string[] = [];
-      if (t.autonomous) {
+      const integrada = this.integradaDe(t);
+      if (t.autonomous === 2) {
+        if (!integrada) throw new Error(`La rutina integrada "${t.message}" no está registrada en este backend.`);
+        result = await integrada.run();
+        if (result.trim()) fallos = await this.entregar(t, result, true);
+        else result = '(sin novedades: no se envió nada)';
+      } else if (t.autonomous) {
         if (!this.runAgent) throw new Error('El agente no está disponible para ejecutar tareas autónomas.');
         result = await this.runAgent(t.message, t.id);
         fallos = await this.entregar(t, result, true);

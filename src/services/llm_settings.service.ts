@@ -50,6 +50,9 @@ export const AGENTES_LLM: Array<{ name: string; titulo: string; descripcion: str
   { name: 'triage_agent',       titulo: 'Triage',               descripcion: 'Decide si algo se escala a Jesús y con qué prioridad.', defaultModel: 'gemini-3.8-flash' },
   { name: 'public_coordinator', titulo: 'Coordinator público',  descripcion: 'Coordinador para el canal público (webhooks/Buzz sin sesión).', defaultModel: 'gemini-3.8-flash' },
   { name: 'knowledge_public',   titulo: 'Conocimiento público', descripcion: 'Versión acotada del conocimiento para el canal público.', defaultModel: 'gemini-3.8-flash' },
+  { name: 'morning_digest',     titulo: 'Morning Digest',       descripcion: 'Resumen matutino (agenda, correos sin leer, escalamientos). Tarea programada integrada.', defaultModel: 'gemini-3.5-flash-lite' },
+  { name: 'context_consolidation', titulo: 'Consolidación de contexto', descripcion: 'Extrae acuerdos de Chat y Gmail hacia la memoria episódica (nocturno). Muchos hilos: conviene barato o local.', defaultModel: 'gemini-3.5-flash' },
+  { name: 'meeting_ingest',     titulo: 'Ingesta de reuniones', descripcion: 'Resume transcripciones de Meet para indexarlas. Textos largos: conviene barato.', defaultModel: 'gemini-3.5-flash-lite' },
 ];
 
 export const PRESETS: ProviderPreset[] = [

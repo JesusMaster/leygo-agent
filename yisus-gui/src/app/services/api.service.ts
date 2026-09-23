@@ -68,14 +68,16 @@ export interface ScheduledTask {
   status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null; delivery: TaskDelivery[];
   created_at: number; updated_at: number;
   last_run_at: number | null; next_run_at: number | null; descripcion: string;
+  integrada?: { key: string; titulo: string; descripcion: string };
 }
+export interface TareaIntegrada { key: string; titulo: string; descripcion: string; }
 export interface TaskDestinos { chat: { name: string; displayName: string }[]; buzz: string[]; email: string | null; peers: string[]; errores: string[]; }
 export interface TaskRun {
   id: number; task_id: string; started_at: number; duration_ms: number;
   status: 'success' | 'error'; trigger: 'scheduled' | 'manual'; result: string;
 }
 export type TaskInput = {
-  message: string; autonomous: boolean; kind: TaskKind;
+  message: string; autonomous: boolean | number; kind: TaskKind;
   run_at?: string | number | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
   channel?: TaskChannel; target?: string | null; delivery?: TaskDelivery[];
 };
@@ -214,7 +216,7 @@ export class ApiService {
   }
 
   // ─── Tareas programadas ───────────────────────────────────────────────
-  getTasks(): Observable<{ tasks: ScheduledTask[] }> { return this.http.get<any>(`${this.baseUrl}/api/tasks`); }
+  getTasks(): Observable<{ tasks: ScheduledTask[]; integradas?: TareaIntegrada[] }> { return this.http.get<any>(`${this.baseUrl}/api/tasks`); }
   createTask(data: TaskInput): Observable<{ task: ScheduledTask }> { return this.http.post<any>(`${this.baseUrl}/api/tasks`, data); }
   updateTask(id: string, data: Partial<TaskInput & { status: 'active' | 'paused' }>): Observable<{ task: ScheduledTask }> {
     return this.http.put<any>(`${this.baseUrl}/api/tasks/${id}`, data);
