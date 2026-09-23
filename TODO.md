@@ -203,7 +203,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Si `A2A_API_KEY` no está definida (hoy no está en `.env`), `/a2a/v1` queda público y cualquiera conversa con el Coordinator completo, que tiene acceso a Gmail, Drive y Google Chat.
   - `securityRequirements: []` en la Agent Card, incluso cuando hay API key configurada.
   - Nostr entra por el mismo Runner y las mismas tools que Telegram.
-  - ✅ (21/22-09) Tools por canal en `config/channels.json`; A2A exige Bearer por token, con alcance por token validado al invocar. Buzz sigue con las 17 (ver §7).
+  - ✅ (21/22-09) Tools por canal en `config/channels.json`; A2A exige Bearer por token, con alcance por token validado al invocar. Buzz ya no tiene `account_agent` (ver §7).
 
 - [~] **Temas vetados recortados en el Coordinator** — repuestos en el agente PÚBLICO (A2A). En el Coordinator interno siguen recortados a propósito, porque ahí el interlocutor es el propio Jesús. Revisar si se quiere endurecer también para Buzz (`src/agents/agent.ts`):
   - Se eliminaron sueldos/compensaciones, contrataciones/despidos/evaluaciones y opiniones sobre personas específicas. Quedaron solo contratos y credenciales.
@@ -281,7 +281,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Cada token concede un subconjunto. El permiso se verifica **al invocar** (`src/agents/a2a_guard.ts`): si el token no la tiene, la herramienta devuelve `sin_permiso` con un mensaje que el agente transmite tal cual, en vez de que el modelo improvise.
   - Un solo Runner público para todos los tokens (antes uno por alcance).
   - Editable desde la GUI: skills públicas en "Canales y tools", alcance por token en "Tokens A2A".
-  - Pendiente: `config/channels.json` le da a **Buzz** las 17 herramientas, incluida `account_agent`. Buzz es un canal con terceros; conviene recortarlo.
+  - ✅ (22-09) `account_agent` fuera de Buzz. Pendiente recortar el resto (ver §7/§8).
   - ✅ (22-09) La ventana de gracia del 2FA ya es por canal (se fija al pedir la aprobación).
 
 ### 🟡 Menores / Higiene
@@ -304,7 +304,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 - [x] **Guard de permisos por token en A2A verificado** (`npm run check:permisos`): una herramienta publicada pero no concedida devuelve `sin_permiso` y no se ejecuta.
 
 ### Pendiente ⏳
-- [ ] **Decidir el alcance de Buzz**: `config/channels.json` le da a Buzz las 17 herramientas, incluida `account_agent`. Buzz es un canal público de Nostr sin tokens; lo único que hoy frena una acción sobre la cuenta es la confirmación 2FA por Telegram. Propuesta: dejar `knowledge_public`, `faq_agent` y `triage_agent`.
+- [~] **Alcance de Buzz**: `account_agent` ya NO está en Buzz (quitado desde la GUI). Siguen habilitadas 17 de 21: `knowledge_agent` (incluye memoria episódica con acuerdos internos), programar tareas/recordatorios, CRUD de webhooks, `set_monthly_budget` y el digest. Buzz es un canal público sin tokens: lo único que frena una acción es el 2FA por Telegram. Propuesta: dejar `knowledge_public`, `faq_agent`, `triage_agent`, `buzz_send_message`, `buzz_status`.
 - [x] **`setCurrentA2AScope` usa `AsyncLocalStorage.enterWith`** ✅ (22-09): el middleware ahora envuelve `next()` con `runWithA2AScope` (`.run()`); el alcance muere con la petición. `setCurrentA2AScope` queda solo para `check:permisos`.
 - [ ] **`ADMIN_API_KEY` sin definir desactiva el guard** (`return next()`), pensado para desarrollo local. Evaluar exigirla cuando `NODE_ENV=production`. (Hoy el guard acepta también la sesión de la GUI.)
 - [ ] **`/api/settings/env` edita el `.env` completo** desde la GUI (secretos enmascarados, pero se pueden sobrescribir). Está detrás del guard; si la GUI se expone fuera de la VPN/tunnel, conviene Cloudflare Access delante.
@@ -315,7 +315,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 
 Cosas conversadas y no cerradas, en orden de valor:
 
-- [ ] **Alcance de Buzz**: sigue con 17 herramientas, incluida `account_agent`. Propuesta: `knowledge_public`, `faq_agent`, `triage_agent`, `buzz_*`.
+- [ ] **Alcance de Buzz**: `account_agent` ya está fuera; quedan 17 (conocimiento interno, tareas, webhooks, presupuesto). Propuesta: `knowledge_public`, `faq_agent`, `triage_agent`, `buzz_*`.
 - [ ] **Recarga en caliente de tools por canal**: Telegram, Buzz y API construyen su Coordinator al arrancar; un cambio en "Canales y tools" requiere reinicio (A2A no). Podría resolverse igual que los modelos (resolver el set de tools por turno).
 - [ ] **Topes de presupuesto que corten** y no solo avisen (`isOverBudget(channel)` ya existe).
 - [ ] **Botones de resolución rápida de escalamientos en Telegram**.
