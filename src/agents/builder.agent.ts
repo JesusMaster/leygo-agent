@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { LlmAgent } from '@google/adk';
 import { modelFor } from './llm/model_factory.js';
-import { createCustomAgent, updateCustomAgent, listCustomAgents, getCustomAgent, deleteCustomAgent, testCustomTool } from './tools/builder.tools.js';
+import { createCustomAgent, updateCustomAgent, listCustomAgents, getCustomAgent, deleteCustomAgent, testCustomTool, listProviderModels } from './tools/builder.tools.js';
 
 /**
  * agent_builder — el agente programador.
@@ -46,6 +46,25 @@ export const builderAgent = new LlmAgent({
     - PROHIBIDO: require, import, process, globalThis, acceso a archivos. Nada de eso existe en el sandbox.
     - Valida args (p. ej. números finitos) y lanza Error con mensaje claro si falta algo.
 
+    # HERRAMIENTAS QUE LLAMAN A UN MODELO O API EXTERNA (network=true)
+    - NUNCA adivines nombres de modelos ni endpoints de memoria: tu conocimiento puede estar desactualizado.
+      Llama primero a 'list_provider_models' (p. ej. filtro "image") y usa SOLO un modelo que aparezca ahí.
+      Si no hay ninguno adecuado, dilo y no crees la herramienta rota.
+    - Gemini, generación de imágenes: POST https://generativelanguage.googleapis.com/v1beta/models/<MODELO>:generateContent
+      con header 'x-goog-api-key': ctx.env.GEMINI_API_KEY y body
+      {"contents":[{"parts":[{"text": prompt}]}],"generationConfig":{"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"9:16"}}}.
+      La imagen viene en res.json.candidates[0].content.parts[i].inlineData ({mimeType, data} en base64).
+      Los modelos de imagen se llaman "gemini-*-image" (p. ej. gemini-3.1-flash-image); "imagen-3.0-*" NO existe.
+    - Gemini, texto: mismo endpoint sin responseModalities; la respuesta va en candidates[0].content.parts[i].text.
+    - No pongas tests que llamen a la red: para esas herramientas deja tests solo de validación de args
+      (p. ej. sin prompt → lanza Error) o ninguno.
+
+    # ADJUNTOS (imágenes y archivos que produce una herramienta)
+    - Devuelve { adjuntos: [{ tipo: 'imagen'|'archivo', mime, base64, nombre, caption }], ...datos } .
+      El sistema guarda el archivo, se lo muestra al usuario en el chat, Telegram o Google Chat, y al
+      agente le entrega un marcador [[adjunto:ID]] que debe incluir en su respuesta. Nunca devuelvas el
+      base64 en otro campo ni lo pegues en texto.
+
     # SOUL
     Escribe la personalidad en segunda persona, con el rol pedido por Jesús (p. ej. instructor de vuelo:
     preciso, didáctico, usa la terminología correcta, pide los datos que faltan). Incluye qué NO hace.
@@ -58,5 +77,5 @@ export const builderAgent = new LlmAgent({
 
     Estás montado como herramienta del Coordinator: haz el trabajo completo y termina el turno con el resumen.
   `,
-  tools: [createCustomAgent, updateCustomAgent, listCustomAgents, getCustomAgent, deleteCustomAgent, testCustomTool],
+  tools: [createCustomAgent, updateCustomAgent, listCustomAgents, getCustomAgent, deleteCustomAgent, testCustomTool, listProviderModels],
 });

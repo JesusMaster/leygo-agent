@@ -2,6 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { customAgentsService, type CustomAgentManifest } from '../custom/custom_agents.service.js';
 import { currentUsageScope } from '../../utils/usage_collector.js';
+import { llmSettingsService } from '../../services/llm_settings.service.js';
 
 /** Solo Jesús (Telegram, API, GUI) puede crear o cambiar agentes. */
 function externo(): boolean {
@@ -105,3 +106,28 @@ export const testCustomTool = new FunctionTool({
 function resumen(m: CustomAgentManifest, estado: string): string {
   return `**${m.displayName}** ('${m.name}') — ${estado}\n  ${m.description}\n  Herramientas: ${m.tools.map((t) => t.name).join(', ') || 'ninguna'}${m.memory ? ' + memoria propia' : ''}\n  Canales: ${m.channels.join(', ')}${m.env.length ? `\n  Variables: ${m.env.map((e) => e.name).join(', ')} (configúralas en Ajustes → Claves y variables como AGENT_${m.name.toUpperCase()}_<NOMBRE>)` : ''}${m.model ? `\n  Modelo: ${m.model}` : ''}`;
 }
+
+/**
+ * Modelos REALES de los proveedores configurados en Ajustes. El programador debe
+ * consultarlos antes de escribir una herramienta que llame a un LLM o a una API de
+ * generación (imágenes, audio): adivinar nombres de modelo de memoria produce
+ * herramientas que nacen rotas (p. ej. "imagen-3.0-generate-002" ya no existe).
+ */
+export const listProviderModels = new FunctionTool({
+  name: 'list_provider_models',
+  description: 'Lista los proveedores LLM configurados (id, tipo, baseUrl, si tienen clave) y los modelos que cada uno ofrece HOY según su API. Úsala antes de programar una herramienta que llame a un modelo (texto, imagen, audio). "filtro" acota por texto, p. ej. "image".',
+  parameters: z.object({ filtro: z.string().optional().describe('Subcadena para filtrar modelos, p. ej. "image", "flash", "tts"'), proveedor: z.string().optional().describe('id del proveedor (p. ej. "gemini"); vacío = todos') }) as any,
+  execute: async (args: any) => {
+    const filtro = String(args?.filtro || '').toLowerCase();
+    const out: any[] = [];
+    for (const p of llmSettingsService.listProviders()) {
+      if (!p.enabled) continue;
+      if (args?.proveedor && p.id !== args.proveedor) continue;
+      let modelos: string[] = [];
+      try { modelos = await llmSettingsService.listModels(p.id); } catch (err: any) { modelos = [`(no se pudieron listar: ${err.message})`]; }
+      if (filtro) modelos = modelos.filter((m) => m.toLowerCase().includes(filtro));
+      out.push({ id: p.id, kind: p.kind, baseUrl: llmSettingsService.baseUrlEfectiva(p) || null, tieneKey: !!(p as any).tieneKey, envKeySugerida: p.kind === 'gemini' ? 'GEMINI_API_KEY' : undefined, modelos });
+    }
+    return { status: 'success', result: out };
+  },
+});

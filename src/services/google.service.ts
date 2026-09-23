@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { messageFormatter } from '../utils/message_formatter.js';
+import { attachmentsService } from './attachments.service.js';
 
 export class GoogleWorkspaceService {
   private getAuthClient() {
@@ -926,6 +927,7 @@ export class GoogleWorkspaceService {
   }
 
   async sendChatMessage(spaceName: string, text: string, threadName?: string) {
+    text = attachmentsService.comoEnlaces(text);
     const auth = this.getAuthClient();
     const chat = google.chat({ version: 'v1', auth });
 

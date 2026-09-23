@@ -7,6 +7,7 @@ import { getRedisConnector } from '../database/redis.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
+import { attachmentsService } from './attachments.service.js';
 
 dotenv.config();
 
@@ -1025,7 +1026,7 @@ export class NostrGatewayService {
         kind: incomingEvent.kind, // kind 9 para Buzz
         created_at: Math.floor(Date.now() / 1000),
         tags,
-        content: responseText,
+        content: attachmentsService.comoEnlaces(responseText),
       };
 
       const signedEvent = finalizeEvent(eventTemplate, this.secretKey);
@@ -1098,7 +1099,7 @@ export class NostrGatewayService {
         kind: 9,
         created_at: Math.floor(Date.now() / 1000),
         tags,
-        content: text.trim(),
+        content: attachmentsService.comoEnlaces(text.trim()),
       };
       const signed = finalizeEvent(template, this.secretKey);
 

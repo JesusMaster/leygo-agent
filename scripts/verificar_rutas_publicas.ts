@@ -36,6 +36,7 @@ const CASOS: Caso[] = [
   { metodo: 'GET',    ruta: '/api/commitments',          debeExigirClave: true,  nota: 'compromisos' },
   { metodo: 'POST',   ruta: '/api/agents/generate',      debeExigirClave: true,  nota: 'crear agentes con IA' },
   { metodo: 'POST',   ruta: '/api/agents/generate/stream', debeExigirClave: true, nota: 'crear agentes con IA (SSE)' },
+  { metodo: 'GET',    ruta: '/api/adjuntos/0123456789abcdef0123456789abcdef', debeExigirClave: false, nota: 'adjunto generado (URL-capacidad, 404 si no existe)' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },

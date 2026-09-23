@@ -12,6 +12,9 @@ import { customAgentsService, registrarCoordinadorVivo } from './custom/custom_a
  * Las herramientas ya no vienen fijas: se arman por canal desde el catálogo, de
  * modo que habilitar algo nuevo en Telegram no lo deje expuesto en Buzz.
  */
+/** Los agentes que generan imágenes/archivos devuelven marcadores [[adjunto:ID]]; el Coordinator debe dejarlos pasar. */
+const NOTA_ADJUNTOS = `ADJUNTOS: si la respuesta de un agente o herramienta contiene marcadores como [[adjunto:abc123…]], cópialos TAL CUAL en tu respuesta (uno por línea, donde corresponda): el canal los convierte en la imagen o el archivo. Nunca los describas, reescribas ni omitas.\n`;
+
 export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram' | 'buzz' | 'api') {
   const base = `
         # IDENTIDAD
@@ -156,7 +159,7 @@ export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram'
     description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
     // Instrucción dinámica: la sección de agentes personalizados cambia sin reiniciar.
     // La fecha va al FINAL para no invalidar el caché de prompt (el prefijo largo queda estable).
-    instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : '') + '\n\n' + fechaHoraActual(),
+    instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : '') + '\n\n' + NOTA_ADJUNTOS + fechaHoraActual(),
     tools: customAgentsService.unirSinDuplicar(resolveTools(toolNames), canal ? customAgentsService.toolsParaCanal(canal) : []),
   });
   if (canal) registrarCoordinadorVivo(canal, agente);

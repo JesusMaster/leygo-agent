@@ -21,6 +21,7 @@ import {
 import type { RedisSessionService } from '../services/redis_session.service.js';
 import { currentA2AScope } from '../config/channels.js';
 import { agentMessage, extractText, status } from './helpers.js';
+import { attachmentsService } from '../services/attachments.service.js';
 
 const APP_NAME = process.env.ADK_APP_NAME || 'yisus';
 
@@ -117,7 +118,7 @@ export class YisusAgentExecutor implements AgentExecutor {
 
             // 4) Respuesta final → input-required (conversación multi-turno)
             const finalText = replies.length
-                ? replies[replies.length - 1]
+                ? attachmentsService.comoEnlaces(replies[replies.length - 1])
                 : errorModelo
                     ? `⚠️ El modelo no pudo responder: ${errorModelo}`
                     : 'Lo siento, no pude generar una respuesta. ¿Puedes reformular tu consulta?';

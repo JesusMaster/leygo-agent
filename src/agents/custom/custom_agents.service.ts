@@ -258,7 +258,8 @@ class CustomAgentsService {
     if (!m) throw new Error(`No existe el agente ${name}`);
     const t = m.tools.find((x) => x.name === toolName);
     if (!t) throw new Error(`El agente ${name} no tiene la herramienta ${toolName}`);
-    return ejecutar(t.code, args, this.ctxPara(m, t), t.name);
+    const r = await ejecutar(t.code, args, this.ctxPara(m, t), t.name, t.network ? 90_000 : 10_000);
+    return r;
   }
 
   // ─── Alta / edición / baja ───────────────────────────────────────────
@@ -373,8 +374,10 @@ class CustomAgentsService {
       description: t.description,
       parameters: schemaGemini(t.parameters) as any,
       execute: async (args: any) => {
-        const r = await ejecutar(t.code, args, this.ctxPara(m, t), t.name);
+        // Con red (APIs externas, generación de imágenes) el tope es 90 s; sin red, 10 s.
+        const r = await ejecutar(t.code, args, this.ctxPara(m, t), t.name, t.network ? 90_000 : 10_000);
         if (!r.ok) return { status: 'error', message: r.error, logs: r.logs };
+        // (los adjuntos ya se extrajeron en el sandbox: al modelo solo le llega la referencia)
         return { status: 'success', result: r.result, ...(r.logs.length ? { logs: r.logs } : {}) };
       },
     }));
@@ -393,6 +396,7 @@ class CustomAgentsService {
 ${comoTrabajas}
 - Usa tus herramientas para calcular o consultar en vez de estimar de cabeza; muestra los datos de entrada y el resultado.
 - Si te falta un dato para calcular, pídelo en una sola pregunta clara.
+- Si una herramienta devuelve "adjuntos" (imágenes o archivos), incluye en tu respuesta el "marcador" de cada uno tal cual (p. ej. [[adjunto:abc123…]]): el canal lo convierte en la imagen o el archivo. No inventes URLs.
 - Responde en español salvo que te hablen en otro idioma. Tus respuestas se leen en Telegram, chat y GUI: usa markdown simple y escribe fórmulas en texto plano (p. ej. 32 × 3 = 96 NM), nunca LaTeX ($…$).${envDoc}${memDoc}`;
     return new LlmAgent({
       name: m.name,
@@ -492,6 +496,7 @@ ${comoTrabajas}
     for (const e of m.env) { const v = this.valorEnv(m, e.name); if (v !== undefined) env[e.name] = v; }
     return {
       env,
+      agente: m.name,
       log: () => {},
       now: () => new Date().toISOString(),
       ...(t.network ? { fetch: fetchSeguro() } : {}),

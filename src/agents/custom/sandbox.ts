@@ -1,5 +1,6 @@
 import vm from 'node:vm';
 import { Worker } from 'node:worker_threads';
+import { attachmentsService } from '../../services/attachments.service.js';
 
 /**
  * Ejecuta el código de una herramienta de agente personalizado en un Worker
@@ -15,6 +16,8 @@ export interface SandboxCtx {
   fetch?: (url: string, init?: any) => Promise<{ status: number; ok: boolean; text: string; json: any }>;
   log: (...a: any[]) => void;
   now: () => string;
+  /** Nombre del agente dueño (para atribuir los adjuntos que produzca la herramienta). */
+  agente?: string;
 }
 
 export interface SandboxResult { ok: boolean; result?: any; error?: string; logs: string[]; ms: number; }
@@ -57,6 +60,9 @@ export async function ejecutar(code: string, args: any, ctx: SandboxCtx, nombre 
         if (!m.ok) return fin({ ok: false, error: m.error, logs: m.logs || [], ms: m.ms });
         let result: any = null;
         try { result = JSON.parse(m.resultJson); } catch { result = m.resultJson; }
+        // Los adjuntos (base64 de varios MB) se sacan ANTES de medir el tamaño: el modelo
+        // recibe solo la referencia, y el archivo queda guardado para el canal.
+        result = attachmentsService.procesarResultado(result, ctx.agente || nombre);
         const s = JSON.stringify(result) ?? 'null';
         if (s.length > MAX_RESULT) result = { truncado: true, resultado: s.slice(0, MAX_RESULT) };
         return fin({ ok: true, result, logs: m.logs || [], ms: m.ms });
@@ -86,10 +92,11 @@ export function fetchSeguro(): NonNullable<SandboxCtx['fetch']> {
   return async (url: string, init?: any) => {
     if (!/^https:\/\//i.test(url)) throw new Error('Solo se permiten URLs https://');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
+    // 60 s y 12 MB: generar una imagen tarda 5–20 s y vuelve como base64 de varios MB
+    const timer = setTimeout(() => ctrl.abort(), 60_000);
     try {
       const res = await fetch(url, { method: init?.method || 'GET', headers: init?.headers, body: init?.body, signal: ctrl.signal });
-      const text = (await res.text()).slice(0, 200_000);
+      const text = (await res.text()).slice(0, 12_000_000);
       let json: any = null;
       try { json = JSON.parse(text); } catch { /* no es JSON */ }
       return { status: res.status, ok: res.ok, text, json };

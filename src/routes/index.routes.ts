@@ -10,6 +10,7 @@ import { webhookService } from '../services/webhook.service.js';
 import { customWebhookService } from '../services/custom_webhook.service.js';
 import { tokenTrackerService } from '../services/token_tracker.service.js';
 import { guardRutasInternas } from './admin_guard.js';
+import { attachmentsService } from '../services/attachments.service.js';
 
 export default function createIndexRoutes(runner: Runner, sessionService: RedisSessionService) {
     const app = Router();
@@ -241,6 +242,18 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
+    });
+
+    // Adjuntos generados por herramientas (imágenes, archivos). URL-capacidad: el id
+    // es aleatorio de 128 bits y caduca a los 7 días; no lleva clave para que <img>,
+    // Telegram y Google Chat puedan cargarla.
+    app.get('/api/adjuntos/:id', (req, res) => {
+        const a = attachmentsService.leer(req.params.id);
+        if (!a) return res.status(404).json({ error: 'Adjunto no encontrado o caducado' });
+        res.setHeader('Content-Type', a.meta.mime);
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        res.setHeader('Content-Disposition', `${a.meta.tipo === 'imagen' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(a.meta.nombre)}`);
+        res.send(a.buffer);
     });
 
     // Tabla de precios por modelo (catálogo LiteLLM + overrides manuales)

@@ -1,8 +1,8 @@
 {
   "name": "banano",
   "displayName": "Banano",
-  "description": "Generador de imágenes para Instagram con Gemini Imagen 3: aspect ratio 9:16 por defecto (o el solicitado) y dimensiones máximas de 1920px.",
-  "soul": "Eres Banano, el director de arte visual y creador de imágenes para Instagram de Jesús Leiva. Te especializas en concebir, diseñar y generar imágenes de alto impacto visual y estética profesional optimizadas para redes sociales, utilizando el modelo de generación de imágenes de Google Gemini (Imagen 3).\n\nCómo trabajas:\n1. Formato y Proporciones: Tu proporción por defecto es SIEMPRE 9:16 (formato vertical de Instagram Stories y Reels). Si el usuario solicita expresamente otra proporción (como 1:1 para post cuadrado, 4:5 para feed portrait, o 16:9 para landscape), la adaptas inmediatamente.\n2. Resolución y Dimensiones: Garantizas que ni el ancho ni el alto superen nunca el límite máximo de 1920px (por ejemplo 1080x1920 px en 9:16). Utiliza 'calcular_resolucion_instagram' y 'obtener_aspect_ratio_gemini' para determinar los parámetros exactos.\n3. Dirección de Arte y Prompt Engineering: Tomas las ideas del usuario y las elevas a nivel profesional de Instagram usando 'formatear_prompt_instagram' o aportando dirección de iluminación, paleta de colores, textura fotográfica realista y composición cuidada.\n4. Generación: Utilizas 'generar_imagen_gemini' para ejecutar la creación con Gemini Imagen 3.\n5. Entrega y Comunicación: Presentas al usuario la confirmación de la imagen generada, detallando el prompt optimizado, la proporción aplicada (9:16 u otra) y las dimensiones exactas. NUNCA pegues cadenas crudas de base64 en tus mensajes de texto, ya que saturarían el límite de caracteres del chat.\n6. Tono: Creativo, moderno, con buen ojo visual, ágil y enfocado en entregar contenido listo para destacar en Instagram.",
+  "description": "Generador de imágenes para Instagram con Gemini Gemini Image: aspect ratio 9:16 por defecto (o el solicitado) y dimensiones máximas de 1920px.",
+  "soul": "Eres Banano, el director de arte visual y creador de imágenes para Instagram de Jesús Leiva. Te especializas en concebir, diseñar y generar imágenes de alto impacto visual y estética profesional optimizadas para redes sociales, utilizando el modelo de generación de imágenes de Google Gemini (Gemini Image).\n\nCómo trabajas:\n1. Formato y Proporciones: Tu proporción por defecto es SIEMPRE 9:16 (formato vertical de Instagram Stories y Reels). Si el usuario solicita expresamente otra proporción (como 1:1 para post cuadrado, 4:5 para feed portrait, o 16:9 para landscape), la adaptas inmediatamente.\n2. Resolución y Dimensiones: Garantizas que ni el ancho ni el alto superen nunca el límite máximo de 1920px (por ejemplo 1080x1920 px en 9:16). Utiliza 'calcular_resolucion_instagram' y 'obtener_aspect_ratio_gemini' para determinar los parámetros exactos.\n3. Dirección de Arte y Prompt Engineering: Tomas las ideas del usuario y las elevas a nivel profesional de Instagram usando 'formatear_prompt_instagram' o aportando dirección de iluminación, paleta de colores, textura fotográfica realista y composición cuidada.\n4. Generación: Utilizas 'generar_imagen_gemini' para ejecutar la creación con Gemini Gemini Image.\n5. Entrega y Comunicación: Presentas al usuario la confirmación de la imagen generada, detallando el prompt optimizado, la proporción aplicada (9:16 u otra) y las dimensiones exactas. NUNCA pegues cadenas crudas de base64 en tus mensajes de texto, ya que saturarían el límite de caracteres del chat.\n6. Tono: Creativo, moderno, con buen ojo visual, ágil y enfocado en entregar contenido listo para destacar en Instagram.",
   "tools": [
     {
       "name": "calcular_resolucion_instagram",
@@ -57,7 +57,7 @@
     },
     {
       "name": "obtener_aspect_ratio_gemini",
-      "description": "Mapea la proporción solicitada al aspect ratio soportado por Gemini Imagen 3 ('9:16', '1:1', '3:4', '4:3', '16:9').",
+      "description": "Mapea la proporción solicitada al aspect ratio soportado por Gemini Gemini Image ('9:16', '1:1', '3:4', '4:3', '16:9').",
       "parameters": {
         "type": "object",
         "properties": {
@@ -129,32 +129,32 @@
     },
     {
       "name": "generar_imagen_gemini",
-      "description": "Genera una imagen con el modelo Imagen 3 de Gemini (imagen-3.0-generate-002), aplicando la relación de aspecto para Instagram (por defecto 9:16) y dimensiones máximas de 1920px.",
+      "description": "Genera una imagen con Gemini (modelo gemini-3.1-flash-image por defecto) en la relación de aspecto pedida (9:16 por defecto, formato Instagram). Devuelve la imagen como adjunto: incluye su marcador en la respuesta.",
       "parameters": {
         "type": "object",
         "properties": {
-          "alto": {
-            "type": "number",
-            "description": "Alto en píxeles (máximo 1920)"
-          },
-          "ancho": {
-            "type": "number",
-            "description": "Ancho en píxeles (máximo 1920)"
+          "prompt": {
+            "type": "string",
+            "description": "Descripción visual detallada de la imagen a generar (en inglés funciona mejor)"
           },
           "aspect_ratio": {
             "type": "string",
-            "description": "Relación de aspecto ('9:16' por defecto, '1:1', '3:4', '4:3', '16:9')"
+            "description": "Relación de aspecto: '9:16' (por defecto), '1:1', '3:4', '4:3', '16:9', '4:5', '2:3', '3:2', '21:9'"
           },
-          "prompt": {
+          "modelo": {
             "type": "string",
-            "description": "Descripción visual detallada de la imagen a generar"
+            "description": "Modelo de imagen de Gemini. Por defecto gemini-3.1-flash-image; alternativa gemini-3-pro-image (más calidad, más caro)"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Pie corto para acompañar la imagen (opcional)"
           }
         },
         "required": [
           "prompt"
         ]
       },
-      "code": "if (!args.prompt || typeof args.prompt !== 'string') {\n  throw new Error(\"El parámetro 'prompt' es requerido.\");\n}\n\nconst apiKey = ctx.env.GEMINI_API_KEY;\nif (!apiKey) {\n  return {\n    exito: false,\n    error: \"No se encontró la clave GEMINI_API_KEY. Por favor configúrala en Ajustes -> Claves y variables como AGENT_BANANO_GEMINI_API_KEY.\",\n    sugerencia: \"Agrega tu API Key de Google Gemini / AI Studio para que Banano pueda generar las imágenes.\"\n  };\n}\n\nlet ratio = (args.aspect_ratio || '9:16').trim();\nconst validRatios = ['9:16', '1:1', '3:4', '4:3', '16:9'];\nif (!validRatios.includes(ratio)) {\n  if (ratio === '4:5') {\n    ratio = '3:4';\n  } else {\n    ratio = '9:16';\n  }\n}\n\nlet ancho = typeof args.ancho === 'number' && args.ancho > 0 ? Math.min(args.ancho, 1920) : (ratio === '9:16' ? 1080 : (ratio === '16:9' ? 1920 : 1080));\nlet alto = typeof args.alto === 'number' && args.alto > 0 ? Math.min(args.alto, 1920) : (ratio === '9:16' ? 1920 : (ratio === '16:9' ? 1080 : 1080));\n\nconst endpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${encodeURIComponent(apiKey)}`;\n\nconst payload = {\n  instances: [\n    {\n      prompt: args.prompt.trim()\n    }\n  ],\n  parameters: {\n    sampleCount: 1,\n    aspectRatio: ratio,\n    outputMimeType: \"image/jpeg\",\n    personGeneration: \"ALLOW_ADULT\",\n    safetySetting: \"block_medium_and_above\"\n  }\n};\n\nconst res = await ctx.fetch(endpoint, {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json'\n  },\n  body: JSON.stringify(payload)\n});\n\nif (!res.ok) {\n  let errorMsg = `HTTP ${res.status}`;\n  try {\n    const errObj = typeof res.json === 'function' ? await res.json() : (typeof res.json === 'object' && res.json !== null ? res.json : JSON.parse(res.text || '{}'));\n    if (errObj.error && errObj.error.message) {\n      errorMsg = errObj.error.message;\n    }\n  } catch (e) {}\n  return {\n    exito: false,\n    status: res.status,\n    error: `Error al generar imagen con Gemini: ${errorMsg}`\n  };\n}\n\nconst data = typeof res.json === 'function' ? await res.json() : (typeof res.json === 'object' && res.json !== null ? res.json : JSON.parse(res.text || '{}'));\nconst prediction = (data.predictions && data.predictions[0]) ? data.predictions[0] : null;\n\nif (!prediction || !prediction.bytesBase64Encoded) {\n  return {\n    exito: false,\n    error: \"No se recibió ninguna imagen de Gemini Imagen 3.\",\n    respuesta: JSON.stringify(data).slice(0, 300)\n  };\n}\n\nconst mime = prediction.mimeType || 'image/jpeg';\nconst base64 = prediction.bytesBase64Encoded;\n\nreturn {\n  exito: true,\n  modelo: \"imagen-3.0-generate-002\",\n  prompt: args.prompt.trim(),\n  aspect_ratio: ratio,\n  dimensiones: {\n    ancho_px: ancho,\n    alto_px: alto,\n    maximo_px: 1920\n  },\n  mime_type: mime,\n  tamano_base64_caracteres: base64.length,\n  data_url: `data:${mime};base64,${base64}`\n};",
+      "code": "if (!args.prompt || typeof args.prompt !== 'string' || !args.prompt.trim()) {\n  throw new Error(\"El parámetro 'prompt' es requerido.\");\n}\nconst apiKey = ctx.env.GEMINI_API_KEY;\nif (!apiKey) {\n  return { exito: false, error: \"Falta GEMINI_API_KEY: configúrala en Ajustes → Claves y variables (AGENT_BANANO_GEMINI_API_KEY o GEMINI_API_KEY).\" };\n}\n\n// Ratios que acepta la API de imágenes de Gemini\nconst validos = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];\nlet ratio = String(args.aspect_ratio || '9:16').trim();\nif (!validos.includes(ratio)) ratio = '9:16';\n\nconst modelo = String(args.modelo || 'gemini-3.1-flash-image').trim();\nconst endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`;\nconst body = {\n  contents: [{ parts: [{ text: args.prompt.trim() }] }],\n  generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: ratio } }\n};\n\nconst res = await ctx.fetch(endpoint, {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },\n  body: JSON.stringify(body)\n});\n\nif (!res.ok) {\n  const msg = (res.json && res.json.error && res.json.error.message) ? res.json.error.message : `HTTP ${res.status}`;\n  return { exito: false, status: res.status, modelo, error: `Gemini no pudo generar la imagen: ${msg}` };\n}\n\nconst parts = (((res.json || {}).candidates || [])[0] || {}).content ? res.json.candidates[0].content.parts || [] : [];\nconst img = parts.find(p => p.inlineData && p.inlineData.data);\nif (!img) {\n  const texto = parts.map(p => p.text).filter(Boolean).join(' ').slice(0, 300);\n  const bloqueo = res.json && res.json.promptFeedback && res.json.promptFeedback.blockReason;\n  return { exito: false, modelo, error: bloqueo ? `Gemini bloqueó el prompt (${bloqueo})` : 'Gemini no devolvió imagen', detalle: texto };\n}\n\nconst mime = img.inlineData.mimeType || 'image/png';\nconst ext = mime.includes('jpeg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';\nconst nombre = `banano-${ratio.replace(':', 'x')}-${Date.now()}.${ext}`;\nreturn {\n  exito: true,\n  modelo,\n  aspect_ratio: ratio,\n  prompt_usado: args.prompt.trim(),\n  adjuntos: [{ tipo: 'imagen', mime, base64: img.inlineData.data, nombre, caption: args.caption || undefined }]\n};\n",
       "network": true,
       "tests": []
     }
@@ -167,15 +167,13 @@
     }
   ],
   "channels": [
-    "telegram",
-    "api",
-    "a2a"
+    "api"
   ],
-  "model": null,
+  "model": "gemini/gemini-3.1-flash-image",
   "memory": false,
   "enabled": true,
   "createdBy": "ia",
   "createdAt": "2026-09-23T22:43:41.126Z",
-  "updatedAt": "2026-09-23T22:43:41.126Z",
-  "version": 1
+  "updatedAt": "2026-09-23T23:05:57.502762Z",
+  "version": 8
 }

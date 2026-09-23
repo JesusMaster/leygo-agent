@@ -8,6 +8,7 @@ import { telegramAuthService } from './telegram_auth.service.js';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 import { tokenTrackerService } from './token_tracker.service.js';
+import { attachmentsService } from './attachments.service.js';
 
 dotenv.config();
 
@@ -150,6 +151,9 @@ export class TelegramBotService {
     options: { parseMode?: 'HTML' | 'Markdown'; replyMarkup?: any } = {}
   ): Promise<number | null> {
     try {
+      // Marcadores [[adjunto:ID]] → se quitan del texto y se envían como foto/documento al final
+      const { texto: sinAdjuntos, adjuntos } = attachmentsService.extraer(text);
+      if (adjuntos.length) text = sinAdjuntos || (adjuntos[0].caption ? '' : '📎');
       const chunks = splitMessage(text, 4000);
       let firstMsgId: number | null = null;
 
@@ -179,10 +183,30 @@ export class TelegramBotService {
           }
         }
       }
+      for (const a of adjuntos) await this.sendAttachment(chatId, a.id, a.caption);
       return firstMsgId;
     } catch (err: any) {
       console.error(`❌ [TelegramBot] Error enviando mensaje a ${chatId}:`, err.response?.data || err.message);
       return null;
+    }
+  }
+
+  /** Foto (imágenes hasta 10 MB) o documento, subido como multipart. */
+  public async sendAttachment(chatId: string | number, adjuntoId: string, caption?: string): Promise<boolean> {
+    const a = attachmentsService.leer(adjuntoId);
+    if (!a) return false;
+    const esFoto = a.meta.tipo === 'imagen' && a.meta.bytes <= 10 * 1024 * 1024 && /^image\/(jpeg|png|webp)$/.test(a.meta.mime);
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    if (caption) form.append('caption', caption.slice(0, 1024));
+    form.append(esFoto ? 'photo' : 'document', new Blob([new Uint8Array(a.buffer)], { type: a.meta.mime }), a.meta.nombre);
+    try {
+      await axios.post(`${this.baseUrl}/${esFoto ? 'sendPhoto' : 'sendDocument'}`, form, { maxBodyLength: Infinity });
+      return true;
+    } catch (err: any) {
+      console.error(`❌ [TelegramBot] Error enviando adjunto ${adjuntoId}:`, err.response?.data || err.message);
+      await this.sendMessage(chatId, `📎 ${a.meta.nombre}: ${attachmentsService.urlPublica(a.meta.id)}`);
+      return false;
     }
   }
 
@@ -485,6 +509,8 @@ export class TelegramBotService {
       }
 
       if (turno.directo && !turno.aviso) accumulatedText = `**${turno.directo.displayName}** (directo)\n\n${accumulatedText}`;
+      const extraccion = attachmentsService.extraer(accumulatedText);
+      accumulatedText = extraccion.texto || (extraccion.adjuntos.length ? '📎' : accumulatedText);
       const formattedHtml = markdownToTelegramHtml(accumulatedText);
       const chunks = splitMessage(formattedHtml, 4000);
 
@@ -502,6 +528,7 @@ export class TelegramBotService {
       } else {
         await this.sendMessage(senderChatId, formattedHtml, { parseMode: 'HTML' });
       }
+      for (const a of extraccion.adjuntos) await this.sendAttachment(senderChatId, a.id, a.caption);
     } catch (err: any) {
       console.error('❌ [TelegramBot] Error ejecutando agente para Telegram:', err);
       const errMsg = `❌ Ocurrió un error al procesar tu solicitud:\n<code>${escapeHtml(err.message)}</code>`;

@@ -201,6 +201,8 @@ input[type=time], input[type=date], input[type=datetime-local] { color-scheme: d
 
 /* ─── Markdown renderizado en el chat (global: llega por innerHTML) ─────── */
 .md { overflow-wrap: anywhere; }
+.md img.adjunto-img { display: block; max-width: min(100%, 420px); max-height: 560px; border-radius: 12px; border: 1px solid var(--border-light); margin: 6px 0; object-fit: contain; background: var(--bg-main); }
+.md a.adjunto { display: inline-block; }
 .md :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4) { margin: 0 0 10px; }
 .md > :last-child { margin-bottom: 0; }
 .md ul, .md ol { padding-left: 24px; margin-left: 0; }
