@@ -136,27 +136,87 @@ class CommitmentsService {
   }
 
   // ─── Dedup ────────────────────────────────────────────────────────────
-  private async duplicadoDe(d: Detectado): Promise<Commitment | null> {
-    const abiertos = sqliteReminderService.listCommitments({ status: ABIERTOS, limit: 500 });
+  /**
+   * Candidatos a duplicado de un detectado: los abiertos (y los cerrados en los
+   * últimos 45 días, para no reproponer lo que ya se hizo) con parecido léxico
+   * o semántico. Devuelve los mejores con su puntaje.
+   */
+  private async candidatos(d: Detectado): Promise<Array<{ c: Commitment; s: number; via: 'lexico' | 'semantico' }>> {
+    const hace45 = Date.now() - 45 * 86400000;
+    const base = sqliteReminderService.listCommitments({ limit: 800 }).filter((c) => ABIERTOS.includes(c.status) || (c.updated_at >= hace45 && c.status !== 'descartado'));
     const tk = tokens(`${d.title} ${d.counterpart || ''}`);
-    let mejor: { c: Commitment; s: number } | null = null;
-    for (const c of abiertos) {
+    const out = new Map<string, { c: Commitment; s: number; via: 'lexico' | 'semantico' }>();
+    for (const c of base) {
       const s = jaccard(tk, tokens(`${c.title} ${c.counterpart || ''}`));
-      if (s >= 0.6 && (!mejor || s > mejor.s)) mejor = { c, s };
+      if (s >= 0.3) out.set(c.id, { c, s, via: 'lexico' });
     }
-    if (mejor) return mejor.c;
-    // Semántico, si hay índice: mismo compromiso dicho con otras palabras.
     if (await this.qdrant()) {
       try {
         const vector = await qdrantService.generateEmbedding(this.textoEmbedding({ title: d.title, detail: d.detail || null, counterpart: d.counterpart || null, owner: d.owner || 'Jesús' }));
-        const res = await qdrantService.raw.query(COLECCION, { query: vector, limit: 3, with_payload: true, score_threshold: 0.88 });
+        const res = await qdrantService.raw.query(COLECCION, { query: vector, limit: 5, with_payload: true, score_threshold: 0.72 });
         for (const p of res.points || []) {
           const c = sqliteReminderService.getCommitment(String((p.payload as any)?.commitmentId));
-          if (c && ABIERTOS.includes(c.status)) return c;
+          if (!c || c.status === 'descartado') continue;
+          if (!ABIERTOS.includes(c.status) && c.updated_at < hace45) continue;
+          const prev = out.get(c.id);
+          if (!prev || (p.score || 0) > prev.s) out.set(c.id, { c, s: p.score || 0, via: 'semantico' });
         }
       } catch { /* opcional */ }
     }
-    return null;
+    return [...out.values()].sort((a, b) => b.s - a.s).slice(0, 5);
+  }
+
+  /**
+   * Decide, para un lote de detectados de una misma fuente, cuáles son nuevos y
+   * cuáles ya existen. Parecido obvio (léxico ≥ 0.6 o semántico ≥ 0.9) se
+   * resuelve solo; lo dudoso se le pregunta a la IA en UNA llamada por lote,
+   * mostrándole los candidatos. Sin candidatos = nuevo, sin llamar a nada.
+   */
+  async decidirDuplicados(items: Detectado[]): Promise<Array<{ d: Detectado; dup: Commitment | null; via: string }>> {
+    const decisiones: Array<{ d: Detectado; dup: Commitment | null; via: string }> = [];
+    const dudosos: Array<{ idx: number; cands: Array<{ c: Commitment; s: number; via: string }> }> = [];
+    for (let i = 0; i < items.length; i++) {
+      const d = items[i];
+      const cands = await this.candidatos(d);
+      const top = cands[0];
+      if (!top) { decisiones.push({ d, dup: null, via: 'sin candidatos' }); continue; }
+      if ((top.via === 'lexico' && top.s >= 0.6) || (top.via === 'semantico' && top.s >= 0.9)) { decisiones.push({ d, dup: top.c, via: `${top.via} ${top.s.toFixed(2)}` }); continue; }
+      decisiones.push({ d, dup: null, via: 'pendiente IA' });
+      dudosos.push({ idx: i, cands });
+    }
+    if (!dudosos.length) return decisiones;
+
+    // Una sola llamada para todos los dudosos del lote.
+    const { generarTexto } = await import('../agents/llm/model_factory.js');
+    const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
+    const bloque = dudosos.map(({ idx, cands }) => {
+      const d = items[idx];
+      return `#${idx}: "${d.title}"${d.counterpart ? ` (con ${d.counterpart})` : ''}${d.owner ? ` [responsable ${d.owner}]` : ''}\n   candidatos: ${cands.map((k) => `[${k.c.id}] "${k.c.title}"${k.c.counterpart ? ` (con ${k.c.counterpart})` : ''} [${k.c.status}]`).join(' | ')}`;
+    }).join('\n');
+    const prompt = `Eres el asistente de Jesús Leiva. Para cada compromiso nuevo (#n) decide si es EL MISMO compromiso que alguno de sus candidatos ya registrados (misma acción y mismo responsable/contraparte, aunque esté dicho con otras palabras o más detalle) o si es uno distinto.
+Reglas:
+- "mismo" si es la misma acción aunque cambie la redacción, o si es el siguiente paso / una parte / más detalle de un compromiso ya registrado sobre el mismo tema y con el mismo responsable (p. ej. "pedir a Producto los accesos del Panel" es parte de "Panel de Engagement: traspasar a CORE"). Ante la duda, "mismo": es mejor anotar una mención que duplicar.
+- "distinto" solo si es otro tema, otra entrega claramente separada u otro responsable.
+
+${bloque}
+
+Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
+    beginUsageScope('system', 'commitments_dedup', 'Dedup de compromisos');
+    try {
+      const raw = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt)).replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+      const obj = JSON.parse(raw || '{}');
+      for (const { idx, cands } of dudosos) {
+        const v = String(obj[idx] ?? obj[`#${idx}`] ?? 'nuevo').trim();
+        const hit = cands.find((k) => k.c.id === v.replace(/[\[\]]/g, ''));
+        decisiones[idx] = { d: items[idx], dup: hit ? hit.c : null, via: hit ? 'IA' : 'IA: nuevo' };
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [Compromisos] Dedup por IA falló (${err?.message}); los dudosos entran como nuevos.`);
+      for (const { idx } of dudosos) decisiones[idx] = { d: items[idx], dup: null, via: 'IA falló → nuevo' };
+    } finally {
+      flushUsageScope().catch(() => {});
+    }
+    return decisiones;
   }
 
   // ─── Altas ────────────────────────────────────────────────────────────
@@ -199,13 +259,16 @@ class CommitmentsService {
   async ingestarDetectados(items: Detectado[], origen: Origen): Promise<{ nuevos: Commitment[]; repetidos: number }> {
     const nuevos: Commitment[] = [];
     let repetidos = 0;
-    for (const d of items) {
-      if (!d?.title || d.title.trim().length < 6) continue;
-      const dup = await this.duplicadoDe(d);
+    const validos = items.filter((d) => d?.title && d.title.trim().length >= 6);
+    const decisiones = await this.decidirDuplicados(validos);
+    for (const { d, dup } of decisiones) {
       if (dup) {
         repetidos++;
-        sqliteReminderService.addCommitmentUpdate({ commitment_id: dup.id, at: Date.now(), kind: 'mencion', text: `Vuelve a aparecer en ${origen.type}${origen.title ? `: ${origen.title}` : ''}`, by: 'auto' });
+        sqliteReminderService.addCommitmentUpdate({ commitment_id: dup.id, at: Date.now(), kind: 'mencion', text: `Vuelve a aparecer en ${origen.type}${origen.title ? `: ${origen.title}` : ''}${origen.link ? ` — ${origen.link}` : ''}`, by: 'auto' });
         if (!dup.due_date && d.due) sqliteReminderService.updateCommitment(dup.id, { proposed_due: d.due });
+        if (dup.status === 'hecho' || dup.status === 'cancelado') {
+          sqliteReminderService.addCommitmentUpdate({ commitment_id: dup.id, at: Date.now(), kind: 'nota', text: 'Ojo: ya estaba cerrado y vuelve a mencionarse; revisa si se reabrió.', by: 'auto' });
+        }
         continue;
       }
       nuevos.push(await this.crear({ ...d, status: 'propuesto' }, origen, 'auto'));

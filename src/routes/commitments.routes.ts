@@ -28,6 +28,13 @@ export default function createCommitmentsRoutes() {
     res.json(commitmentsBackfillService.iniciar({ limite: req.body?.limite, desde: req.body?.desde }));
   });
 
+  /** Simulación de dedup: qué pasaría con estos detectados, sin crear nada. */
+  app.post('/api/commitments/dedup-check', async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const r = await commitmentsService.decidirDuplicados(items);
+    res.json({ decisiones: r.map((x) => ({ title: x.d.title, resultado: x.dup ? `duplicado de [${x.dup.id}] ${x.dup.title}` : 'nuevo', via: x.via })) });
+  });
+
   /** Cambio de estado en lote (p. ej. descartar propuestos antiguos tras un backfill). */
   app.post('/api/commitments/bulk', async (req, res) => {
     const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
