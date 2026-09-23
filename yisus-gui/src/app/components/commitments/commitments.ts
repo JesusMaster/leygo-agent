@@ -46,6 +46,10 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
         </div>
         <input type="text" class="buscar" [ngModel]="q()" (ngModelChange)="q.set($event)" placeholder="Filtrar por texto, persona…" />
         <button class="btn-secondary" (click)="load()"><i class="ph ph-arrows-clockwise"></i></button>
+        @if (vista() === 'propuestos' && propuestosAntiguos().length) {
+          <span class="spacer"></span>
+          <button class="btn-secondary" (click)="descartarAntiguos()" title="Propuestos cuya fecha ya pasó: casi siempre ya se hicieron o quedaron obsoletos"><i class="ph ph-broom"></i> Descartar {{ propuestosAntiguos().length }} con fecha pasada</button>
+        }
       </div>
 
       @if (!cargado()) {
@@ -280,7 +284,18 @@ export class CommitmentsComponent {
       (!f || [c.title, c.detail, c.owner, c.counterpart, c.source_title, c.id].some((x) => (x || '').toLowerCase().includes(f))));
   });
 
+  propuestosAntiguos = computed(() => this.filtrados().filter((c) => c.status === 'propuesto' && (c.due_date || c.proposed_due || '') < this.hoy() && (c.due_date || c.proposed_due)));
+
   constructor() { this.load(); }
+
+  descartarAntiguos() {
+    const ids = this.propuestosAntiguos().map((c) => c.id);
+    if (!confirm(`¿Descartar ${ids.length} propuesto(s) con fecha anterior a hoy? Quedan en "Hechos" como descartados y se pueden reabrir.`)) return;
+    this.api.bulkCommitments(ids, 'descartado', 'Descartado en lote: fecha anterior a hoy').subscribe({
+      next: (r) => { this.toast.ok(`${r.actualizados} descartado(s)`); this.load(); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo'),
+    });
+  }
 
   ir(v: Vista) { this.vista.set(v); this.load(); }
 

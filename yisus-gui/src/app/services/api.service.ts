@@ -282,6 +282,7 @@ export class ApiService {
   updateCommitment(id: string, data: Partial<Commitment> & { note?: string }): Observable<{ item: Commitment }> { return this.http.put<any>(`${this.baseUrl}/api/commitments/${id}`, data); }
   acceptCommitment(id: string, due_date?: string | null): Observable<{ item: Commitment }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/accept`, { due_date }); }
   addCommitmentNote(id: string, text: string): Observable<{ updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notes`, { text }); }
+  bulkCommitments(ids: string[], status: CommitmentStatus, note?: string): Observable<{ actualizados: number }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/bulk`, { ids, status, note }); }
   deleteCommitment(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/commitments/${id}`); }
   getCommitmentsBackfill(): Observable<BackfillEstado> { return this.http.get<any>(`${this.baseUrl}/api/commitments/backfill`); }
   startCommitmentsBackfill(desde?: string): Observable<BackfillEstado> { return this.http.post<any>(`${this.baseUrl}/api/commitments/backfill`, { desde: desde || undefined }); }

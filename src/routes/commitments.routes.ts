@@ -28,6 +28,16 @@ export default function createCommitmentsRoutes() {
     res.json(commitmentsBackfillService.iniciar({ limite: req.body?.limite, desde: req.body?.desde }));
   });
 
+  /** Cambio de estado en lote (p. ej. descartar propuestos antiguos tras un backfill). */
+  app.post('/api/commitments/bulk', async (req, res) => {
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const status = req.body?.status as CommitmentStatus;
+    if (!ids.length || !ESTADOS.includes(status)) return res.status(400).json({ error: 'Indica ids y un estado válido' });
+    let n = 0;
+    for (const id of ids) if (await commitmentsService.actualizar(id, { status }, 'jesus', req.body?.note || 'Cambio en lote')) n++;
+    res.json({ actualizados: n });
+  });
+
   app.get('/api/commitments/search', async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (!q) return res.json({ items: [] });
