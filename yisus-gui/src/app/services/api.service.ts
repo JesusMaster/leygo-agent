@@ -65,7 +65,7 @@ export interface TaskDelivery { channel: TaskChannel; target?: string | null; }
 export interface ScheduledTask {
   id: string; message: string; autonomous: number; kind: TaskKind;
   run_at: number | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
-  status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null; delivery: TaskDelivery[];
+  status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null; delivery: TaskDelivery[]; model: string | null;
   created_at: number; updated_at: number;
   last_run_at: number | null; next_run_at: number | null; descripcion: string;
   integrada?: { key: string; titulo: string; descripcion: string };
@@ -79,7 +79,7 @@ export interface TaskRun {
 export type TaskInput = {
   message: string; autonomous: boolean | number; kind: TaskKind;
   run_at?: string | number | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
-  channel?: TaskChannel; target?: string | null; delivery?: TaskDelivery[];
+  channel?: TaskChannel; target?: string | null; delivery?: TaskDelivery[]; model?: string | null;
 };
 
 export interface CustomWebhook {
@@ -261,6 +261,7 @@ export class ApiService {
   setLlmAssignment(agent: string, a: { provider: string; model: string } | null): Observable<{ agentes: AgenteLlm[] }> {
     return this.http.put<any>(`${this.baseUrl}/api/settings/llm/assignments/${agent}`, a || {});
   }
+  getLlmCatalogo(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/catalogo`); }
   getEnv(): Observable<{ ruta: string; vars: EnvVar[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/env`); }
   saveEnv(cambios: Record<string, string | null>): Observable<{ cambiadas: string[]; requierenReinicio: string[] }> {
     return this.http.put<any>(`${this.baseUrl}/api/settings/env`, { cambios });

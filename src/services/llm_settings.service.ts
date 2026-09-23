@@ -209,6 +209,35 @@ class LlmSettingsService {
     return { provider, model: a.model };
   }
 
+  /**
+   * "<proveedor>/<modelo>" → proveedor + modelo. Entiende también los valores
+   * antiguos de los webhooks ("gemma3:12b (ollama)", "gemini-2.5-flash").
+   */
+  resolverRef(ref: string): { provider: LlmProvider; model: string } | null {
+    const v = (ref || '').trim();
+    const barra = v.indexOf('/');
+    if (barra > 0) {
+      const prov = this.getProvider(v.slice(0, barra));
+      if (prov) return { provider: prov, model: v.slice(barra + 1) };
+    }
+    if (/\(ollama\)/i.test(v) || /^(gemma|llama|qwen|mistral|phi|deepseek|gpt-oss)/i.test(v)) {
+      const prov = this.leerProviders().find((p) => p.kind === 'ollama' && p.enabled);
+      if (prov) return { provider: prov, model: v.replace(/\s*\(ollama\)\s*/i, '').trim() };
+    }
+    const gem = this.getProvider('gemini') || this.leerProviders().find((p) => p.kind === 'gemini' && p.enabled);
+    if (gem) return { provider: gem, model: v.startsWith('gemini') ? v : 'gemini-3.5-flash-lite' };
+    return null;
+  }
+
+  /** Proveedores activos con sus modelos (para selectores de la GUI). */
+  async catalogo(): Promise<Array<{ id: string; name: string; kind: ProviderKind; models: string[]; error?: string }>> {
+    const providers = this.leerProviders().filter((p) => p.enabled);
+    return Promise.all(providers.map(async (p) => {
+      try { return { id: p.id, name: p.name, kind: p.kind, models: await this.listModels(p.id) }; }
+      catch (err: any) { return { id: p.id, name: p.name, kind: p.kind, models: [], error: err?.message }; }
+    }));
+  }
+
   /** Resumen para la GUI: agente → asignación efectiva. */
   describeAssignments() {
     const asig = this.getAssignments();

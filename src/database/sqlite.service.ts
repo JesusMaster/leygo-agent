@@ -76,6 +76,7 @@ export interface ScheduledTask {
   channel: ScheduledTaskChannel;   // primer destino (compatibilidad); la lista completa está en delivery
   target: string | null;
   delivery: TaskDelivery[];        // uno o más destinos: el resultado se entrega por todos
+  model: string | null;            // "<proveedor>/<modelo>" para tareas del agente; null = el del Coordinator
   created_at: number;
   updated_at: number;
   last_run_at: number | null;
@@ -806,6 +807,7 @@ export class SqliteReminderService {
       if (!cols.includes('channel')) this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram'`);
       if (!cols.includes('target'))  this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN target TEXT`);
       if (!cols.includes('delivery')) this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN delivery TEXT`);
+      if (!cols.includes('model'))    this.db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
     } catch (err: any) {
       console.warn('⚠️ [SQLite] No se pudo migrar scheduled_tasks:', err.message);
     }
@@ -815,7 +817,7 @@ export class SqliteReminderService {
     let delivery: TaskDelivery[] = [];
     try { delivery = row.delivery ? JSON.parse(row.delivery) : []; } catch { delivery = []; }
     if (!delivery.length) delivery = [{ channel: row.channel || 'telegram', target: row.target || null }];
-    return { ...row, delivery };
+    return { ...row, delivery, model: row.model ?? null };
   }
 
   public listScheduledTasks(): ScheduledTask[] {
@@ -830,10 +832,10 @@ export class SqliteReminderService {
   public createScheduledTask(t: Omit<ScheduledTask, 'created_at' | 'updated_at' | 'last_run_at'>): ScheduledTask {
     const now = Date.now();
     this.db.prepare(`
-      INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, channel, target, delivery, created_at, updated_at, last_run_at, next_run_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      INSERT INTO scheduled_tasks (id, message, autonomous, kind, run_at, interval_minutes, time_of_day, cron_expr, status, channel, target, delivery, model, created_at, updated_at, last_run_at, next_run_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     `).run(t.id, t.message, Number(t.autonomous) || 0, t.kind, t.run_at ?? null, t.interval_minutes ?? null, t.time_of_day ?? null, t.cron_expr ?? null, t.status,
-      t.delivery?.[0]?.channel || t.channel || 'telegram', t.delivery?.[0]?.target ?? t.target ?? null, JSON.stringify(t.delivery || []), now, now, t.next_run_at ?? null);
+      t.delivery?.[0]?.channel || t.channel || 'telegram', t.delivery?.[0]?.target ?? t.target ?? null, JSON.stringify(t.delivery || []), t.model ?? null, now, now, t.next_run_at ?? null);
     return this.getScheduledTask(t.id)!;
   }
 
@@ -843,10 +845,10 @@ export class SqliteReminderService {
     const n = { ...actual, ...cambios, updated_at: Date.now() };
     this.db.prepare(`
       UPDATE scheduled_tasks SET message = ?, autonomous = ?, kind = ?, run_at = ?, interval_minutes = ?, time_of_day = ?, cron_expr = ?,
-        status = ?, channel = ?, target = ?, delivery = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
+        status = ?, channel = ?, target = ?, delivery = ?, model = ?, updated_at = ?, last_run_at = ?, next_run_at = ?
       WHERE id = ?
     `).run(n.message, Number(n.autonomous) || 0, n.kind, n.run_at ?? null, n.interval_minutes ?? null, n.time_of_day ?? null, n.cron_expr ?? null,
-      n.status, n.delivery?.[0]?.channel || n.channel || 'telegram', n.delivery?.[0]?.target ?? n.target ?? null, JSON.stringify(n.delivery || []),
+      n.status, n.delivery?.[0]?.channel || n.channel || 'telegram', n.delivery?.[0]?.target ?? n.target ?? null, JSON.stringify(n.delivery || []), n.model ?? null,
       n.updated_at, n.last_run_at ?? null, n.next_run_at ?? null, id);
     return this.getScheduledTask(id);
   }
@@ -884,7 +886,7 @@ export class SqliteReminderService {
         this.createScheduledTask({
           id: r.id, message: r.message, autonomous: 0, kind: 'once',
           run_at: r.target_time, interval_minutes: null, time_of_day: null, cron_expr: null,
-          status: 'active', channel: 'telegram', target: null, delivery: [{ channel: 'telegram' }], next_run_at: r.target_time,
+          status: 'active', channel: 'telegram', target: null, delivery: [{ channel: 'telegram' }], model: null, next_run_at: r.target_time,
         });
         n++;
       }

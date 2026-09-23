@@ -8,6 +8,7 @@ import createApiRoutes from './routes/index.js';
 import { Runner, InMemoryArtifactService, InMemoryMemoryService } from '@google/adk';
 import { buildChannelCoordinator } from './agents/agent.js';
 import { buildPublicCoordinator } from './agents/public.agent.js';
+import { conModelo } from './agents/llm/model_factory.js';
 import { RedisSessionService } from './services/redis_session.service.js';
 import { telegramBotService } from './services/telegram_bot.service.js';
 import { schedulerService } from './services/scheduler.service.js';
@@ -99,7 +100,7 @@ server.start().then(async () => {
 
     // Las tareas autónomas corren con el mismo coordinator que Telegram (mismas
     // herramientas, mismo 2FA) y se contabilizan en el canal "system".
-    scheduledTasksService.setAgentRunner(async (instruccion, taskId) => {
+    scheduledTasksService.setAgentRunner(async (instruccion, taskId, modelo) => {
         const appName = APP_NAME;
         const userId = 'jesus';
         const sessionId = `task-${taskId}`;
@@ -112,12 +113,15 @@ server.start().then(async () => {
         beginUsageScope('system', sessionId, `[Tarea] ${instruccion.slice(0, 80)}`);
         let texto = '';
         let errorModelo = '';
-        for await (const event of telegramRunner.runAsync({ userId, sessionId: session.id, newMessage: { role: 'user', parts: [{ text: prompt }] } })) {
-            if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
-            for (const part of event.content?.parts || []) {
-                if (part.text && event.author !== 'user') texto += part.text;
+        // La tarea puede fijar su propio proveedor/modelo para el Coordinator (como los webhooks).
+        await conModelo('Coordinator', modelo, async () => {
+            for await (const event of telegramRunner.runAsync({ userId, sessionId: session.id, newMessage: { role: 'user', parts: [{ text: prompt }] } })) {
+                if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
+                for (const part of event.content?.parts || []) {
+                    if (part.text && event.author !== 'user') texto += part.text;
+                }
             }
-        }
+        });
         flushUsageScope().catch(() => {});
         if (!texto.trim() && errorModelo) throw new Error(`El modelo no pudo responder: ${errorModelo}`);
         return texto.trim() || 'Listo. La tarea se ejecutó sin respuesta adicional.';

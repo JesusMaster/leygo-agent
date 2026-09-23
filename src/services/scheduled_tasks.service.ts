@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskRun, ScheduledTaskChannel, TaskDelivery } from '../database/sqlite.service.js';
 import { telegramBotService } from './telegram_bot.service.js';
 import { messageFormatter } from '../utils/message_formatter.js';
+import { llmSettingsService } from './llm_settings.service.js';
 
 /**
  * Tareas programadas, al estilo de las "Tareas Programadas" de Leygo.
@@ -15,7 +16,7 @@ import { messageFormatter } from '../utils/message_formatter.js';
  * Los recordatorios de la tabla vieja se migran al arrancar.
  */
 
-type RunAgent = (instruction: string, taskId: string) => Promise<string>;
+type RunAgent = (instruction: string, taskId: string, model?: string | null) => Promise<string>;
 
 /**
  * Tarea integrada: rutina del sistema (Morning Digest, sync de Meet…) que se
@@ -108,7 +109,7 @@ export class ScheduledTasksService {
   public create(input: {
     message: string; autonomous: boolean | number; kind: ScheduledTaskKind;
     run_at?: number | string | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null;
-    channel?: ScheduledTaskChannel | null; target?: string | null; delivery?: TaskDelivery[] | null;
+    channel?: ScheduledTaskChannel | null; target?: string | null; delivery?: TaskDelivery[] | null; model?: string | null;
   }): ScheduledTask {
     const base = this.normalizar(input);
     const entrega = this.normalizarEntregas(input.delivery, input.channel, input.target);
@@ -117,7 +118,7 @@ export class ScheduledTasksService {
     const id = Math.random().toString(36).substring(2, 9);
     const tarea = sqliteReminderService.createScheduledTask({
       id, message: input.message.trim(), autonomous: modo, kind: input.kind,
-      ...base, ...entrega, status: 'active', next_run_at: this.proximaEjecucion({ ...base, kind: input.kind } as any),
+      ...base, ...entrega, model: this.normalizarModelo(input.model), status: 'active', next_run_at: this.proximaEjecucion({ ...base, kind: input.kind } as any),
     });
     this.programar(tarea);
     return tarea;
@@ -126,7 +127,7 @@ export class ScheduledTasksService {
   public update(id: string, cambios: Partial<{
     message: string; autonomous: boolean | number; kind: ScheduledTaskKind;
     run_at: number | string | null; interval_minutes: number | null; time_of_day: string | null; cron_expr: string | null;
-    status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null; delivery: TaskDelivery[];
+    status: 'active' | 'paused'; channel: ScheduledTaskChannel; target: string | null; delivery: TaskDelivery[]; model: string | null;
   }>): ScheduledTask | null {
     const actual = sqliteReminderService.getScheduledTask(id);
     if (!actual) return null;
@@ -152,6 +153,7 @@ export class ScheduledTasksService {
     const actualizada = sqliteReminderService.updateScheduledTask(id, {
       message,
       autonomous: modo,
+      model: cambios.model !== undefined ? this.normalizarModelo(cambios.model) : actual.model,
       kind, ...horario, ...entrega, status,
       next_run_at: status === 'active' ? this.proximaEjecucion({ ...horario, kind } as any) : null,
     });
@@ -199,7 +201,7 @@ export class ScheduledTasksService {
         else result = '(sin novedades: no se envió nada)';
       } else if (t.autonomous) {
         if (!this.runAgent) throw new Error('El agente no está disponible para ejecutar tareas autónomas.');
-        result = await this.runAgent(t.message, t.id);
+        result = await this.runAgent(t.message, t.id, t.model);
         fallos = await this.entregar(t, result, true);
       } else {
         result = t.message;
@@ -413,6 +415,16 @@ export class ScheduledTasksService {
       (tmp as any).destroy?.();
       return next ? next.getTime() : null;
     } catch { return null; }
+  }
+
+  /** "<proveedor>/<modelo>" válido o null (= el modelo del Coordinator en Ajustes). */
+  private normalizarModelo(v?: string | null): string | null {
+    const s = (v || '').trim();
+    if (!s) return null;
+    const barra = s.indexOf('/');
+    if (barra <= 0 || barra === s.length - 1) throw new Error('El modelo debe ir como "<proveedor>/<modelo>" (p. ej. gemini/gemini-3.8-flash).');
+    if (!llmSettingsService.getProvider(s.slice(0, barra))) throw new Error(`Proveedor desconocido: ${s.slice(0, barra)}. Configúralo en Ajustes → Proveedores LLM.`);
+    return s;
   }
 
   private describir(t: ScheduledTask): string {

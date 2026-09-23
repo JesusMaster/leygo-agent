@@ -104,34 +104,12 @@ export class CustomWebhookService {
    * El campo `modelo` del webhook se guarda como "<proveedor>/<modelo>".
    */
   public async listModels(): Promise<{ providers: Array<{ id: string; name: string; kind: string; models: string[]; error?: string }> }> {
-    const providers = llmSettingsService.listProviders().filter((p) => p.enabled);
-    const out = await Promise.all(providers.map(async (p) => {
-      try {
-        return { id: p.id, name: p.name, kind: p.kind, models: await llmSettingsService.listModels(p.id) };
-      } catch (err: any) {
-        return { id: p.id, name: p.name, kind: p.kind, models: [], error: err?.message };
-      }
-    }));
-    return { providers: out };
+    return { providers: await llmSettingsService.catalogo() };
   }
 
-  /** "<proveedor>/<modelo>" → proveedor + modelo. Entiende los valores antiguos. */
+  /** "<proveedor>/<modelo>" → proveedor + modelo (entiende los valores antiguos). */
   public resolverModelo(modelo: string): { provider: LlmProvider; model: string } | null {
-    const v = (modelo || '').trim();
-    const barra = v.indexOf('/');
-    if (barra > 0) {
-      const prov = llmSettingsService.getProvider(v.slice(0, barra));
-      if (prov) return { provider: prov, model: v.slice(barra + 1) };
-    }
-    // Formato antiguo: "gemma3:12b (ollama)" o "gemini-2.5-flash"
-    if (/\(ollama\)/i.test(v) || /^(gemma|llama|qwen|mistral|phi|deepseek|gpt-oss)/i.test(v)) {
-      const prov = llmSettingsService.listProviders().find((p) => p.kind === 'ollama' && p.enabled);
-      const provFull = prov && llmSettingsService.getProvider(prov.id);
-      if (provFull) return { provider: provFull, model: v.replace(/\s*\(ollama\)\s*/i, '').trim() };
-    }
-    const gem = llmSettingsService.getProvider('gemini') || llmSettingsService.listProviders().filter((p) => p.kind === 'gemini' && p.enabled).map((p) => llmSettingsService.getProvider(p.id)!)[0];
-    if (gem) return { provider: gem, model: v.startsWith('gemini') ? v : 'gemini-3.5-flash-lite' };
-    return null;
+    return llmSettingsService.resolverRef(modelo);
   }
 
   public getLogs(webhookId?: string, limit: number = 20): CustomWebhookLog[] {

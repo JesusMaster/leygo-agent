@@ -64,6 +64,11 @@ export default function createSettingsRoutes() {
     } catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 
+  /** Proveedores activos con sus modelos: para los selectores de tareas y webhooks. */
+  app.get('/api/settings/llm/catalogo', async (_req, res) => {
+    res.json({ providers: await llmSettingsService.catalogo() });
+  });
+
   app.get('/api/settings/llm/agentes', (_req, res) => {
     res.json({ agentes: AGENTES_LLM });
   });

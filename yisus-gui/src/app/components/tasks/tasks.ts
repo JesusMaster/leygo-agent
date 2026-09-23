@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService, TareaIntegrada, ScheduledTask, TaskRun, TaskKind, TaskInput, TaskChannel, TaskDelivery } from '../../services/api.service';
+import { ModelPickerComponent } from '../model-picker/model-picker';
 import { DeliveryPickerComponent } from './delivery-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
@@ -12,7 +13,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
  */
 @Component({
   selector: 'app-tasks',
-  imports: [FormsModule, FriendlyDatePipe, DeliveryPickerComponent],
+  imports: [FormsModule, FriendlyDatePipe, DeliveryPickerComponent, ModelPickerComponent],
   template: `
     <div class="page">
       <div class="page-head">
@@ -44,6 +45,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
               @for (d of t.delivery; track d.channel + (d.target || '')) {
                 <span class="tb chan" [title]="d.target || ''"><i class="ph" [class]="'ph ' + iconoCanal(d.channel)"></i> {{ etiquetaCanal(d.channel) }}</span>
               }
+              @if (t.autonomous === 1 && t.model) { <span class="tb model" [title]="t.model"><i class="ph ph-cpu"></i> {{ modeloCorto(t.model) }}</span> }
               @if (t.status === 'paused') { <span class="badge warn">PAUSADA</span> }
               @if (t.status === 'done') { <span class="badge dim">EJECUTADA</span> }
               </div>
@@ -85,7 +87,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                       @case ('cron') { <label class="field"><span>Expresión cron</span><input type="text" class="mono" [(ngModel)]="editForm.cron_expr" placeholder="0 9 * * 1-5" /></label> }
                     }
                   </div>
-                  <div class="field"><span>Entregar por</span></div>
+                  @if (t.autonomous === 1) {
+                    <div class="field"><span>Modelo que procesa la tarea</span></div>
+                    <app-model-picker [value]="editForm.model" (valueChange)="editForm.model = $event" />
+                  }
+                  <div class="field" style="margin-top:12px"><span>Entregar por</span></div>
                   <app-delivery-picker [value]="editForm.delivery" (valueChange)="editForm.delivery = $event" />
                   <div class="row" style="margin-top:12px">
                     <button class="btn-secondary" (click)="editando.set(null)">Cancelar</button>
@@ -166,6 +172,11 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                 <input type="checkbox" [(ngModel)]="form.autonomous" />
                 <span><strong>Es una acción autónoma</strong> (el agente trabajará en esto con sus herramientas y te reporta el resultado)</span>
               </label>
+              @if (form.autonomous) {
+                <div class="field"><span>Modelo que procesa la tarea</span></div>
+                <app-model-picker [value]="form.model" (valueChange)="form.model = $event" />
+                <small class="hint" style="display:block;margin:-6px 0 14px">Por defecto usa el modelo del Coordinator (Ajustes → Modelos por agente). Cámbialo si esta tarea merece uno más barato o más capaz.</small>
+              }
             }
 
             <div class="dos-col">
@@ -211,6 +222,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
   `,
   styles: [`
     .tb.sys { background: rgba(168,85,247,.14); color: #c084fc; }
+    .tb.model { background: rgba(56,189,248,.14); color: #7dd3fc; text-transform: none; letter-spacing: 0; }
     .task { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; transition: border-color .15s; }
     .task:hover { border-color: var(--accent-primary); }
     .task.paused { opacity: .85; }
@@ -293,7 +305,7 @@ export class TasksComponent {
   items = signal<ScheduledTask[]>([]);
   cargado = signal(false);
   editando = signal<string | null>(null);
-  editForm: { message: string; delivery: TaskDelivery[]; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string } = { message: '', delivery: [{ channel: 'telegram' }], kind: 'daily', run_at: '', interval_minutes: null, time_of_day: '09:00', cron_expr: '' };
+  editForm: { message: string; delivery: TaskDelivery[]; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; model: string } = { message: '', delivery: [{ channel: 'telegram' }], kind: 'daily', run_at: '', interval_minutes: null, time_of_day: '09:00', cron_expr: '', model: '' };
   integradas = signal<TareaIntegrada[]>([]);
   /** Rutinas del sistema que no tienen tarea (p. ej. si se borró): se pueden volver a programar */
   integradasDisponibles = computed(() => this.integradas().filter((i) => !this.items().some((t) => t.autonomous === 2 && t.message === i.key)));
@@ -304,7 +316,7 @@ export class TasksComponent {
 
   modal = signal(false);
   guardando = signal(false);
-  form: { message: string; autonomous: boolean; integrada: string; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; delivery: TaskDelivery[] } = this.formVacio();
+  form: { message: string; autonomous: boolean; integrada: string; model: string; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; delivery: TaskDelivery[] } = this.formVacio();
 
   constructor() { this.load(); }
 
@@ -316,6 +328,7 @@ export class TasksComponent {
   }
 
   // ─── Presentación ────────────────────────────────────────────────────
+  modeloCorto(m: string) { const i = m.indexOf('/'); return i > 0 ? m.slice(i + 1) : m; }
   descripcionIntegrada(key: string) { return this.integradas().find((i) => i.key === key)?.descripcion || ''; }
   titulo(t: ScheduledTask): string {
     if (t.integrada) return t.integrada.titulo;
@@ -355,7 +368,7 @@ export class TasksComponent {
   editar(t: ScheduledTask) {
     this.editForm = {
       message: t.message, delivery: (t.delivery || []).map((d) => ({ ...d })), kind: t.kind,
-      run_at: t.run_at ? this.aLocal(t.run_at) : '', interval_minutes: t.interval_minutes, time_of_day: t.time_of_day || '09:00', cron_expr: t.cron_expr || '',
+      run_at: t.run_at ? this.aLocal(t.run_at) : '', interval_minutes: t.interval_minutes, time_of_day: t.time_of_day || '09:00', cron_expr: t.cron_expr || '', model: t.model || '',
     };
     this.editando.set(t.id);
   }
@@ -384,7 +397,7 @@ export class TasksComponent {
   private limpia(d: TaskDelivery[]) { return d.map((x) => ({ channel: x.channel, target: x.channel === 'telegram' ? null : ((x.target || '').trim() || null) })); }
   guardarEdicion(t: ScheduledTask) {
     const f = this.editForm;
-    this.api.updateTask(t.id, { ...(t.autonomous === 2 ? {} : { message: f.message.trim() }), delivery: this.limpia(f.delivery), ...this.horarioDe(f) }).subscribe({
+    this.api.updateTask(t.id, { ...(t.autonomous === 2 ? {} : { message: f.message.trim() }), ...(t.autonomous === 1 ? { model: f.model || null } : {}), delivery: this.limpia(f.delivery), ...this.horarioDe(f) }).subscribe({
       next: () => { this.editando.set(null); this.load(); this.toast.ok('Tarea actualizada'); },
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
     });
@@ -413,7 +426,7 @@ export class TasksComponent {
   abierto(r: TaskRun) { return this.abiertos.has(`${r.id}-${r.started_at}`); }
 
   // ─── Crear ───────────────────────────────────────────────────────────
-  private formVacio() { return { message: '', autonomous: false, integrada: '', kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', delivery: [{ channel: 'telegram' as TaskChannel }] as TaskDelivery[] }; }
+  private formVacio() { return { message: '', autonomous: false, integrada: '', model: '', kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', delivery: [{ channel: 'telegram' as TaskChannel }] as TaskDelivery[] }; }
   abrirNueva() { this.form = this.formVacio(); this.modal.set(true); }
   cerrarModal() { if (!this.guardando()) this.modal.set(false); }
 
@@ -427,7 +440,7 @@ export class TasksComponent {
     const f = this.form;
     const datos: TaskInput = f.integrada
       ? { message: f.integrada, autonomous: 2, kind: f.kind, delivery: this.limpia(f.delivery), ...this.horarioDe(f) }
-      : { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind, delivery: this.limpia(f.delivery), ...this.horarioDe(f) };
+      : { message: f.message.trim(), autonomous: f.autonomous, kind: f.kind, delivery: this.limpia(f.delivery), ...(f.autonomous && f.model ? { model: f.model } : {}), ...this.horarioDe(f) };
     this.guardando.set(true);
     this.api.createTask(datos).subscribe({
       next: () => { this.guardando.set(false); this.modal.set(false); this.load(); this.toast.ok('Tarea programada'); },

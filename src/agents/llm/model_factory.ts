@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { BaseLlm } from '@google/adk';
 import { TrackedGemini } from '../tracked_gemini.js';
 import { OpenAiCompatibleLlm } from './openai_compatible_llm.js';
@@ -10,6 +11,21 @@ import { aplicarPresupuesto } from './context_budget.js';
  * configuración, así que cambiar la key o la URL desde la GUI crea uno nuevo.
  */
 const cache = new Map<string, BaseLlm>();
+
+/**
+ * Override de modelo por ejecución: una tarea programada o un webhook pueden
+ * pedir que un agente (normalmente el Coordinator) use otro proveedor/modelo
+ * solo durante ese turno, sin tocar la asignación global de Ajustes.
+ */
+const overrides = new AsyncLocalStorage<Map<string, { provider: LlmProvider; model: string }>>();
+
+export function conModelo<T>(agentName: string, ref: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  const r = ref ? llmSettingsService.resolverRef(ref) : null;
+  if (!r) return fn();
+  const mapa = new Map(overrides.getStore() || []);
+  mapa.set(agentName, r);
+  return overrides.run(mapa, fn);
+}
 
 export function construirLlm(provider: LlmProvider, model: string, agentName: string): BaseLlm {
   const baseUrl = llmSettingsService.baseUrlEfectiva(provider);
@@ -59,7 +75,7 @@ export class DynamicLlm extends BaseLlm {
 
   /** Cliente efectivo en este momento. */
   actual(): BaseLlm {
-    const r = llmSettingsService.resolve(this.agentName);
+    const r = overrides.getStore()?.get(this.agentName) || llmSettingsService.resolve(this.agentName);
     if (!r) return this.fallback;
     try {
       return construirLlm(r.provider, r.model, this.agentName);
