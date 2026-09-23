@@ -118,7 +118,8 @@ export function neutralizarAdjuntosPrevios(contents: any[]): any[] {
     const parts = c.parts.map((p: any) => {
       if (typeof p?.text === 'string' && MARCADOR_ADJUNTO.test(p.text)) {
         MARCADOR_ADJUNTO.lastIndex = 0; cambio = true;
-        return { ...p, text: p.text.replace(MARCADOR_ADJUNTO, '[imagen/archivo ya entregado en ese turno]') };
+        // Se borra sin dejar rastro: cualquier texto sustituto termina copiado por el modelo ("[imagen ya entregada]")
+        return { ...p, text: p.text.replace(MARCADOR_ADJUNTO, '').replace(/\n{3,}/g, '\n\n').trim() || '(imagen enviada)' };
       }
       MARCADOR_ADJUNTO.lastIndex = 0;
       const fr = p?.functionResponse;
@@ -126,7 +127,7 @@ export function neutralizarAdjuntosPrevios(contents: any[]): any[] {
         const json = JSON.stringify(fr.response);
         if (MARCADOR_ADJUNTO.test(json)) {
           MARCADOR_ADJUNTO.lastIndex = 0; cambio = true;
-          return { ...p, functionResponse: { ...fr, response: JSON.parse(json.replace(MARCADOR_ADJUNTO, '[ya entregado]')) } };
+          return { ...p, functionResponse: { ...fr, response: JSON.parse(json.replace(MARCADOR_ADJUNTO, '')) } };
         }
         MARCADOR_ADJUNTO.lastIndex = 0;
       }
