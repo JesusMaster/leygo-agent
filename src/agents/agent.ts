@@ -157,7 +157,7 @@ export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram'
     // Instrucción dinámica: la sección de agentes personalizados cambia sin reiniciar.
     // La fecha va al FINAL para no invalidar el caché de prompt (el prefijo largo queda estable).
     instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : '') + '\n\n' + fechaHoraActual(),
-    tools: [...resolveTools(toolNames), ...(canal ? customAgentsService.toolsParaCanal(canal) : [])],
+    tools: customAgentsService.unirSinDuplicar(resolveTools(toolNames), canal ? customAgentsService.toolsParaCanal(canal) : []),
   });
   if (canal) registrarCoordinadorVivo(canal, agente);
   return agente;

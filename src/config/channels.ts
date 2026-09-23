@@ -3,6 +3,7 @@ import path from 'path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { expandToolSpec, TOOLS_DISPONIBLES_A2A_POR_DEFECTO } from '../agents/tool_catalog.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
+import { customAgentsService } from '../agents/custom/custom_agents.service.js';
 
 /**
  * Configuración de qué herramientas ve cada canal.
@@ -100,7 +101,10 @@ function resolveTokenValue(raw: string): string | null {
 /** Herramientas que el canal A2A ofrece (techo del canal, no permiso del token) */
 export function getToolsDisponiblesA2A(): string[] {
   const cfg = loadConfig();
-  return expandToolSpec(cfg.a2a?.disponibles || TOOLS_DISPONIBLES_A2A_POR_DEFECTO);
+  const base = expandToolSpec(cfg.a2a?.disponibles || TOOLS_DISPONIBLES_A2A_POR_DEFECTO);
+  // Los agentes personalizados con "a2a" en su manifiesto también forman parte del techo
+  // (aunque no estén marcados en Canales y tools), para que un token pueda recibirlos.
+  return [...new Set([...base, ...customAgentsService.nombresParaCanal('a2a')])];
 }
 
 /**

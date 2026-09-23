@@ -313,6 +313,30 @@ class CustomAgentsService {
     return [...this.registro.values()].filter((r) => r.manifest.enabled && r.manifest.channels.includes(canal)).map((r) => r.tool);
   }
 
+  /** Nombres de los agentes personalizados habilitados para un canal (para techos de permisos). */
+  nombresParaCanal(canal: CanalAgente): string[] {
+    this.cargarTodo();
+    return [...this.registro.values()].filter((r) => r.manifest.enabled && r.manifest.channels.includes(canal)).map((r) => r.manifest.name);
+  }
+
+  /**
+   * Une las herramientas del canal (config/channels.json) con las de los agentes
+   * personalizados, sin repetir nombres: un agente puede venir por las dos vías
+   * (marcado en "Canales y tools" Y con el canal en su manifiesto) y el ADK aborta
+   * con "Duplicate tool name".
+   */
+  unirSinDuplicar(base: any[], extra: any[]): any[] {
+    const vistos = new Set<string>();
+    const out: any[] = [];
+    for (const t of [...base, ...extra]) {
+      const n = String(t?.name || '');
+      if (n && vistos.has(n)) continue;
+      if (n) vistos.add(n);
+      out.push(t);
+    }
+    return out;
+  }
+
   /** Texto de ruteo que el Coordinator agrega a su instrucción (dinámico). */
   seccionRuteo(canal: CanalAgente): string {
     const lista = this.list().filter((m) => m.enabled && m.channels.includes(canal));

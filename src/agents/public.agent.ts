@@ -85,7 +85,7 @@ export function buildPublicCoordinator(toolNames?: string[]) {
   model: modelFor('public_coordinator', 'gemini-3.8-flash'),
   description: 'Interfaz pública de Yisus para agentes externos (A2A): arquitectura de Apprecio y preguntas frecuentes de la plataforma.',
   instruction: () => base + customAgentsService.seccionRuteo('a2a') + '\n\n' + fechaHoraActual(),
-    tools: [...resolveTools(nombres).map(envolverConPermisoA2A), ...customAgentsService.toolsParaCanal('a2a').map(envolverConPermisoA2A)],
+    tools: customAgentsService.unirSinDuplicar(resolveTools(nombres), customAgentsService.toolsParaCanal('a2a')).map(envolverConPermisoA2A),
   });
   registrarCoordinadorVivo('a2a', agente, envolverConPermisoA2A);
   return agente;
