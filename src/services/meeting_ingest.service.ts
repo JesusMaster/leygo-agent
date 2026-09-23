@@ -122,7 +122,7 @@ export class MeetingIngestService {
   "participants": ["Nombre de persona 1", "Nombre de persona 2"],
   "summary": "Resumen ejecutivo de los temas tratados (2 a 4 oraciones)",
   "agreements": ["Acuerdo o decisión 1", "Acuerdo o compromiso 2"],
-  "tasks": [{"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}]
+  "tasks": [{"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "context": "1-2 frases: de qué se trata y por qué surgió", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}]
 }
 Solo pon en "tasks" compromisos accionables con responsable claro (no decisiones ni contexto).
 

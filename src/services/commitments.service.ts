@@ -358,8 +358,9 @@ export function parsearTareas(tasks: any): { strings: string[]; detectados: Dete
       const counterpart = String(t.counterpart || t.contraparte || '').trim() || null;
       const due = /^\d{4}-\d{2}-\d{2}$/.test(String(t.due || t.fecha || '')) ? String(t.due || t.fecha) : null;
       const priority = ['alta', 'media', 'baja'].includes(t.priority) ? t.priority : undefined;
+      const detail = String(t.context || t.contexto || t.detail || '').trim() || null;
       strings.push(`${owner || 'Jesús'}: ${task}${due ? ` (para ${due})` : ''}`);
-      detectados.push({ title: task, owner, counterpart, due, priority });
+      detectados.push({ title: task, detail, owner, counterpart, due, priority });
     } else if (typeof t === 'string' && t.trim()) {
       strings.push(t.trim());
       const m = t.match(/^\s*([^:]{2,40}):\s*(.+)$/);

@@ -284,6 +284,8 @@ export class ApiService {
   addCommitmentNote(id: string, text: string): Observable<{ updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notes`, { text }); }
   notifyCommitment(id: string, delivery: TaskDelivery[], message: string): Observable<{ enviados: string[]; fallos: string[]; updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notify`, { delivery, message }); }
   getCommitmentDefaultMessage(id: string, status?: string): Observable<{ message: string }> { return this.http.get<any>(`${this.baseUrl}/api/commitments/${id}/default-message${status ? '?status=' + status : ''}`); }
+  enrichCommitments(): Observable<any> { return this.http.post<any>(`${this.baseUrl}/api/commitments/enrich`, {}); }
+  getCommitmentsEnrich(): Observable<{ corriendo: boolean; total: number; hechos: number; sinFuente: number; error: string | null }> { return this.http.get<any>(`${this.baseUrl}/api/commitments/enrich`); }
   bulkCommitments(ids: string[], status: CommitmentStatus, note?: string): Observable<{ actualizados: number }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/bulk`, { ids, status, note }); }
   deleteCommitment(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/commitments/${id}`); }
   getCommitmentsBackfill(): Observable<BackfillEstado> { return this.http.get<any>(`${this.baseUrl}/api/commitments/backfill`); }

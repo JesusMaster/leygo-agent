@@ -26,6 +26,7 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
           <p class="sub">Lo que debes y lo que te deben, detectado en Chat, Gmail y Meet o anotado a mano. Los propuestos esperan tu visto bueno; el aviso diario se configura en <a routerLink="/tasks">Tareas programadas</a> ("Aviso de compromisos").</p>
         </div>
         <div class="row">
+          <button class="btn-secondary" (click)="completarContexto()" [disabled]="enriqueciendo()" title="Escribe 1-2 frases de contexto a los compromisos que no lo tienen, desde su reunión o hilo de origen"><i class="ph" [class.ph-text-align-left]="!enriqueciendo()" [class.ph-spinner]="enriqueciendo()"></i> Completar contexto</button>
           <button class="btn-secondary" (click)="abrirBackfill()" title="Importar desde la memoria episódica"><i class="ph ph-clock-counter-clockwise"></i> Backfill</button>
           <button class="btn-primary" (click)="abrirNuevo()"><i class="ph ph-plus"></i> Nuevo</button>
         </div>
@@ -111,7 +112,8 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 <span class="spacer"></span>
                 <code class="id">{{ c.id }}</code>
               </div>
-              @if (c.detail) { <div class="cm-detail">{{ c.detail }}</div> }
+              @if (c.detail) { <div class="cm-detail"><i class="ph ph-info"></i><span>{{ c.detail }}</span></div> }
+              @else if (c.source_type && c.source_type !== 'manual') { <div class="cm-detail vacio"><i class="ph ph-info"></i><span>Sin contexto todavía — usa "Completar contexto" arriba.</span></div> }
 
               @if (abierto() === c.id) {
                 <div class="detalle">
@@ -265,7 +267,9 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .con, .src { display: inline-flex; align-items: center; gap: 5px; }
     .src { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .id { font-size: 11px; color: var(--text-dim); }
-    .cm-detail { margin-top: 8px; font-size: 13.5px; color: var(--text-dim); white-space: pre-wrap; }
+    .cm-detail { margin-top: 8px; font-size: 13.5px; color: var(--text-main); white-space: pre-wrap; display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; background: var(--bg-main); border-left: 3px solid var(--accent-primary); }
+    .cm-detail i { color: var(--accent-primary); margin-top: 2px; flex-shrink: 0; }
+    .cm-detail.vacio { color: var(--text-dim); border-left-color: var(--border-light); font-style: italic; }
     .detalle { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border-light); }
     .campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
     .campos .detalle-txt { grid-column: 1 / -1; }
@@ -297,6 +301,8 @@ export class CommitmentsComponent {
   backfill = signal<BackfillEstado | null>(null);
   guardando = signal(false);
   enviando = signal(false);
+  enriqueciendo = signal(false);
+  private pollEnrich: any = null;
   cierre = signal<{ c: Commitment; status: CommitmentStatus | null; message: string; delivery: TaskDelivery[] } | null>(null);
   notaNueva = '';
   backfillDesde = '';
@@ -422,6 +428,19 @@ export class CommitmentsComponent {
     this.api.createCommitment({ title: f.title.trim(), detail: f.detail.trim() || null, owner: f.owner.trim() || undefined, counterpart: f.counterpart.trim() || null, due_date: f.due_date || null, priority: f.priority } as any).subscribe({
       next: (r) => { this.guardando.set(false); this.modal.set(false); this.toast.ok(r.item.due_date ? `Registrado para el ${r.item.due_date}` : `Registrado; fecha sugerida ${r.item.proposed_due}`); this.vista.set('abiertos'); this.load(); },
       error: (e) => { this.guardando.set(false); this.toast.error(e?.error?.error || 'No se pudo crear'); },
+    });
+  }
+
+  completarContexto() {
+    this.enriqueciendo.set(true);
+    this.api.enrichCommitments().subscribe({
+      next: () => {
+        clearInterval(this.pollEnrich);
+        this.pollEnrich = setInterval(() => this.api.getCommitmentsEnrich().subscribe({ next: (e) => {
+          if (!e.corriendo) { clearInterval(this.pollEnrich); this.enriqueciendo.set(false); this.toast.ok(`Contexto completado en ${e.hechos} compromiso(s)${e.sinFuente ? ` · ${e.sinFuente} sin fuente` : ''}`); this.load(); }
+        } }), 3000);
+      },
+      error: (e) => { this.enriqueciendo.set(false); this.toast.error(e?.error?.error || 'No se pudo'); },
     });
   }
 

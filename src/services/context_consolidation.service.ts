@@ -81,7 +81,7 @@ REGLAS ESTRICTAS DE FILTRADO:
        "Decisión concreta 2..."
      ],
      "tasks": [
-       {"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}
+       {"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "context": "1-2 frases: de qué se trata y por qué surgió (el problema, el proyecto, qué se espera)", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}
      ],
      "summary": "Resumen ejecutivo de 2 a 4 oraciones sobre el contexto y la conclusión alcanzada."
    }

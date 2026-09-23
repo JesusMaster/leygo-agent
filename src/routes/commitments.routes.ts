@@ -2,7 +2,7 @@ import { Router } from 'express';
 import express from 'express';
 import { adminGuard } from './admin_guard.js';
 import { commitmentsService } from '../services/commitments.service.js';
-import { commitmentsBackfillService } from '../services/commitments_backfill.service.js';
+import { commitmentsBackfillService, commitmentsEnrichService } from '../services/commitments_backfill.service.js';
 import type { CommitmentStatus } from '../database/sqlite.service.js';
 
 const ESTADOS: CommitmentStatus[] = ['propuesto', 'pendiente', 'en_curso', 'hecho', 'cancelado', 'descartado'];
@@ -37,6 +37,10 @@ export default function createCommitmentsRoutes() {
     for (const id of ids) if (await commitmentsService.actualizar(id, { status }, 'jesus', req.body?.note || 'Cambio en lote')) n++;
     res.json({ actualizados: n });
   });
+
+  /** Completa el contexto (detail) de los compromisos que no lo tienen, desde su fuente. */
+  app.get('/api/commitments/enrich', (_req, res) => res.json(commitmentsEnrichService.estado));
+  app.post('/api/commitments/enrich', (_req, res) => res.json(commitmentsEnrichService.iniciar()));
 
   app.get('/api/commitments/search', async (req, res) => {
     const q = String(req.query.q || '').trim();
