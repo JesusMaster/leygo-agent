@@ -3,7 +3,7 @@ import { LlmAgent } from '@google/adk';
 import { modelFor } from './llm/model_factory.js';
 import { resolveTools } from './tool_catalog.js';
 import { envolverConPermisoA2A } from './a2a_guard.js';
-import { fechaHoraActual } from '../utils/fecha.js';
+import { NOTA_FECHA } from '../utils/fecha.js';
 import { customAgentsService, registrarCoordinadorVivo } from './custom/custom_agents.service.js';
 import { getToolsDisponiblesA2A } from '../config/channels.js';
 
@@ -84,7 +84,7 @@ export function buildPublicCoordinator(toolNames?: string[]) {
   name: 'Yisus',
   model: modelFor('public_coordinator', 'gemini-3.8-flash'),
   description: 'Interfaz pública de Yisus para agentes externos (A2A): arquitectura de Apprecio y preguntas frecuentes de la plataforma.',
-  instruction: () => base + customAgentsService.seccionRuteo('a2a') + '\n\n' + 'ADJUNTOS: si una herramienta devuelve marcadores como [[adjunto:abc123…]], cópialos tal cual en tu respuesta; el canal los convierte en enlaces.\n' + fechaHoraActual(),
+  instruction: () => base + customAgentsService.seccionRuteo('a2a') + '\n\n' + 'ADJUNTOS: si una herramienta devuelve marcadores como [[adjunto:abc123…]], cópialos tal cual en tu respuesta; el canal los convierte en enlaces.\n' + NOTA_FECHA,
     tools: customAgentsService.unirSinDuplicar(resolveTools(nombres), customAgentsService.toolsParaCanal('a2a')).map(envolverConPermisoA2A),
   });
   registrarCoordinadorVivo('a2a', agente, envolverConPermisoA2A);

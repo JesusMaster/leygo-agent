@@ -5,6 +5,7 @@ import { OpenAiCompatibleLlm } from './openai_compatible_llm.js';
 import { AnthropicLlm } from './anthropic_llm.js';
 import { llmSettingsService, type LlmProvider } from '../../services/llm_settings.service.js';
 import { aplicarPresupuesto } from './context_budget.js';
+import { currentUsageScope } from '../../utils/usage_collector.js';
 
 /**
  * Construye el cliente concreto para un proveedor + modelo. Se cachea por
@@ -89,7 +90,7 @@ export class DynamicLlm extends BaseLlm {
     const llm = this.actual();
     if (llmRequest && typeof llmRequest === 'object') {
       llmRequest.model = llm.model;
-      const r = aplicarPresupuesto(llmRequest, this.agentName);
+      const r = aplicarPresupuesto(llmRequest, this.agentName, currentUsageScope()?.threadId);
       if (r.antes !== r.despues) {
         console.log(`✂️  [LLM] ${this.agentName}: contexto ${(r.antes / 1000).toFixed(0)}k → ${(r.despues / 1000).toFixed(0)}k chars${r.recortados ? ` (${r.recortados} mensajes antiguos fuera)` : ''}`);
       }

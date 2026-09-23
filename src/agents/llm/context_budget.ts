@@ -27,7 +27,7 @@ const TOPE_RESULT_DEFAULT = 12_000;
 
 /** Ventana de historial por agente, en caracteres del JSON de `contents`. */
 export const VENTANA_POR_AGENTE: Record<string, number> = {
-  Coordinator: 160_000,        // ≈ 45k tokens: conversación larga pero acotada
+  Coordinator: 90_000,         // ≈ 25k tokens: lo demás vive en la memoria episódica; cada turno paga este historial completo
   public_coordinator: 100_000,
   account_agent: 60_000,       // ≈ 17k tokens: correos y chats recientes
   knowledge_agent: 40_000,
@@ -76,27 +76,49 @@ function esInicioDeTurno(c: any): boolean {
  * El corte se hace en un mensaje de usuario con texto, así ninguna functionCall
  * queda sin su functionResponse (Gemini lo rechaza).
  */
-export function recortarHistorial(contents: any[], maxChars: number): { contents: any[]; recortados: number } {
+/** Ancla de recorte por conversación: el primer mensaje que se conservó la última vez. */
+const anclas = new Map<string, string>();
+const huella = (c: any): string => { try { const s = JSON.stringify(c); return `${s.length}:${s.slice(0, 400)}`; } catch { return ''; } };
+
+/**
+ * Con `clave` (agente + hilo) el corte es ESTABLE: una vez recortado, el historial
+ * empieza siempre en el mismo mensaje hasta que vuelva a desbordar; entonces se
+ * recorta de golpe hasta el 60 % del tope. Si el corte se moviera en cada turno,
+ * el prefijo cambiaría y Gemini no reutilizaría el caché de prompt.
+ */
+export function recortarHistorial(contents: any[], maxChars: number, clave?: string): { contents: any[]; recortados: number } {
   if (!Array.isArray(contents) || contents.length === 0) return { contents, recortados: 0 };
   const tam = contents.map((c) => { try { return JSON.stringify(c).length; } catch { return 0; } });
   const total = tam.reduce((a, b) => a + b, 0);
-  if (total <= maxChars) return { contents, recortados: 0 };
 
   // Índice del turno actual (último mensaje de usuario con texto): nunca se corta.
   let turnoActual = 0;
   for (let i = contents.length - 1; i >= 0; i--) if (esInicioDeTurno(contents[i])) { turnoActual = i; break; }
 
-  // Desde el final, acumula hasta llenar el presupuesto.
+  // ¿Sigue valiendo el ancla anterior?
+  const ancla = clave ? anclas.get(clave) : undefined;
+  if (ancla) {
+    const i = contents.findIndex((c) => huella(c) === ancla);
+    if (i > 0 && i <= turnoActual) {
+      const desdeAncla = tam.slice(i).reduce((a, b) => a + b, 0);
+      if (desdeAncla <= maxChars) return { contents: contents.slice(i), recortados: i };
+    }
+  }
+  if (total <= maxChars) return { contents, recortados: 0 };
+
+  // Desbordó: desde el final, acumula hasta el objetivo (60 % del tope, para no recortar en cada turno).
+  const objetivo = clave ? Math.floor(maxChars * 0.6) : maxChars;
   let acumulado = 0;
   let desde = contents.length;
   for (let i = contents.length - 1; i >= 0; i--) {
-    if (acumulado + tam[i] > maxChars && i < turnoActual) break;
+    if (acumulado + tam[i] > objetivo && i < turnoActual) break;
     acumulado += tam[i];
     desde = i;
   }
   // Avanza hasta un inicio de turno (sin pasar del actual).
   while (desde < turnoActual && !esInicioDeTurno(contents[desde])) desde++;
   if (desde === 0) return { contents, recortados: 0 };
+  if (clave) anclas.set(clave, huella(contents[desde]));
   return { contents: contents.slice(desde), recortados: desde };
 }
 
@@ -137,11 +159,11 @@ export function neutralizarAdjuntosPrevios(contents: any[]): any[] {
   });
 }
 
-export function aplicarPresupuesto(llmRequest: any, agentName: string): { antes: number; despues: number; recortados: number } {
+export function aplicarPresupuesto(llmRequest: any, agentName: string, hilo?: string): { antes: number; despues: number; recortados: number } {
   const original: any[] = Array.isArray(llmRequest?.contents) ? llmRequest.contents : [];
   const antes = original.reduce((a, c) => { try { return a + JSON.stringify(c).length; } catch { return a; } }, 0);
   const limpios = neutralizarAdjuntosPrevios(limpiarRespuestasDeTools(original));
-  const { contents, recortados } = recortarHistorial(limpios, VENTANA_POR_AGENTE[agentName] ?? VENTANA_DEFAULT);
+  const { contents, recortados } = recortarHistorial(limpios, VENTANA_POR_AGENTE[agentName] ?? VENTANA_DEFAULT, hilo ? `${agentName}::${hilo}` : undefined);
   llmRequest.contents = contents;
   const despues = contents.reduce((a, c) => { try { return a + JSON.stringify(c).length; } catch { return a; } }, 0);
   return { antes, despues, recortados };

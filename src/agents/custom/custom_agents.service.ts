@@ -7,6 +7,7 @@ import { modelFor, construirLlm } from '../llm/model_factory.js';
 import { ejecutar, compilar, fetchSeguro, type SandboxCtx } from './sandbox.js';
 import { qdrantService, QdrantKnowledgeService } from '../../services/qdrant.service.js';
 import { llmSettingsService } from '../../services/llm_settings.service.js';
+import { sufijoFechaMensaje } from '../../utils/fecha.js';
 
 /**
  * Agentes personalizados ("self agents"): los crea el agente programador (o la
@@ -388,7 +389,7 @@ class CustomAgentsService {
 
     const ref = m.model ? llmSettingsService.resolverRef(m.model) : null;
     const comoTrabajas = modo === 'directo'
-      ? `- Jesús te habla directamente (te mencionó con @${m.name}), sin pasar por el Coordinator de Yisus: respóndele tú, en tu personalidad, con la respuesta completa.`
+      ? `- Jesús te habla directamente (te mencionó con @${m.name}), sin pasar por el Coordinator de Yisus: respóndele tú, en tu personalidad, con la respuesta completa. Cada mensaje termina con "[enviado: fecha hora]": es la fecha/hora actual; no la repitas.`
       : `- Estás montado como herramienta del Coordinator de Yisus (el agente de Jesús Leiva): recibes una consulta, la resuelves con tus herramientas y terminas el turno con la respuesta completa.`;
     const base = `${m.soul}
 
@@ -465,9 +466,12 @@ ${comoTrabajas}
     const parts: any[] = newMessage?.parts || [];
     const iTexto = parts.findIndex((p) => typeof p?.text === 'string' && p.text.trim());
     const men = iTexto >= 0 ? this.resolverMencion(parts[iTexto].text, canal) : null;
-    if (!men) return { runner: runnerCoordinator, newMessage };
-    if (men.tipo === 'no_disponible') return { runner: runnerCoordinator, newMessage, directo: { name: men.name, displayName: men.displayName }, aviso: `⚠️ ${men.motivo}` };
-    const nuevo = { ...newMessage, parts: parts.map((p, i) => (i === iTexto ? { ...p, text: men.texto } : p)) };
+    // La fecha/hora de envío va dentro del mensaje (prefijo estable → caché de prompt)
+    const conFecha = (texto: string) => texto + sufijoFechaMensaje();
+    const base = iTexto >= 0 ? { ...newMessage, parts: parts.map((p, i) => (i === iTexto ? { ...p, text: conFecha(p.text) } : p)) } : newMessage;
+    if (!men) return { runner: runnerCoordinator, newMessage: base };
+    if (men.tipo === 'no_disponible') return { runner: runnerCoordinator, newMessage: base, directo: { name: men.name, displayName: men.displayName }, aviso: `⚠️ ${men.motivo}` };
+    const nuevo = { ...newMessage, parts: parts.map((p, i) => (i === iTexto ? { ...p, text: conFecha(men.texto) } : p)) };
     return { runner: await this.runnerDirecto(men.name, appName, sessionService), newMessage: nuevo, directo: { name: men.name, displayName: men.displayName } };
   }
 

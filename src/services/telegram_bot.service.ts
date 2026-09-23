@@ -9,6 +9,7 @@ import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 import { tokenTrackerService } from './token_tracker.service.js';
 import { attachmentsService } from './attachments.service.js';
+import { sqliteReminderService } from '../database/sqlite.service.js';
 
 dotenv.config();
 
@@ -145,6 +146,30 @@ export class TelegramBotService {
   /**
    * Envía un mensaje a un chat específico
    */
+  /**
+   * Sesión por chat con caducidad por inactividad: cada turno del Coordinator paga
+   * TODO el historial de la sesión, así que un "Hola" del día siguiente no debe
+   * arrastrar la conversación de ayer. Tras TELEGRAM_SESSION_IDLE_MIN minutos sin
+   * mensajes (por defecto 240) se abre una sesión nueva; /nueva la fuerza.
+   */
+  private sessionIdPara(chatId: string | number): string {
+    const clave = `telegram.session.${chatId}`;
+    const idleMin = Number(process.env.TELEGRAM_SESSION_IDLE_MIN) || 240;
+    let estado: { id: string; last: number } | null = null;
+    try { const raw = sqliteReminderService.getConfig(clave, ''); estado = raw ? JSON.parse(raw) : null; } catch { estado = null; }
+    const ahora = Date.now();
+    if (!estado || ahora - estado.last > idleMin * 60_000) {
+      if (estado) console.log(`🧹 [TelegramBot] Sesión de ${chatId} caducó por inactividad (${Math.round((ahora - estado.last) / 60000)} min): se abre una nueva.`);
+      estado = { id: `telegram-${chatId}-${ahora.toString(36)}`, last: ahora };
+    } else estado.last = ahora;
+    sqliteReminderService.setConfig(clave, JSON.stringify(estado));
+    return estado.id;
+  }
+
+  private nuevaSesion(chatId: string | number): void {
+    sqliteReminderService.setConfig(`telegram.session.${chatId}`, JSON.stringify({ id: `telegram-${chatId}-${Date.now().toString(36)}`, last: Date.now() }));
+  }
+
   public async sendMessage(
     chatId: string | number,
     text: string,
@@ -455,6 +480,13 @@ export class TelegramBotService {
       return;
     }
 
+    // /nueva: empezar una conversación limpia (el historial anterior queda en memoria episódica)
+    if (/^\/(nueva|new|reset)\b/i.test(userPrompt)) {
+      this.nuevaSesion(senderChatId);
+      await this.sendMessage(senderChatId, '🧹 Conversación nueva. Lo anterior queda en la memoria episódica.');
+      return;
+    }
+
     // 3. Ejecutar a través de ADK Runner
     if (!this.runner || !this.sessionService) {
       await this.sendMessage(senderChatId, '⚠️ El agente aún no está listo en el servidor.');
@@ -467,7 +499,7 @@ export class TelegramBotService {
     try {
       const appName = process.env.ADK_APP_NAME || 'yisus';
       const userId = 'jesus';
-      const sessionId = `telegram-${senderChatId}`;
+      const sessionId = this.sessionIdPara(senderChatId);
 
       let session = await this.sessionService.getSession({ appName, userId, sessionId });
       if (!session) {

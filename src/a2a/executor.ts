@@ -22,6 +22,7 @@ import type { RedisSessionService } from '../services/redis_session.service.js';
 import { currentA2AScope } from '../config/channels.js';
 import { agentMessage, extractText, status } from './helpers.js';
 import { attachmentsService } from '../services/attachments.service.js';
+import { sufijoFechaMensaje } from '../utils/fecha.js';
 
 const APP_NAME = process.env.ADK_APP_NAME || 'yisus';
 
@@ -81,7 +82,7 @@ export class YisusAgentExecutor implements AgentExecutor {
             //    Si Jesús resolvió algo escalado desde esta conversación, se le dice primero.
             const { escalationDeliveryService } = await import('../services/escalation_delivery.service.js');
             const pendiente = escalationDeliveryService.consumePendingFor(contextId);
-            const newMessage = { role: 'user', parts: [{ text: pendiente + userText }] } as any;
+            const newMessage = { role: 'user', parts: [{ text: pendiente + userText + sufijoFechaMensaje() }] } as any;
             const replies: string[] = [];
             let errorModelo = '';
 

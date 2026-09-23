@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
 import { attachmentsService } from './attachments.service.js';
+import { sufijoFechaMensaje } from '../utils/fecha.js';
 
 dotenv.config();
 
@@ -957,7 +958,7 @@ export class NostrGatewayService {
 
       const newMessage = {
         role: 'user',
-        parts: [{ text: pendiente + prompt }],
+        parts: [{ text: pendiente + prompt + sufijoFechaMensaje() }],
       } as any;
 
       const replies: string[] = [];
