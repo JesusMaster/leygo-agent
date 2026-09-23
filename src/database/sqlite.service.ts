@@ -127,6 +127,9 @@ export interface Commitment {
   updated_at: number;
   completed_at: number | null;
   last_notified_at: number | null;
+  reminder_auto: number;                 // 1 = friendly reminder automático (1 día antes y cada día vencido)
+  reminder_delivery: string | null;      // JSON TaskDelivery[] para el reminder
+  last_reminded_at: number | null;
 }
 export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
 
@@ -322,7 +325,10 @@ export class SqliteReminderService {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         completed_at INTEGER,
-        last_notified_at INTEGER
+        last_notified_at INTEGER,
+        reminder_auto INTEGER NOT NULL DEFAULT 0,
+        reminder_delivery TEXT,
+        last_reminded_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status, due_date);
       CREATE INDEX IF NOT EXISTS idx_commitments_fp ON commitments(fingerprint);
@@ -412,6 +418,7 @@ export class SqliteReminderService {
     this.migrateUsageHistory();
     this.migrateScheduledTasks();
     this.migrateEscalations();
+    this.migrateCommitments();
   }
 
   // ─── Recordatorios ──────────────────────────────────────────────────────────
@@ -957,6 +964,17 @@ export class SqliteReminderService {
 
   // ─── Escalamientos (triage_agent) ──────────────────────────────────────────
 
+  private migrateCommitments(): void {
+    try {
+      const cols = (this.db.prepare(`PRAGMA table_info(commitments)`).all() as any[]).map((c) => c.name);
+      if (!cols.includes('reminder_auto'))     this.db.exec(`ALTER TABLE commitments ADD COLUMN reminder_auto INTEGER NOT NULL DEFAULT 0`);
+      if (!cols.includes('reminder_delivery')) this.db.exec(`ALTER TABLE commitments ADD COLUMN reminder_delivery TEXT`);
+      if (!cols.includes('last_reminded_at'))  this.db.exec(`ALTER TABLE commitments ADD COLUMN last_reminded_at INTEGER`);
+    } catch (err: any) {
+      console.warn('⚠️ [SQLite] No se pudo migrar commitments:', err.message);
+    }
+  }
+
   private migrateEscalations(): void {
     try {
       const cols = (this.db.prepare(`PRAGMA table_info(escalations)`).all() as any[]).map((c) => c.name);
@@ -1001,7 +1019,7 @@ export class SqliteReminderService {
 
   // ─── Compromisos ─────────────────────────────────────────────────────────
 
-  public createCommitment(c: Omit<Commitment, 'created_at' | 'updated_at' | 'completed_at' | 'last_notified_at'>): Commitment {
+  public createCommitment(c: Omit<Commitment, 'created_at' | 'updated_at' | 'completed_at' | 'last_notified_at' | 'reminder_auto' | 'reminder_delivery' | 'last_reminded_at'>): Commitment {
     const now = Date.now();
     this.db.prepare(`
       INSERT INTO commitments (id, title, detail, owner, mine, counterpart, due_date, proposed_due, status, priority, source_type, source_ref, source_title, source_link, fingerprint, created_at, updated_at)
@@ -1020,10 +1038,12 @@ export class SqliteReminderService {
     const n = { ...actual, ...cambios, updated_at: Date.now() };
     this.db.prepare(`
       UPDATE commitments SET title = ?, detail = ?, owner = ?, mine = ?, counterpart = ?, due_date = ?, proposed_due = ?, status = ?, priority = ?,
-        source_type = ?, source_ref = ?, source_title = ?, source_link = ?, fingerprint = ?, updated_at = ?, completed_at = ?, last_notified_at = ?
+        source_type = ?, source_ref = ?, source_title = ?, source_link = ?, fingerprint = ?, updated_at = ?, completed_at = ?, last_notified_at = ?,
+        reminder_auto = ?, reminder_delivery = ?, last_reminded_at = ?
       WHERE id = ?
     `).run(n.title, n.detail ?? null, n.owner, n.mine ? 1 : 0, n.counterpart ?? null, n.due_date ?? null, n.proposed_due ?? null, n.status, n.priority,
-      n.source_type ?? null, n.source_ref ?? null, n.source_title ?? null, n.source_link ?? null, n.fingerprint ?? null, n.updated_at, n.completed_at ?? null, n.last_notified_at ?? null, id);
+      n.source_type ?? null, n.source_ref ?? null, n.source_title ?? null, n.source_link ?? null, n.fingerprint ?? null, n.updated_at, n.completed_at ?? null, n.last_notified_at ?? null,
+      n.reminder_auto ? 1 : 0, n.reminder_delivery ?? null, n.last_reminded_at ?? null, id);
     return this.getCommitment(id);
   }
 

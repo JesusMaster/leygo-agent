@@ -92,8 +92,16 @@ export default function createCommitmentsRoutes() {
   app.get('/api/commitments/:id/default-message', (req, res) => {
     const c = commitmentsService.obtener(req.params.id);
     if (!c) return res.status(404).json({ error: 'No existe' });
+    if (req.query.kind === 'recordatorio') return res.json({ message: commitmentsService.mensajeRecordatorio(c) });
     const status = (req.query.status as string) || c.status;
     res.json({ message: commitmentsService.mensajePorDefecto({ ...c, status: status as any }) });
+  });
+
+  /** Friendly reminder automático: 1 día antes y cada día vencido, por los canales guardados. */
+  app.put('/api/commitments/:id/reminder', (req, res) => {
+    const c = commitmentsService.configurarRecordatorio(req.params.id, !!req.body?.auto, req.body?.delivery || null, 'jesus');
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    res.json({ item: c });
   });
 
   app.post('/api/commitments/:id/notes', (req, res) => {

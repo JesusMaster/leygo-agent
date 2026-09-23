@@ -273,6 +273,52 @@ class CommitmentsService {
     return { enviados, fallos };
   }
 
+  /** Friendly reminder para quien le debe algo a Jesús. */
+  mensajeRecordatorio(c: Commitment): string {
+    const nombre = (c.mine ? c.counterpart : c.owner)?.split(' ')[0];
+    const saludo = nombre ? `Hola ${nombre}, ` : 'Hola, ';
+    const hoy = hoyIso();
+    const cuando = c.due_date
+      ? (c.due_date < hoy ? `lo teníamos para el ${c.due_date} y ya se nos pasó` : c.due_date === hoy ? `lo teníamos para hoy` : `lo teníamos para el ${c.due_date}`)
+      : 'no le pusimos fecha';
+    return `${saludo}¿cómo vas con "${c.title}"? ${cuando.charAt(0).toUpperCase() + cuando.slice(1)}. Si necesitas algo de mi lado o hay que mover la fecha, me dices. Gracias.`;
+  }
+
+  /** Configura (o apaga) el friendly reminder automático de un compromiso. */
+  configurarRecordatorio(id: string, auto: boolean, delivery: Array<{ channel: string; target?: string | null }> | null, by = 'jesus'): Commitment | null {
+    const c = sqliteReminderService.getCommitment(id);
+    if (!c) return null;
+    const n = sqliteReminderService.updateCommitment(id, { reminder_auto: auto ? 1 : 0, reminder_delivery: delivery?.length ? JSON.stringify(delivery) : c.reminder_delivery })!;
+    sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: 'recordatorio', text: auto ? `Reminder automático activado (1 día antes y cada día vencido)${delivery?.length ? ` por ${delivery.map((d) => d.channel).join(' + ')}` : ''}` : 'Reminder automático desactivado', by });
+    return n;
+  }
+
+  /**
+   * Reminders automáticos del día (los llama la rutina "Aviso de compromisos"):
+   * compromisos que otros le deben a Jesús, con reminder_auto, cuya fecha es
+   * mañana o ya pasó, y que no se recordaron hoy. Devuelve un resumen para Jesús.
+   */
+  async enviarRecordatoriosAutomaticos(): Promise<string> {
+    const hoy = hoyIso();
+    const manana = new Date(); manana.setDate(manana.getDate() + 1);
+    const mananaIso = manana.toLocaleDateString('en-CA', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago' });
+    const inicioHoy = new Date(`${hoy}T00:00:00`).getTime();
+    const candidatos = sqliteReminderService.listCommitments({ status: ['pendiente', 'en_curso'], limit: 500 })
+      .filter((c) => c.reminder_auto && c.reminder_delivery && c.due_date && (c.due_date <= hoy || c.due_date === mananaIso) && (!c.last_reminded_at || c.last_reminded_at < inicioHoy));
+    const lineas: string[] = [];
+    for (const c of candidatos) {
+      try {
+        const destinos = JSON.parse(c.reminder_delivery!);
+        const r = await this.notificar(c.id, destinos, this.mensajeRecordatorio(c), 'auto');
+        sqliteReminderService.updateCommitment(c.id, { last_reminded_at: Date.now() });
+        lineas.push(`• ${c.owner}: "${c.title}" (${c.due_date}) → ${r.enviados.join(' + ')}${r.fallos.length ? ` · fallos: ${r.fallos.join(' · ')}` : ''}`);
+      } catch (err: any) {
+        lineas.push(`• ${c.owner}: "${c.title}" → no se pudo: ${err?.message}`);
+      }
+    }
+    return lineas.length ? `🔔 Friendly reminders enviados:\n${lineas.join('\n')}` : '';
+  }
+
   mensajePorDefecto(c: Commitment): string {
     const quien = c.counterpart ? `${c.counterpart.split(' ')[0]}, ` : '';
     if (c.status === 'hecho') return `${quien}listo lo de "${c.title}". Cualquier cosa me avisas.`;

@@ -46,8 +46,11 @@ export class SchedulerService {
     scheduledTasksService.registrarIntegrada({
       key: 'commitments_reminder',
       titulo: 'Aviso de compromisos',
-      descripcion: 'Compromisos vencidos, los de hoy y los propuestos por revisar. Solo avisa si hay algo.',
-      run: async () => commitmentsService.textoAviso(),
+      descripcion: 'Compromisos vencidos, los de hoy y los propuestos por revisar; además manda los friendly reminders automáticos a quienes te deben algo. Solo avisa si hay algo.',
+      run: async () => {
+        const recordatorios = await commitmentsService.enviarRecordatoriosAutomaticos();
+        return [commitmentsService.textoAviso(), recordatorios].filter(Boolean).join('\n\n');
+      },
       defaults: { kind: 'daily', time_of_day: '09:00' },
     });
 

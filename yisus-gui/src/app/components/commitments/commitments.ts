@@ -72,6 +72,7 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 <span class="tb estado" [attr.data-estado]="c.status">{{ estadoLabel(c.status) }}</span>
                 <span class="tb quien" [class.mio]="c.mine"><i class="ph" [class.ph-user]="c.mine" [class.ph-users]="!c.mine"></i> {{ c.mine ? 'Lo debo' : 'Me debe ' + c.owner }}</span>
                 @if (c.priority === 'alta') { <span class="tb prio">alta</span> }
+                @if (c.reminder_auto) { <span class="tb rem" title="Friendly reminder automático: 1 día antes y cada día vencido"><i class="ph ph-bell-ringing"></i> reminder</span> }
                 @if (c.source_type) {
                   <span class="tb origen" [title]="c.source_title || ''">
                     @if (c.source_link) { <a [href]="c.source_link" target="_blank" rel="noopener">{{ origenLabel(c.source_type) }} <i class="ph ph-arrow-square-out"></i></a> }
@@ -86,7 +87,11 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 } @else if (c.status === 'pendiente' || c.status === 'en_curso') {
                   @if (c.status === 'pendiente') { <button class="ta" title="Marcar en curso" (click)="cambiarEstado(c, 'en_curso')"><i class="ph ph-play"></i></button> }
                   <button class="ta ok" title="Marcar hecho (y avisar)" (click)="abrirCierre(c, 'hecho')"><i class="ph ph-check-circle"></i></button>
-                  <button class="ta" title="Avisar a la contraparte" (click)="abrirCierre(c, null)"><i class="ph ph-paper-plane-tilt"></i></button>
+                  @if (!c.mine) {
+                    <button class="ta rem" [class.on]="!!c.reminder_auto" [title]="c.reminder_auto ? 'Friendly reminder (automático activo)' : 'Friendly reminder a ' + c.owner" (click)="abrirRecordatorio(c)"><i class="ph" [class.ph-bell-ringing]="!!c.reminder_auto" [class.ph-bell]="!c.reminder_auto"></i></button>
+                  } @else {
+                    <button class="ta" title="Avisar a la contraparte" (click)="abrirCierre(c, null)"><i class="ph ph-paper-plane-tilt"></i></button>
+                  }
                   <button class="ta" title="Cancelar (y avisar)" (click)="abrirCierre(c, 'cancelado')"><i class="ph ph-prohibit"></i></button>
                 } @else {
                   <button class="ta" title="Reabrir" (click)="cambiarEstado(c, 'pendiente')"><i class="ph ph-arrow-counter-clockwise"></i></button>
@@ -180,23 +185,30 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
       <div class="modal-backdrop" (click)="cierre.set(null)">
         <div class="modal" (click)="$event.stopPropagation()">
           <div class="modal-head">
-            <h3>{{ z.status === 'hecho' ? 'Marcar como hecho' : z.status === 'cancelado' ? 'Cancelar compromiso' : 'Avisar a la contraparte' }}</h3>
+            <h3>{{ z.kind === 'recordatorio' ? 'Friendly reminder a ' + z.c.owner : z.status === 'hecho' ? 'Marcar como hecho' : z.status === 'cancelado' ? 'Cancelar compromiso' : 'Avisar a la contraparte' }}</h3>
             <button class="btn-icon" (click)="cierre.set(null)"><i class="ph ph-x"></i></button>
           </div>
           <div class="modal-body">
             <p class="card-sub"><strong>{{ z.c.title }}</strong>@if (z.c.counterpart) { · con {{ z.c.counterpart }} }</p>
             <label class="field">
-              <span>Mensaje para {{ z.c.counterpart || 'la contraparte' }}</span>
+              <span>Mensaje para {{ z.kind === 'recordatorio' ? z.c.owner : (z.c.counterpart || 'la contraparte') }}</span>
               <textarea rows="3" [(ngModel)]="z.message"></textarea>
               <small class="hint">Se envía tal cual por los canales que marques. Sin canales, solo se cambia el estado.</small>
             </label>
-            <label class="field"><span>Avisar por</span></label>
+            <label class="field"><span>{{ z.kind === 'recordatorio' ? 'Recordar por' : 'Avisar por' }}</span></label>
             <app-delivery-picker [value]="z.delivery" (valueChange)="setDelivery($event)" />
+            @if (z.kind === 'recordatorio') {
+              <label class="check" style="margin-top:12px">
+                <input type="checkbox" [checked]="z.auto" (change)="setAuto($any($event.target).checked)" />
+                <span><strong>Recordar automáticamente</strong> por estos canales: 1 día antes de la fecha y cada día que siga vencido (lo manda la rutina "Aviso de compromisos").</span>
+              </label>
+            }
           </div>
           <div class="modal-foot">
             <button class="btn-secondary" (click)="cierre.set(null)">Cancelar</button>
             @if (z.status) { <button class="btn-secondary" (click)="confirmarCierre(false)">Solo {{ z.status === 'hecho' ? 'marcar hecho' : 'cancelar' }}</button> }
-            <button class="btn-primary" [disabled]="!z.delivery.length || enviando()" (click)="confirmarCierre(true)"><i class="ph ph-paper-plane-tilt"></i> {{ z.status ? (z.status === 'hecho' ? 'Marcar y avisar' : 'Cancelar y avisar') : 'Enviar aviso' }}</button>
+            @if (z.kind === 'recordatorio') { <button class="btn-secondary" [disabled]="enviando()" (click)="guardarRecordatorio(false)">Solo guardar ajuste</button> }
+            <button class="btn-primary" [disabled]="!z.delivery.length || enviando()" (click)="z.kind === 'recordatorio' ? guardarRecordatorio(true) : confirmarCierre(true)"><i class="ph" [class.ph-bell]="z.kind === 'recordatorio'" [class.ph-paper-plane-tilt]="z.kind !== 'recordatorio'"></i> {{ z.kind === 'recordatorio' ? 'Enviar reminder ahora' : z.status ? (z.status === 'hecho' ? 'Marcar y avisar' : 'Cancelar y avisar') : 'Enviar aviso' }}</button>
           </div>
         </div>
       </div>
@@ -249,6 +261,8 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .tb.estado[data-estado=hecho] { background: rgba(16,185,129,.16); color: var(--ok); }
     .tb.quien.mio { background: rgba(129,140,248,.16); color: #a5b4fc; }
     .tb.prio { background: rgba(239,68,68,.14); color: var(--danger); }
+    .tb.rem { background: rgba(245,158,11,.14); color: var(--warn); text-transform: none; letter-spacing: 0; }
+    .ta.rem.on { border-color: var(--warn); color: var(--warn); }
     .tb.origen a { color: inherit; text-decoration: none; display: inline-flex; gap: 4px; align-items: center; }
     .tb.kind { text-transform: none; letter-spacing: 0; font-weight: 600; }
     .cm-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
@@ -277,6 +291,8 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .hist-item { display: grid; grid-template-columns: 110px auto 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; }
     .hist-when, .hist-by { color: var(--text-dim); font-size: 12px; }
     .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+    .check { display: flex; align-items: flex-start; gap: 10px; margin: 4px 0 4px; cursor: pointer; font-size: 13.5px; }
+    .check input { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--accent-primary); }
     .bf { margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-main); font-size: 13px; }
     .dim { color: var(--text-dim); }
     @media (max-width: 640px) { .cm-head { flex-direction: column; } .dos { grid-template-columns: 1fr; } .hist-item { grid-template-columns: 1fr; gap: 2px; } }
@@ -303,7 +319,7 @@ export class CommitmentsComponent {
   enviando = signal(false);
   enriqueciendo = signal(false);
   private pollEnrich: any = null;
-  cierre = signal<{ c: Commitment; status: CommitmentStatus | null; message: string; delivery: TaskDelivery[] } | null>(null);
+  cierre = signal<{ c: Commitment; status: CommitmentStatus | null; message: string; delivery: TaskDelivery[]; kind?: 'aviso' | 'recordatorio'; auto?: boolean } | null>(null);
   notaNueva = '';
   backfillDesde = '';
   pend: Record<string, Partial<Commitment>> = {};
@@ -366,8 +382,31 @@ export class CommitmentsComponent {
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo cambiar'),
     });
   }
+  abrirRecordatorio(c: Commitment) {
+    let delivery: TaskDelivery[] = [];
+    try { delivery = c.reminder_delivery ? JSON.parse(c.reminder_delivery) : []; } catch { delivery = []; }
+    this.cierre.set({ c, status: null, message: '', delivery, kind: 'recordatorio', auto: !!c.reminder_auto });
+    this.api.getCommitmentDefaultMessage(c.id, undefined, 'recordatorio').subscribe({ next: (r) => { const z = this.cierre(); if (z && !z.message) this.cierre.set({ ...z, message: r.message }); }, error: () => {} });
+  }
+  setAuto(v: boolean) { const z = this.cierre(); if (z) this.cierre.set({ ...z, auto: v }); }
+  guardarRecordatorio(enviarAhora: boolean) {
+    const z = this.cierre();
+    if (!z) return;
+    this.enviando.set(true);
+    const fin = () => { this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarHistorial(z.c.id); };
+    this.api.setCommitmentReminder(z.c.id, !!z.auto, z.delivery.length ? z.delivery : null).subscribe({
+      next: () => {
+        if (!enviarAhora) { this.toast.ok(z.auto ? 'Reminder automático activado' : 'Ajuste guardado'); fin(); return; }
+        this.api.notifyCommitment(z.c.id, z.delivery, z.message).subscribe({
+          next: (r) => { this.toast.ok(`Reminder enviado por ${r.enviados.join(' + ')}${r.fallos.length ? ' · fallos: ' + r.fallos.join(' · ') : ''}`); fin(); },
+          error: (e) => { this.toast.error(e?.error?.error || 'No se pudo enviar'); fin(); },
+        });
+      },
+      error: (e) => { this.toast.error(e?.error?.error || 'No se pudo guardar'); this.enviando.set(false); },
+    });
+  }
   abrirCierre(c: Commitment, status: CommitmentStatus | null) {
-    this.cierre.set({ c, status, message: '', delivery: [] });
+    this.cierre.set({ c, status, message: '', delivery: [], kind: 'aviso' });
     this.api.getCommitmentDefaultMessage(c.id, status || undefined).subscribe({ next: (r) => { const z = this.cierre(); if (z && !z.message) { z.message = r.message; this.cierre.set({ ...z }); } }, error: () => {} });
   }
   setDelivery(d: TaskDelivery[]) { const z = this.cierre(); if (z) this.cierre.set({ ...z, delivery: d }); }

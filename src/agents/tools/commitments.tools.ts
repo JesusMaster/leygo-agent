@@ -148,9 +148,10 @@ export const commitmentHistory = new FunctionTool({
 
 export const commitmentNotify = new FunctionTool({
   name: 'commitment_notify',
-  description: 'Avisa a la contraparte de un compromiso por un canal: email (correo de la persona), chat (spaceName de Google Chat, p. ej. spaces/AAAA), buzz (canal por defecto), a2a (nombre del agente remoto) o telegram (Jesús). Úsala cuando Jesús diga "avísale a X que ya está" o "notifícalo por correo". Si no hay mensaje, se redacta uno en tono de Jesús según el estado.',
+  description: 'Avisa a la contraparte de un compromiso por un canal: email (correo de la persona), chat (spaceName de Google Chat, p. ej. spaces/AAAA), buzz (canal por defecto), a2a (nombre del agente remoto) o telegram (Jesús). Úsala cuando Jesús diga "avísale a X que ya está", "notifícalo por correo" o, con tipo=recordatorio, "mándale un friendly reminder a X" (para lo que le deben a Jesús). Si no hay mensaje, se redacta uno en tono de Jesús.',
   parameters: z.object({
     id: z.string(),
+    tipo: z.enum(['aviso', 'recordatorio']).optional().describe('recordatorio = friendly reminder a quien le debe algo a Jesús. Por defecto aviso.'),
     channel: z.enum(['email', 'chat', 'buzz', 'a2a', 'telegram']),
     target: z.string().optional().describe('Correo, spaceName de Chat, canal de Buzz o nombre del agente A2A. No aplica a telegram.'),
     message: z.string().optional().describe('Texto a enviar. Omitir para usar el mensaje por defecto.'),
@@ -158,8 +159,11 @@ export const commitmentNotify = new FunctionTool({
   execute: async (args: any) => {
     if (externo()) return SOLO_JESUS;
     try {
-      const r = await commitmentsService.notificar(args.id, [{ channel: args.channel, target: args.target || null }], args.message, 'agente');
-      return { status: 'success', result: `Avisado por ${r.enviados.join(' + ')}${r.fallos.length ? ` (fallos: ${r.fallos.join(' · ')})` : ''}.` };
+      const c = commitmentsService.obtener(args.id);
+      if (!c) return { status: 'error', message: `No existe el compromiso ${args.id}` };
+      const mensaje = args.message || (args.tipo === 'recordatorio' ? commitmentsService.mensajeRecordatorio(c) : undefined);
+      const r = await commitmentsService.notificar(args.id, [{ channel: args.channel, target: args.target || null }], mensaje, 'agente');
+      return { status: 'success', result: `${args.tipo === 'recordatorio' ? 'Friendly reminder enviado' : 'Avisado'} por ${r.enviados.join(' + ')}${r.fallos.length ? ` (fallos: ${r.fallos.join(' · ')})` : ''}.` };
     } catch (err: any) { return { status: 'error', message: err.message }; }
   },
 });

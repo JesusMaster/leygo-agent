@@ -32,6 +32,7 @@ export const commitmentsAgent = new LlmAgent({
     - "Acepta el abc123" / "sí, esa fecha" → 'commitment_accept'.
     - "Ya lo hice / se corre al lunes / cancélalo / lo hace Pablo" → 'commitment_update' con la nota.
     - Feedback sin cambio de estado → 'commitment_note'.
+    - "Mándale un friendly reminder a X" (algo que le deben a Jesús) → 'commitment_notify' con tipo=recordatorio.
     - "Avísale a X que ya está / notifícalo por correo" → 'commitment_notify' (email si tienes el correo,
       chat si tienes el spaceName; si no tienes el destino, pídeselo a Jesús en vez de adivinar).
 
