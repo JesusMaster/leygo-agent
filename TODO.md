@@ -134,6 +134,12 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
   - `DynamicLlm`: cada agente resuelve proveedor+modelo en cada turno desde `system_config` (`llm.providers`, `llm.assignments`). Cambios sin reiniciar. Override por ejecución (`conModelo`) para tareas programadas y webhooks.
   - GUI Ajustes: Proveedores LLM (presets), Modelos por agente (incluye digest, consolidación e ingesta), Claves y variables (edita el `.env` con secretos enmascarados, reinicio del backend).
   - Los errores del proveedor (sin crédito, RPM, caído) se muestran en el chat/Telegram/Buzz/A2A en vez de "(sin respuesta)".
+- [x] **Self agents (agentes personalizados creados por IA)** ✅ (23-09):
+  - `agent_builder` (`src/agents/builder.agent.ts` + `tools/builder.tools.ts`): agente programador montado en el Coordinator (Telegram/API/GUI; bloqueado en Buzz y A2A). "Crea un agente que…" → diseña soul, herramientas en JS con JSON Schema y tests, llama a `create_custom_agent`; si un test o la validación fallan, corrige y reintenta.
+  - `src/agents/custom/custom_agents.service.ts`: manifiestos en `data/agents/<slug>/agent.json` (+ `soul.md`), validación (slug, schema con `required` ⊆ `properties`, código sin require/import/process), tests obligatorios, **montaje en caliente** como AgentTool en los Coordinators vivos (por canal; A2A con guard de permisos), grupo `personalizados` del catálogo de tools, modelo propio (o el por defecto), memoria episódica propia en Qdrant (`agent_<slug>`), variables de entorno `AGENT_<SLUG>_<VAR>` (se editan en la GUI y van al `.env`).
+  - Sandbox: `worker_threads` + `node:vm` con contexto sin prototipos, frontera JSON, `ctx.fetch` solo https y solo si `network=true`, timeout duro (mata el worker). Probado contra escapes (`constructor.constructor`) y bucles infinitos.
+  - GUI **Agentes**: tarjetas, "Crear con IA", editor en línea (soul, descripción, canales, memoria, modelo, herramientas con schema/código/test individual, variables), "Probar" (chat directo sin Coordinator), activar/desactivar/eliminar. Rutas `/api/agents/*` (admin).
+  - Primer agente real: **Nami** (instructora de vuelo: km↔NM/SM, ft→m, TOD 3:1, V/S) creada y verificada vía GUI y vía Coordinator.
 - [x] **Presupuesto de contexto** ✅ (22-09, `src/agents/llm/context_budget.ts`): las respuestas de herramientas ya no viajan duplicadas (`result` + `data`) y tienen tope por herramienta; el historial se recorta a una ventana por agente cortando en inicio de turno; Conocimiento/FAQ/Triage/Conocimiento público van sin historial entre turnos (compartían sesión con el Coordinator y arrastraban todo). Misma pregunta: $0,198 → $0,016. El tooltip de consumo del chat muestra llamadas por agente.
 
 ---
@@ -324,6 +330,7 @@ Cosas conversadas y no cerradas, en orden de valor:
 - [ ] **2FA: acciones públicas que pregunten siempre** (no acogerse a la ventana de gracia).
 - [ ] **Watcher de Obsidian + borrado/renombrado + hashes incrementales + búsqueda híbrida** (§1).
 - [ ] **Purga/retención de memoria episódica** (§2).
-- [ ] **`apprecio_agent`** (GitHub/GitLab) y **AutoCoder Sandbox** (§4/§5).
+- [ ] **`apprecio_agent`** (GitHub/GitLab). AutoCoder Sandbox → cubierto por los self agents (§4).
+- [ ] **Self agents**: render de LaTeX en el chat (Gemini lo usa aunque se le pida texto plano), versionado/rollback de manifiestos, permitir que un agente personalizado use tools del sistema (p. ej. `drive_read_file`) con permisos explícitos.
 - [ ] **Override de modelo de una tarea también para los subagentes** (hoy solo aplica al Coordinator).
 - [ ] **Streaming para proveedores no-Gemini** (los adaptadores entregan la respuesta completa por turno).

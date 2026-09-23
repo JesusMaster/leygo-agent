@@ -6,6 +6,7 @@
       "account_agent",
       "triage_agent",
       "commitments_agent",
+      "agent_builder",
       "schedule_reminder",
       "schedule_task",
       "list_scheduled_reminders",
@@ -29,7 +30,6 @@
     "tools": [
       "faq_agent",
       "triage_agent",
-      "commitments_agent",
       "get_token_usage",
       "buzz_send_message",
       "buzz_status",
@@ -61,22 +61,7 @@
       "knowledge_public",
       "faq_agent",
       "triage_agent",
-      "commitments_agent",
-      "schedule_reminder",
-      "schedule_task",
-      "list_scheduled_reminders",
-      "trigger_morning_digest",
-      "get_recent_webhooks",
-      "create_custom_webhook",
-      "list_custom_webhooks",
-      "toggle_custom_webhook",
-      "get_custom_webhook_logs",
-      "get_token_usage",
-      "set_monthly_budget",
-      "refresh_pricing_catalog",
-      "buzz_send_message",
-      "buzz_status",
-      "account_agent"
+      "get_token_usage"
     ]
   }
 }

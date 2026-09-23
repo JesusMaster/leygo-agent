@@ -178,7 +178,9 @@ input[type=time], input[type=date], input[type=datetime-local] { color-scheme: d
 .modal {
   width: min(600px, 100%); background: var(--bg-card); border: 1px solid var(--border-light);
   border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,.45); overflow: hidden;
+  max-height: calc(var(--app-h, 100dvh) - 48px); display: flex; flex-direction: column;
 }
+.modal-body { overflow: auto; flex: 1 1 auto; min-height: 0; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border-light); }
 .modal-head h3 { margin: 0; font-size: 18px; }
 .modal-body { padding: 20px 24px; }

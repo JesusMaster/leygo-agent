@@ -117,6 +117,14 @@ export interface Commitment {
 export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
 export interface CommitmentsPage { hoy: string; items: Commitment[]; stats: Record<string, number>; }
 export interface BackfillEstado { corriendo: boolean; iniciado: number | null; terminado: number | null; puntos: number; procesados: number; saltados: number; nuevos: number; repetidos: number; error: string | null; ultimo: string | null; }
+// ─── Agentes personalizados ─────────────────────────────────────────────────
+export interface CustomToolDef { name: string; description: string; parameters: any; code: string; network?: boolean; tests?: Array<{ args: any; expect?: any; note?: string }>; }
+export interface CustomEnvVar { name: string; description: string; secret?: boolean; }
+export type CanalAgente = 'telegram' | 'api' | 'buzz' | 'a2a';
+export interface CustomAgent {
+  name: string; displayName: string; description: string; soul: string; tools: CustomToolDef[]; env: CustomEnvVar[];
+  memory: boolean; model: string | null; channels: CanalAgente[]; enabled: boolean; createdBy: 'ia' | 'gui'; createdAt: string; updatedAt: string; version: number;
+}
 export interface EnvVar { key: string; grupo: string; descripcion: string; secreto: boolean; caliente?: boolean; placeholder?: string; valor: string | null; definida: boolean; enArchivo: boolean; }
 
 @Injectable({ providedIn: 'root' })
@@ -292,6 +300,15 @@ export class ApiService {
   deleteCommitment(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/commitments/${id}`); }
   getCommitmentsBackfill(): Observable<BackfillEstado> { return this.http.get<any>(`${this.baseUrl}/api/commitments/backfill`); }
   startCommitmentsBackfill(desde?: string): Observable<BackfillEstado> { return this.http.post<any>(`${this.baseUrl}/api/commitments/backfill`, { desde: desde || undefined }); }
+  // ─── Agentes personalizados ────────────────────────────────────────────────
+  getAgents(): Observable<{ agents: CustomAgent[] }> { return this.http.get<any>(`${this.baseUrl}/api/agents`); }
+  getAgent(name: string): Observable<{ agent: CustomAgent }> { return this.http.get<any>(`${this.baseUrl}/api/agents/${name}`); }
+  createAgent(data: Partial<CustomAgent>): Observable<{ agent: CustomAgent }> { return this.http.post<any>(`${this.baseUrl}/api/agents`, data); }
+  updateAgent(name: string, data: Partial<CustomAgent>): Observable<{ agent: CustomAgent }> { return this.http.put<any>(`${this.baseUrl}/api/agents/${name}`, data); }
+  deleteAgent(name: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/agents/${name}`); }
+  generateAgent(prompt: string): Observable<{ respuesta: string; pasos: string[]; nuevos: string[]; agents: CustomAgent[] }> { return this.http.post<any>(`${this.baseUrl}/api/agents/generate`, { prompt }); }
+  testAgentTool(name: string, tool: string, args: any): Observable<{ ok: boolean; result?: any; error?: string; logs: string[]; ms: number }> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/tools/${tool}/test`, { args }); }
+  chatAgent(name: string, text: string): Observable<{ respuesta: string; pasos: string[] }> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/chat`, { text }); }
   getLlmCatalogo(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/catalogo`); }
   getEnv(): Observable<{ ruta: string; vars: EnvVar[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/env`); }
   saveEnv(cambios: Record<string, string | null>): Observable<{ cambiadas: string[]; requierenReinicio: string[] }> {

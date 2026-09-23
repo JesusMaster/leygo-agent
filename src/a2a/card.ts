@@ -88,6 +88,12 @@ const SKILLS_POR_TOOL: Record<string, any> = {
         tags:        ['escalation', 'triage', 'es'],
         examples:    ['Necesito confirmar una fecha de entrega con Jesús', '¿Qué temas pendientes tengo por resolver?'],
     },
+    agent_builder: {
+        name:        'Creación de agentes personalizados',
+        description: 'Programa agentes especialistas a partir de una descripción. Uso personal de Jesús.',
+        tags:        ['builder', 'agents', 'es'],
+        examples:    ['Crea un agente que convierta unidades de vuelo'],
+    },
     commitments_agent: {
         name:        'Compromisos de Jesús',
         description: 'Lista viva de compromisos: lo que Jesús debe y lo que le deben, con fechas, estado y seguimiento. Uso personal.',

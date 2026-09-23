@@ -3,6 +3,7 @@ import { LlmAgent } from '@google/adk';
 import { modelFor } from './llm/model_factory.js';
 import { resolveTools } from './tool_catalog.js';
 import { getChannelTools } from '../config/channels.js';
+import { customAgentsService, registrarCoordinadorVivo } from './custom/custom_agents.service.js';
 
 /**
  * Coordinator interno (Telegram, API y Buzz).
@@ -10,13 +11,8 @@ import { getChannelTools } from '../config/channels.js';
  * Las herramientas ya no vienen fijas: se arman por canal desde el catálogo, de
  * modo que habilitar algo nuevo en Telegram no lo deje expuesto en Buzz.
  */
-export function buildCoordinator(toolNames: string[] = ['*']) {
-  return new LlmAgent({
-
-    name: 'Coordinator',
-    model: modelFor('Coordinator', 'gemini-3.8-flash'),
-    description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
-    instruction: `
+export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram' | 'buzz' | 'api') {
+  const base = `
         # IDENTIDAD
         Eres **Yisus**, el agente clon de Jesús Leiva, CTO de Apprecio. "Yisus" es el
         anglicismo con que le dicen en confianza. Representas su criterio, tono y forma
@@ -118,6 +114,9 @@ export function buildCoordinator(toolNames: string[] = ['*']) {
         Telegram y te devuelve un "lo reviso y te confirmo".
         - **Ver o cerrar escalamientos pendientes** (por ejemplo "qué tengo pendiente de
         decidir", "resuelve el escalamiento a1b2c3d4") → también 'triage_agent'.
+        - **Crear, modificar o revisar agentes personalizados** ("crea un agente que…", "agrégale una
+        herramienta a Nami", "qué agentes tengo") → 'agent_builder'. Pásale la petición COMPLETA de Jesús tal cual
+        (nombre, personalidad, qué debe saber hacer): él programa las herramientas y lo deja montado.
         - **Compromisos** (lo que Jesús debe a otros y lo que otros le deben): "¿qué tengo pendiente?",
         "¿qué le debo a Sebastián?", "anota que le debo X a Y el viernes", "ya lo hice", "se corre al lunes",
         "acepta el abc123", "¿cómo voy con mis compromisos?" → 'commitments_agent'. Pásale la frase completa
@@ -149,9 +148,17 @@ export function buildCoordinator(toolNames: string[] = ['*']) {
         Ante la duda entre sonar como Jesús o ser preciso/seguro, gana lo segundo.
         Es preferible un "déjame revisarlo" que una respuesta inventada con buen tono.
        
-    `,
-    tools: resolveTools(toolNames),
+    `;
+  const agente = new LlmAgent({
+    name: 'Coordinator',
+    model: modelFor('Coordinator', 'gemini-3.8-flash'),
+    description: 'Coordinador principal de Yisus. Saluda, identifica al usuario y delega las tareas a los agentes especialistas manteniendo siempre el control central.',
+    // Instrucción dinámica: la sección de agentes personalizados cambia sin reiniciar.
+    instruction: () => base + (canal ? customAgentsService.seccionRuteo(canal) : ''),
+    tools: [...resolveTools(toolNames), ...(canal ? customAgentsService.toolsParaCanal(canal) : [])],
   });
+  if (canal) registrarCoordinadorVivo(canal, agente);
+  return agente;
 }
 
 /** Coordinator con acceso completo: ADK Web y usos internos sin canal definido. */
@@ -161,7 +168,7 @@ export const coordinator = buildCoordinator(['*']);
 export function buildChannelCoordinator(channel: 'telegram' | 'buzz' | 'api') {
   const tools = getChannelTools(channel);
   console.log(`🧰 [Agent] Coordinator para "${channel}": ${tools.length} herramientas (${tools.join(', ') || 'ninguna'})`);
-  return buildCoordinator(tools);
+  return buildCoordinator(tools, channel);
 }
 
 // El ADK Web busca específicamente un export llamado 'rootAgent'

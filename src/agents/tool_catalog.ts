@@ -4,6 +4,8 @@ import { accountAgent } from './account.agent.js';
 import { knowledgeAgent } from './knowledge.agent.js';
 import { triageAgent } from './triage.agent.js';
 import { commitmentsAgent } from './commitments.agent.js';
+import { builderAgent } from './builder.agent.js';
+import { customAgentsService } from './custom/custom_agents.service.js';
 import { publicKnowledgeAgent } from './public_knowledge.agent.js';
 import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool, scheduleTaskTool } from './tools/scheduler.tools.js';
 import {
@@ -32,6 +34,7 @@ export const TOOL_CATALOG: Record<string, any> = {
   account_agent:    new AgentTool({ agent: accountAgent }),          // Gmail, Calendar, Drive, Chat
   triage_agent:     new AgentTool({ agent: triageAgent }),
   commitments_agent: new AgentTool({ agent: commitmentsAgent }),        // lista viva de compromisos
+  agent_builder:    new AgentTool({ agent: builderAgent }),            // programa agentes personalizados
 
   // Recordatorios y digest
   schedule_reminder:        scheduleReminderTool,
@@ -71,6 +74,8 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   workspace:  ['account_agent'],
   triage:     ['triage_agent'],
   compromisos: ['commitments_agent'],
+  builder:    ['agent_builder'],
+  personalizados: [],
   reminders:  ['schedule_reminder', 'schedule_task', 'list_scheduled_reminders', 'trigger_morning_digest'],
   webhooks:   ['get_recent_webhooks', 'create_custom_webhook', 'list_custom_webhooks', 'toggle_custom_webhook', 'get_custom_webhook_logs'],
   usage:      ['get_token_usage', 'set_monthly_budget', 'refresh_pricing_catalog'],
@@ -139,6 +144,8 @@ export const TOOL_GROUP_LABELS: Record<string, string> = {
   workspace: 'Google Workspace',
   triage:    'Escalamiento',
   compromisos: 'Compromisos',
+  builder:   'Crear agentes',
+  personalizados: 'Agentes personalizados',
   reminders: 'Recordatorios y digest',
   webhooks:  'Webhooks',
   usage:     'Consumo y presupuesto',
@@ -153,3 +160,6 @@ export function grupoDeTool(tool: string): { grupo: string; etiqueta: string } {
   }
   return { grupo: 'otros', etiqueta: 'Otros' };
 }
+
+// Los agentes personalizados se publican en el catálogo en caliente (sin import circular).
+customAgentsService.setCatalogo(TOOL_CATALOG, TOOL_GROUPS);

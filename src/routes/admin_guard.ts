@@ -52,6 +52,7 @@ export const RUTAS_PROTEGIDAS: Array<{ metodos: string[]; test: (ruta: string) =
   // Ajustes: proveedores LLM, asignaciones y variables del .env.
   { metodos: ['GET', 'POST', 'PUT', 'DELETE'], test: (r) => r === '/api/settings' || r.startsWith('/api/settings/') },
   { metodos: ['GET', 'POST', 'PUT', 'DELETE'], test: (r) => r === '/api/commitments' || r.startsWith('/api/commitments/') },
+  { metodos: ['GET', 'POST', 'PUT', 'DELETE'], test: (r) => r === '/api/agents' || r.startsWith('/api/agents/') },
 ];
 
 /**

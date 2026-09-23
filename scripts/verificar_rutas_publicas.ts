@@ -34,6 +34,7 @@ const CASOS: Caso[] = [
   { metodo: 'GET',    ruta: '/api/settings/llm',         debeExigirClave: true,  nota: 'proveedores LLM (keys)' },
   { metodo: 'POST',   ruta: '/api/settings/restart',     debeExigirClave: true,  nota: 'reiniciar backend' },
   { metodo: 'GET',    ruta: '/api/commitments',          debeExigirClave: true,  nota: 'compromisos' },
+  { metodo: 'POST',   ruta: '/api/agents/generate',      debeExigirClave: true,  nota: 'crear agentes con IA' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },
