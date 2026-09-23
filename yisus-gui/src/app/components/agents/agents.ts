@@ -23,7 +23,7 @@ const CANALES: Array<{ id: CanalAgente; nombre: string }> = [
       <div class="page-head">
         <div>
           <h2>Agentes</h2>
-          <p class="sub">Tus agentes especialistas. Descríbelos en lenguaje natural y el agente programador los construye con sus herramientas; después los editas acá. Los agentes del sistema se configuran en <a routerLink="/settings">Ajustes</a>.</p>
+          <p class="sub">Tus agentes especialistas. Descríbelos en lenguaje natural y el agente programador los construye con sus herramientas; después los editas acá. En el chat y en Telegram puedes hablarles directo con <code>@nombre …</code> (sin pasar por el Coordinator). Los agentes del sistema se configuran en <a routerLink="/settings">Ajustes</a>.</p>
         </div>
         <div class="row">
           <button class="btn-secondary" (click)="abrirNuevo()"><i class="ph ph-plus"></i> A mano</button>

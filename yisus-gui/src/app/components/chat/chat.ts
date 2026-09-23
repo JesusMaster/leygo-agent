@@ -4,6 +4,7 @@ import { ChatService, ChatMessage, Adjunto, Paso } from '../../services/chat.ser
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 import { ToastService } from '../../services/toast.service';
+import { ApiService } from '../../services/api.service';
 
 const MAX_ADJUNTO_MB = 15;
 const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx|py|go|java|kt|rb|php|sh|sql|log|env|toml|ini)$/i;
@@ -35,8 +36,13 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
             <div class="meta">
               @if (m.role === 'agent') {
                 <span class="avatar"><i class="ph" [class.ph-sparkle]="m.streaming" [class.ph-robot]="!m.streaming"></i></span>
-                <span class="who">Yisus</span>
-                @if (m.author && m.author !== 'Coordinator' && m.author !== 'agente') { <span class="via">vía {{ m.author }}</span> }
+                @if (m.directo) {
+                  <span class="who">{{ m.directo.displayName }}</span>
+                  <span class="via directo" title="Respondió directamente por la mención @{{ m.directo.name }}, sin pasar por el Coordinator"><i class="ph ph-at"></i> directo</span>
+                } @else {
+                  <span class="who">Yisus</span>
+                  @if (m.author && m.author !== 'Coordinator' && m.author !== 'agente') { <span class="via">vía {{ m.author }}</span> }
+                }
                 <span class="when">{{ m.at | friendlyDate }}</span>
                 @if (m.uso) {
                   <span class="uso" [title]="detalleUso(m)">
@@ -96,8 +102,17 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
             }
           </div>
         }
+        @if (sugerencias().length) {
+          <div class="menciones">
+            @for (a of sugerencias(); track a.name; let i = $index) {
+              <button type="button" class="mencion" [class.activa]="i === sugerenciaIdx()" (mousedown)="$event.preventDefault(); elegirMencion(a)">
+                <span class="slug">@{{ a.name }}</span> <span class="nombre">{{ a.displayName }}</span> <span class="desc">{{ a.description }}</span>
+              </button>
+            }
+          </div>
+        }
         <div class="input-row">
-          <textarea #ta rows="1" [(ngModel)]="texto" (input)="ajustar(ta)" (keydown.enter)="enviar($event)"
+          <textarea #ta rows="1" [(ngModel)]="texto" (input)="ajustar(ta); actualizarSugerencias(ta)" (keydown)="teclaMencion($event)" (keydown.enter)="enviar($event)"
             [placeholder]="placeholder()"></textarea>
           @if (chat.thinking()) {
             <button class="btn-send stop" title="Detener" (click)="chat.cancelar()"><i class="ph-fill ph-stop"></i></button>
@@ -161,6 +176,13 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
     .chat-input { display: flex; flex-direction: column; gap: 8px; padding: 14px 28px 12px; border-top: 1px solid var(--border-light); }
     .input-row { display: flex; gap: 10px; align-items: flex-end; border: 1px solid var(--border-light); border-radius: 14px; background: var(--bg-input); padding: 8px 8px 8px 16px; transition: border-color .15s; }
     .input-row:focus-within { border-color: var(--accent-primary); }
+    .via.directo { color: var(--accent, #7c8cff); }
+    .menciones { display: flex; flex-direction: column; gap: 2px; margin: 0 0 6px; padding: 6px; border-radius: 10px; background: var(--bg-card); border: 1px solid var(--border-light); box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    .mencion { display: flex; gap: 8px; align-items: baseline; text-align: left; width: 100%; padding: 7px 10px; border-radius: 7px; border: 0; background: transparent; color: var(--text-main); cursor: pointer; font-size: 13px; }
+    .mencion:hover, .mencion.activa { background: var(--bg-main); }
+    .mencion .slug { font-family: ui-monospace, monospace; color: var(--accent, #7c8cff); font-weight: 600; }
+    .mencion .nombre { font-weight: 600; }
+    .mencion .desc { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     .input-row textarea { flex: 1; resize: none; border: 0; background: transparent; padding: 8px 0; font-size: 15px; line-height: 1.5; max-height: 220px; overflow-y: auto; min-height: 24px; }
     .input-row textarea:focus { outline: none; box-shadow: none; }
     .btn-send { width: 42px; height: 42px; border-radius: 12px; border: 0; background: var(--accent-primary); color: #fff; font-size: 20px; cursor: pointer; display: grid; place-items: center; flex: 0 0 auto; transition: background .15s, transform .1s; }
@@ -196,6 +218,7 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
 export class ChatComponent {
   chat = inject(ChatService);
   private toast = inject(ToastService);
+  private api = inject(ApiService);
   texto = '';
   pendientes = signal<Adjunto[]>([]);
   /** En móvil no cabe la ayuda de teclas en el placeholder */
@@ -213,6 +236,50 @@ export class ChatComponent {
         if (el) el.scrollTop = el.scrollHeight;
       });
     });
+  }
+
+  /** Autocompletado de "@agente" al inicio del mensaje (agentes personalizados habilitados en API/GUI). */
+  private agentes = signal<{ name: string; displayName: string; description: string }[]>([]);
+  sugerencias = signal<{ name: string; displayName: string; description: string }[]>([]);
+  sugerenciaIdx = signal(0);
+  private agentesCargados = false;
+
+  private cargarAgentes() {
+    if (this.agentesCargados) return;
+    this.agentesCargados = true;
+    this.api.getAgents().subscribe({
+      next: (r) => {
+        this.agentes.set((r.agents || []).filter((a) => a.enabled && a.channels.includes('api')).map((a) => ({ name: a.name, displayName: a.displayName, description: a.description })));
+        const ta = document.querySelector<HTMLTextAreaElement>('.input-row textarea');
+        if (ta) this.actualizarSugerencias(ta);
+      },
+      error: () => { this.agentesCargados = false; },
+    });
+  }
+
+  actualizarSugerencias(ta: HTMLTextAreaElement) {
+    const m = /^@([a-z0-9_]*)$/i.exec(ta.value);
+    if (!m) { this.sugerencias.set([]); return; }
+    this.cargarAgentes();
+    const q = m[1].toLowerCase();
+    const lista = this.agentes().filter((a) => a.name.startsWith(q) || a.displayName.toLowerCase().startsWith(q)).slice(0, 6);
+    this.sugerencias.set(lista);
+    this.sugerenciaIdx.set(0);
+  }
+
+  elegirMencion(a: { name: string }) {
+    this.texto = `@${a.name} `;
+    this.sugerencias.set([]);
+    queueMicrotask(() => document.querySelector<HTMLTextAreaElement>('.input-row textarea')?.focus());
+  }
+
+  teclaMencion(ev: KeyboardEvent) {
+    const lista = this.sugerencias();
+    if (!lista.length) return;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); this.sugerenciaIdx.set((this.sugerenciaIdx() + 1) % lista.length); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); this.sugerenciaIdx.set((this.sugerenciaIdx() - 1 + lista.length) % lista.length); }
+    else if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); this.elegirMencion(lista[this.sugerenciaIdx()]); }
+    else if (ev.key === 'Escape') { this.sugerencias.set([]); }
   }
 
   ajustar(ta: HTMLTextAreaElement) {

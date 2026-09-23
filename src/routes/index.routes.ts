@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import express from 'express';
 import { Runner } from '@google/adk';
+import { customAgentsService } from '../agents/custom/custom_agents.service.js';
 import { beginUsageScope, flushUsageScope, summarizeUsageScope } from '../utils/usage_collector.js';
 import { USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { RedisSessionService } from '../services/redis_session.service.js';
@@ -316,8 +317,15 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
 
         try {
             beginUsageScope('api', sessionId, promptText);
-            for await (const event of runner.runAsync({ userId, sessionId: session.id, newMessage })) {
-                events.push(event);
+            // "@nami …" → directo al agente personalizado, sin Coordinator
+            const turno = await customAgentsService.prepararTurno({ canal: 'api', newMessage, appName, sessionService, runnerCoordinator: runner });
+            if (turno.directo) events.push({ type: 'directo', agent: turno.directo.name, displayName: turno.directo.displayName });
+            if (turno.aviso) {
+                events.push({ author: turno.directo!.name, content: { role: 'model', parts: [{ text: turno.aviso }] } });
+            } else {
+                for await (const event of turno.runner.runAsync({ userId, sessionId: session.id, newMessage: turno.newMessage })) {
+                    events.push(event);
+                }
             }
 
             flushUsageScope().catch(() => {});
@@ -346,8 +354,15 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
 
         try {
             beginUsageScope('api', sessionId, promptText);
-            for await (const event of runner.runAsync({ userId, sessionId: session.id, newMessage })) {
-                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            // "@nami …" → directo al agente personalizado, sin Coordinator
+            const turno = await customAgentsService.prepararTurno({ canal: 'api', newMessage, appName, sessionService, runnerCoordinator: runner });
+            if (turno.directo) res.write(`data: ${JSON.stringify({ type: 'directo', agent: turno.directo.name, displayName: turno.directo.displayName })}\n\n`);
+            if (turno.aviso) {
+                res.write(`data: ${JSON.stringify({ author: turno.directo!.name, content: { role: 'model', parts: [{ text: turno.aviso }] } })}\n\n`);
+            } else {
+                for await (const event of turno.runner.runAsync({ userId, sessionId: session.id, newMessage: turno.newMessage })) {
+                    res.write(`data: ${JSON.stringify(event)}\n\n`);
+                }
             }
             // Consumo del turno para la GUI (tokens y costo), antes de persistirlo
             res.write(`data: ${JSON.stringify({ type: 'usage', ...summarizeUsageScope() })}\n\n`);

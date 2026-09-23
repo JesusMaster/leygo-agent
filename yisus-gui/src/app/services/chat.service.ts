@@ -29,6 +29,8 @@ export interface ChatMessage {
   role: 'user' | 'agent';
   text: string;
   author?: string;
+  /** Respondió un agente personalizado directamente (mención @slug), sin Coordinator */
+  directo?: { name: string; displayName: string };
   at: number;
   adjuntos?: Adjunto[];
   pasos?: Paso[];
@@ -151,6 +153,7 @@ export class ChatService {
           let evento: any;
           try { evento = JSON.parse(payload); } catch { continue; }
 
+          if (evento?.type === 'directo') { actualizar({ directo: { name: evento.agent, displayName: evento.displayName } }); continue; }
           if (evento?.type === 'usage') {
             actualizar({ uso: { inputTokens: evento.inputTokens, outputTokens: evento.outputTokens, totalTokens: evento.totalTokens, costUsd: evento.costUsd, porAgente: evento.porAgente } });
             continue;

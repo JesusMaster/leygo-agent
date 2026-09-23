@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { customAgentsService } from '../agents/custom/custom_agents.service.js';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { Runner } from '@google/adk';
@@ -453,13 +454,16 @@ export class TelegramBotService {
       let errorModelo = '';
       beginUsageScope('telegram', sessionId, userPrompt);
 
-      for await (const event of this.runner.runAsync({
+      // "@nami …" → directo al agente personalizado, sin Coordinator
+      const turno = await customAgentsService.prepararTurno({
+        canal: 'telegram', appName, sessionService: this.sessionService, runnerCoordinator: this.runner,
+        newMessage: { role: 'user', parts: [{ text: userPrompt }] },
+      });
+      if (turno.aviso) accumulatedText = turno.aviso;
+      else for await (const event of turno.runner.runAsync({
         userId,
         sessionId: session.id,
-        newMessage: {
-          role: 'user',
-          parts: [{ text: userPrompt }],
-        },
+        newMessage: turno.newMessage,
       })) {
         if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
         if (event.content?.parts) {
@@ -480,6 +484,7 @@ export class TelegramBotService {
           : 'Listo. Acción ejecutada sin respuesta adicional.';
       }
 
+      if (turno.directo && !turno.aviso) accumulatedText = `**${turno.directo.displayName}** (directo)\n\n${accumulatedText}`;
       const formattedHtml = markdownToTelegramHtml(accumulatedText);
       const chunks = splitMessage(formattedHtml, 4000);
 

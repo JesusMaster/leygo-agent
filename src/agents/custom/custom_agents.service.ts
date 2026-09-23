@@ -52,7 +52,14 @@ const DIR = path.resolve(process.cwd(), 'data', 'agents');
 const SLUG = /^[a-z][a-z0-9_]{1,30}$/;
 const RESERVADOS = new Set(['coordinator', 'yisus', 'knowledge_agent', 'faq_agent', 'account_agent', 'triage_agent', 'commitments_agent', 'knowledge_public', 'agent_builder']);
 
-type Registro = { manifest: CustomAgentManifest; agent: LlmAgent; tool: AgentTool };
+type Registro = { manifest: CustomAgentManifest; agent: LlmAgent; tool: AgentTool; directo?: LlmAgent; runners?: Map<string, any> };
+
+/** "@nami …" al inicio del mensaje (solo se atiende si el slug es un agente personalizado). */
+const MENCION = /^\s*@([a-z][a-z0-9_]{1,30})\b[\s:,;\-–—]*/i;
+
+export type Mencion =
+  | { tipo: 'ok'; name: string; displayName: string; texto: string }
+  | { tipo: 'no_disponible'; name: string; displayName: string; motivo: string };
 
 /** Coordinadores vivos por canal: para montar/desmontar herramientas sin reiniciar. */
 type Vivo = { agent: LlmAgent; wrap?: (tool: any) => any };
@@ -318,7 +325,7 @@ class CustomAgentsService {
   agenteDe(name: string): LlmAgent | undefined { this.cargarTodo(); return this.registro.get(name)?.agent; }
 
   // ─── Construcción del LlmAgent ───────────────────────────────────────
-  private construirAgente(m: CustomAgentManifest): LlmAgent {
+  private construirAgente(m: CustomAgentManifest, modo: 'tool' | 'directo' = 'tool'): LlmAgent {
     const tools: any[] = m.tools.map((t) => new FunctionTool({
       name: t.name,
       description: t.description,
@@ -335,20 +342,103 @@ class CustomAgentsService {
     const memDoc = m.memory ? `\n\nMEMORIA: tienes memoria propia. Usa 'memory_save' para guardar datos que Jesús te pida recordar o que valga la pena retener (preferencias, resultados, contexto), y 'memory_search' antes de responder algo que pudo haberse hablado antes.` : '';
 
     const ref = m.model ? llmSettingsService.resolverRef(m.model) : null;
+    const comoTrabajas = modo === 'directo'
+      ? `- Jesús te habla directamente (te mencionó con @${m.name}), sin pasar por el Coordinator de Yisus: respóndele tú, en tu personalidad, con la respuesta completa.`
+      : `- Estás montado como herramienta del Coordinator de Yisus (el agente de Jesús Leiva): recibes una consulta, la resuelves con tus herramientas y terminas el turno con la respuesta completa.`;
+    const base = `${m.soul}
+
+# CÓMO TRABAJAS
+${comoTrabajas}
+- Usa tus herramientas para calcular o consultar en vez de estimar de cabeza; muestra los datos de entrada y el resultado.
+- Si te falta un dato para calcular, pídelo en una sola pregunta clara.
+- Responde en español salvo que te hablen en otro idioma. Tus respuestas se leen en Telegram, chat y GUI: usa markdown simple y escribe fórmulas en texto plano (p. ej. 32 × 3 = 96 NM), nunca LaTeX ($…$).${envDoc}${memDoc}`;
     return new LlmAgent({
       name: m.name,
       model: ref ? construirLlm(ref.provider, ref.model, m.name) : modelFor(m.name, 'gemini-3.8-flash'),
       includeContents: 'none',
       description: m.description,
-      instruction: `${m.soul}
-
-# CÓMO TRABAJAS
-- Estás montado como herramienta del Coordinator de Yisus (el agente de Jesús Leiva): recibes una consulta, la resuelves con tus herramientas y terminas el turno con la respuesta completa.
-- Usa tus herramientas para calcular o consultar en vez de estimar de cabeza; muestra los datos de entrada y el resultado.
-- Si te falta un dato para calcular, pídelo en una sola pregunta clara.
-- Responde en español salvo que te hablen en otro idioma. Tus respuestas se leen en Telegram, chat y GUI: usa markdown simple y escribe fórmulas en texto plano (p. ej. 32 × 3 = 96 NM), nunca LaTeX ($…$).${envDoc}${memDoc}`,
+      // En modo directo el agente no ve el historial del Coordinator: solo sus propios turnos @slug de la sesión.
+      instruction: modo === 'directo' ? (ctx: any) => base + this.historialDirecto(m.name, ctx) : base,
       tools,
     });
+  }
+
+  /** Últimos intercambios "@slug" de la sesión (pregunta de Jesús + respuesta del agente), para continuidad. */
+  private historialDirecto(name: string, ctx: any, max = 6): string {
+    const eventos: any[] = ctx?.invocationContext?.session?.events || [];
+    const actual = ctx?.invocationContext?.invocationId;
+    const pares: { q: string; a: string }[] = [];
+    let pendiente: string | null = null;
+    for (const ev of eventos) {
+      if (ev?.invocationId && ev.invocationId === actual) break;
+      const texto = (ev?.content?.parts || []).map((p: any) => p?.text || '').filter(Boolean).join('').trim();
+      if (!texto) continue;
+      if (ev.author === 'user') { pendiente = texto; continue; }
+      if (ev.author === name && !ev.partial && pendiente !== null) { pares.push({ q: pendiente, a: texto }); pendiente = null; }
+    }
+    if (!pares.length) return '';
+    const ultimos = pares.slice(-max);
+    return `\n\n# CONVERSACIÓN PREVIA CONTIGO (esta sesión, del más antiguo al más reciente)\n` +
+      ultimos.map((p) => `Jesús: ${p.q.slice(0, 600)}\nTú: ${p.a.slice(0, 900)}`).join('\n\n');
+  }
+
+  // ─── Mención directa (@slug) ─────────────────────────────────────────
+  /**
+   * Detecta "@slug …" al inicio del mensaje. Solo aplica a agentes personalizados
+   * en canales de Jesús (api, telegram); Buzz y A2A siempre pasan por el Coordinator.
+   * Devuelve null si no hay mención o el slug no es un agente personalizado.
+   */
+  resolverMencion(texto: string, canal: CanalAgente): Mencion | null {
+    if (canal === 'buzz' || canal === 'a2a') return null;
+    const m = MENCION.exec(texto || '');
+    if (!m) return null;
+    const name = m[1].toLowerCase();
+    const r = this.get(name);
+    if (!r) return null;
+    const resto = texto.slice(m[0].length).trim();
+    if (!r.enabled) return { tipo: 'no_disponible', name, displayName: r.displayName, motivo: `${r.displayName} está desactivado. Actívalo en la vista Agentes.` };
+    if (!r.channels.includes(canal)) return { tipo: 'no_disponible', name, displayName: r.displayName, motivo: `${r.displayName} no está habilitado para este canal (${canal}). Actívalo en la vista Agentes → canales.` };
+    return { tipo: 'ok', name, displayName: r.displayName, texto: resto || `Hola ${r.displayName}, preséntate y dime en qué me puedes ayudar.` };
+  }
+
+  /**
+   * Runner para hablar con el agente directamente sobre la MISMA sesión del canal
+   * (los eventos quedan en el historial con author = slug; el Coordinator los ve
+   * como contexto en turnos posteriores). Se cachea por agente + servicio de sesiones.
+   */
+  /**
+   * Decide quién atiende el turno de un canal de Jesús: si el mensaje empieza con
+   * "@slug" de un agente personalizado disponible, ese agente (runner directo y
+   * mensaje sin la mención); si el agente existe pero no está disponible, un
+   * aviso (no se corre nada); si no, el runner del Coordinator.
+   */
+  async prepararTurno(opts: { canal: CanalAgente; newMessage: any; appName: string; sessionService: any; runnerCoordinator: any }): Promise<{
+    runner: any; newMessage: any; directo?: { name: string; displayName: string }; aviso?: string;
+  }> {
+    const { canal, newMessage, appName, sessionService, runnerCoordinator } = opts;
+    const parts: any[] = newMessage?.parts || [];
+    const iTexto = parts.findIndex((p) => typeof p?.text === 'string' && p.text.trim());
+    const men = iTexto >= 0 ? this.resolverMencion(parts[iTexto].text, canal) : null;
+    if (!men) return { runner: runnerCoordinator, newMessage };
+    if (men.tipo === 'no_disponible') return { runner: runnerCoordinator, newMessage, directo: { name: men.name, displayName: men.displayName }, aviso: `⚠️ ${men.motivo}` };
+    const nuevo = { ...newMessage, parts: parts.map((p, i) => (i === iTexto ? { ...p, text: men.texto } : p)) };
+    return { runner: await this.runnerDirecto(men.name, appName, sessionService), newMessage: nuevo, directo: { name: men.name, displayName: men.displayName } };
+  }
+
+  async runnerDirecto(name: string, appName: string, sessionService: any): Promise<any> {
+    this.cargarTodo();
+    const r = this.registro.get(name);
+    if (!r) throw new Error(`No existe el agente ${name}`);
+    if (!r.directo) r.directo = this.construirAgente(r.manifest, 'directo');
+    if (!r.runners) r.runners = new Map();
+    const clave = appName;
+    let runner = r.runners.get(clave);
+    if (!runner) {
+      const { Runner } = await import('@google/adk');
+      runner = new Runner({ appName, agent: r.directo, sessionService });
+      r.runners.set(clave, runner);
+    }
+    return runner;
   }
 
   private valorEnv(m: CustomAgentManifest, name: string): string | undefined {
