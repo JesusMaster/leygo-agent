@@ -152,7 +152,7 @@ export class TelegramBotService {
   ): Promise<number | null> {
     try {
       // Marcadores [[adjunto:ID]] → se quitan del texto y se envían como foto/documento al final
-      const { texto: sinAdjuntos, adjuntos } = attachmentsService.extraer(text);
+      const { texto: sinAdjuntos, adjuntos } = attachmentsService.extraer(text, `telegram:${chatId}`);
       if (adjuntos.length) text = sinAdjuntos || (adjuntos[0].caption ? '' : '📎');
       const chunks = splitMessage(text, 4000);
       let firstMsgId: number | null = null;
@@ -509,7 +509,7 @@ export class TelegramBotService {
       }
 
       if (turno.directo && !turno.aviso) accumulatedText = `**${turno.directo.displayName}** (directo)\n\n${accumulatedText}`;
-      const extraccion = attachmentsService.extraer(accumulatedText);
+      const extraccion = attachmentsService.extraer(accumulatedText, `telegram:${senderChatId}`);
       accumulatedText = extraccion.texto || (extraccion.adjuntos.length ? '📎' : accumulatedText);
       const formattedHtml = markdownToTelegramHtml(accumulatedText);
       const chunks = splitMessage(formattedHtml, 4000);

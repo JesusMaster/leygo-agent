@@ -13,7 +13,7 @@ import { customAgentsService, registrarCoordinadorVivo } from './custom/custom_a
  * modo que habilitar algo nuevo en Telegram no lo deje expuesto en Buzz.
  */
 /** Los agentes que generan imágenes/archivos devuelven marcadores [[adjunto:ID]]; el Coordinator debe dejarlos pasar. */
-const NOTA_ADJUNTOS = `ADJUNTOS: si la respuesta de un agente o herramienta contiene marcadores como [[adjunto:abc123…]], cópialos TAL CUAL en tu respuesta (uno por línea, donde corresponda): el canal los convierte en la imagen o el archivo. Nunca los describas, reescribas ni omitas.\n`;
+const NOTA_ADJUNTOS = `ADJUNTOS: si en ESTE turno una herramienta o agente devuelve marcadores como [[adjunto:abc123…]], cópialos TAL CUAL en tu respuesta (uno por línea): el canal los convierte en la imagen o el archivo. Nunca los describas ni reescribas. Un marcador de un turno anterior NO se repite: la imagen ya fue entregada.\n`;
 
 export function buildCoordinator(toolNames: string[] = ['*'], canal?: 'telegram' | 'buzz' | 'api') {
   const base = `

@@ -114,15 +114,24 @@ class AttachmentsService {
     return out;
   }
 
-  /** Extrae los marcadores de un texto: devuelve el texto sin ellos y los adjuntos referenciados. */
-  extraer(texto: string): { texto: string; adjuntos: Adjunto[] } {
+  /** Qué adjunto ya se entregó por qué destino (p. ej. "telegram:12345"): un mismo marcador no se reenvía. */
+  private entregados = new Map<string, Set<string>>();
+
+  /**
+   * Extrae los marcadores de un texto: devuelve el texto sin ellos y los adjuntos
+   * referenciados. Con `destino`, los que ya se entregaron ahí se omiten (el modelo
+   * a veces repite un marcador viejo) y los nuevos quedan registrados.
+   */
+  extraer(texto: string, destino?: string): { texto: string; adjuntos: Adjunto[] } {
     const adjuntos: Adjunto[] = [];
     const vistos = new Set<string>();
+    const ya = destino ? (this.entregados.get(destino) || new Set<string>()) : null;
     const limpio = (texto || '').replace(MARCADOR, (_m, id) => {
       const a = this.get(id);
-      if (a && !vistos.has(a.id)) { vistos.add(a.id); adjuntos.push(a); }
+      if (a && !vistos.has(a.id) && !ya?.has(a.id)) { vistos.add(a.id); adjuntos.push(a); }
       return '';
     }).replace(/\n{3,}/g, '\n\n').trim();
+    if (ya && destino) { for (const a of adjuntos) ya.add(a.id); this.entregados.set(destino, ya); }
     return { texto: limpio, adjuntos };
   }
 

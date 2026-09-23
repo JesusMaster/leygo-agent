@@ -101,10 +101,45 @@ export function recortarHistorial(contents: any[], maxChars: number): { contents
 }
 
 /** Aplica ambas limpiezas a un LlmRequest (sobre copias). Devuelve un resumen para log. */
+const MARCADOR_ADJUNTO = /\[\[\s*adjunto\s*:\s*[a-f0-9-]{16,72}\s*\]\]/gi;
+
+/**
+ * Los marcadores [[adjunto:ID]] de turnos ANTERIORES se neutralizan: si quedan en el
+ * historial, el modelo los copia en respuestas posteriores ("Excelente gracias" →
+ * el canal volvía a mandar la foto). Solo el turno actual conserva los suyos.
+ */
+export function neutralizarAdjuntosPrevios(contents: any[]): any[] {
+  if (!Array.isArray(contents) || !contents.length) return contents;
+  let inicioTurno = 0;
+  for (let i = contents.length - 1; i >= 0; i--) if (esInicioDeTurno(contents[i])) { inicioTurno = i; break; }
+  return contents.map((c, i) => {
+    if (i >= inicioTurno || !Array.isArray(c?.parts)) return c;
+    let cambio = false;
+    const parts = c.parts.map((p: any) => {
+      if (typeof p?.text === 'string' && MARCADOR_ADJUNTO.test(p.text)) {
+        MARCADOR_ADJUNTO.lastIndex = 0; cambio = true;
+        return { ...p, text: p.text.replace(MARCADOR_ADJUNTO, '[imagen/archivo ya entregado en ese turno]') };
+      }
+      MARCADOR_ADJUNTO.lastIndex = 0;
+      const fr = p?.functionResponse;
+      if (fr?.response && typeof fr.response === 'object') {
+        const json = JSON.stringify(fr.response);
+        if (MARCADOR_ADJUNTO.test(json)) {
+          MARCADOR_ADJUNTO.lastIndex = 0; cambio = true;
+          return { ...p, functionResponse: { ...fr, response: JSON.parse(json.replace(MARCADOR_ADJUNTO, '[ya entregado]')) } };
+        }
+        MARCADOR_ADJUNTO.lastIndex = 0;
+      }
+      return p;
+    });
+    return cambio ? { ...c, parts } : c;
+  });
+}
+
 export function aplicarPresupuesto(llmRequest: any, agentName: string): { antes: number; despues: number; recortados: number } {
   const original: any[] = Array.isArray(llmRequest?.contents) ? llmRequest.contents : [];
   const antes = original.reduce((a, c) => { try { return a + JSON.stringify(c).length; } catch { return a; } }, 0);
-  const limpios = limpiarRespuestasDeTools(original);
+  const limpios = neutralizarAdjuntosPrevios(limpiarRespuestasDeTools(original));
   const { contents, recortados } = recortarHistorial(limpios, VENTANA_POR_AGENTE[agentName] ?? VENTANA_DEFAULT);
   llmRequest.contents = contents;
   const despues = contents.reduce((a, c) => { try { return a + JSON.stringify(c).length; } catch { return a; } }, 0);
