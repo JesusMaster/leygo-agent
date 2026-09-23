@@ -16,7 +16,8 @@
     "check:permisos": "tsx scripts/verificar_permisos_a2a.ts",
     "check:2fa": "tsx scripts/verificar_2fa.ts",
     "google:oauth": "tsx scripts/google_oauth.ts",
-    "gui:password": "tsx scripts/gui_password.ts"
+    "gui:password": "tsx scripts/gui_password.ts",
+    "commitments:backfill": "tsx scripts/backfill_commitments.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "^1.2.0",

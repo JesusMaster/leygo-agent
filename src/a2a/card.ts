@@ -88,6 +88,12 @@ const SKILLS_POR_TOOL: Record<string, any> = {
         tags:        ['escalation', 'triage', 'es'],
         examples:    ['Necesito confirmar una fecha de entrega con Jesús', '¿Qué temas pendientes tengo por resolver?'],
     },
+    commitments_agent: {
+        name:        'Compromisos de Jesús',
+        description: 'Lista viva de compromisos: lo que Jesús debe y lo que le deben, con fechas, estado y seguimiento. Uso personal.',
+        tags:        ['commitments', 'todo', 'es'],
+        examples:    ['¿Qué tengo pendiente esta semana?', 'Anota que le debo el informe a Sebastián el viernes'],
+    },
     account_agent: {
         name:        'Google Workspace (Gmail, Calendar, Drive, Chat)',
         description: 'Consulta y gestión de Gmail (búsqueda y redacción de borradores), Calendar (agenda y disponibilidad), Drive (búsqueda y lectura de archivos) y mensajes de Google Chat.',

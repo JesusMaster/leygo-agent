@@ -5,6 +5,7 @@ import { qdrantService, QdrantKnowledgeService } from './qdrant.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { generarTexto } from '../agents/llm/model_factory.js';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
+import { commitmentsService, parsearTareas, linkGmail, linkChat } from './commitments.service.js';
 
 dotenv.config();
 
@@ -14,7 +15,7 @@ export interface ConsolidatedDecision {
   date?: string;
   participants?: string[];
   decisions?: string[];
-  tasks?: string[];
+  tasks?: any[];
   summary?: string;
 }
 
@@ -80,7 +81,7 @@ REGLAS ESTRICTAS DE FILTRADO:
        "Decisión concreta 2..."
      ],
      "tasks": [
-       "Responsable: Tarea o compromiso específico..."
+       {"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}
      ],
      "summary": "Resumen ejecutivo de 2 a 4 oraciones sobre el contexto y la conclusión alcanzada."
    }
@@ -167,6 +168,7 @@ Responde ÚNICAMENTE con el objeto JSON, sin formato markdown ni código alreded
         const titleStr = analysis.title || threadDetail.subject;
         const participants = analysis.participants || [];
 
+        const tareas = parsearTareas(analysis.tasks);
         const structuredContent = `
 Título: ${titleStr}
 Fecha: ${dateStr}
@@ -180,7 +182,7 @@ ${analysis.summary || 'Sin resumen'}
 Decisiones Clave:
 ${(analysis.decisions || []).map((d) => `• ${d}`).join('\n')}
 
-${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analysis.tasks.map((t) => `• ${t}`).join('\n')}` : ''}
+${tareas.strings.length > 0 ? `Compromisos y Tareas:\n${tareas.strings.map((t) => `• ${t}`).join('\n')}` : ''}
 `.trim();
 
         const pointId = generateDeterministicUuid(`gmail_${tSummary.id}`);
@@ -194,7 +196,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
             participants,
             summary: analysis.summary,
             decisions: analysis.decisions,
-            tasks: analysis.tasks || [],
+            tasks: tareas.strings,
             source: 'gmail',
             threadId: tSummary.id,
             subject: threadDetail.subject,
@@ -204,6 +206,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
         );
 
         sqliteReminderService.markThreadConsolidated(tSummary.id, 'gmail', titleStr, threadDetail.messageCount);
+        await commitmentsService.ingestarDetectados(tareas.detectados, { type: 'gmail', ref: tSummary.id, title: titleStr, link: linkGmail(tSummary.id) }).catch(() => {});
 
         result.decisionsIndexed++;
         result.indexed = result.decisionsIndexed;
@@ -280,6 +283,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
         const titleStr = analysis.title || `Discusión en ${cThread.spaceDisplayName}`;
         const participants = analysis.participants || [];
 
+        const tareas = parsearTareas(analysis.tasks);
         const structuredContent = `
 Título: ${titleStr}
 Fecha: ${dateStr}
@@ -293,7 +297,7 @@ ${analysis.summary || 'Sin resumen'}
 Decisiones Clave:
 ${(analysis.decisions || []).map((d) => `• ${d}`).join('\n')}
 
-${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analysis.tasks.map((t) => `• ${t}`).join('\n')}` : ''}
+${tareas.strings.length > 0 ? `Compromisos y Tareas:\n${tareas.strings.map((t) => `• ${t}`).join('\n')}` : ''}
 `.trim();
 
         const pointId = generateDeterministicUuid(`chat_${cThread.threadName}`);
@@ -307,7 +311,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
             participants,
             summary: analysis.summary,
             decisions: analysis.decisions,
-            tasks: analysis.tasks || [],
+            tasks: tareas.strings,
             source: 'google_chat',
             threadId: cThread.threadName,
             spaceDisplayName: cThread.spaceDisplayName,
@@ -317,6 +321,7 @@ ${analysis.tasks && analysis.tasks.length > 0 ? `Compromisos y Tareas:\n${analys
         );
 
         sqliteReminderService.markThreadConsolidated(cThread.threadName, 'google_chat', titleStr, cThread.messages.length);
+        await commitmentsService.ingestarDetectados(tareas.detectados, { type: 'google_chat', ref: cThread.threadName, title: titleStr, link: linkChat(cThread.threadName) }).catch(() => {});
 
         result.decisionsIndexed++;
         result.indexed = result.decisionsIndexed;

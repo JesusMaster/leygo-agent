@@ -47,6 +47,7 @@ export const AGENTES_LLM: Array<{ name: string; titulo: string; descripcion: str
   { name: 'knowledge_agent',    titulo: 'Conocimiento',         descripcion: 'Cerebro digital: Obsidian, minutas de Meet y memoria episódica (Qdrant).', defaultModel: 'gemini-3.8-flash' },
   { name: 'faq_agent',          titulo: 'FAQs',                 descripcion: 'Preguntas frecuentes y respuestas cortas. Conviene un modelo barato.', defaultModel: 'gemini-3.5-flash-lite' },
   { name: 'account_agent',      titulo: 'Cuenta Google',        descripcion: 'Gmail, Calendar, Drive y Chat de Jesús. Usa muchas herramientas: necesita buen function calling.', defaultModel: 'gemini-3.8-flash' },
+  { name: 'commitments_agent',  titulo: 'Compromisos',          descripcion: 'Lista viva de compromisos: acepta, fecha, actualiza y hace seguimiento. CRUD con fechas relativas.', defaultModel: 'gemini-3.5-flash' },
   { name: 'triage_agent',       titulo: 'Triage',               descripcion: 'Decide si algo se escala a Jesús y con qué prioridad.', defaultModel: 'gemini-3.8-flash' },
   { name: 'public_coordinator', titulo: 'Coordinator público',  descripcion: 'Coordinador para el canal público (webhooks/Buzz sin sesión).', defaultModel: 'gemini-3.8-flash' },
   { name: 'knowledge_public',   titulo: 'Conocimiento público', descripcion: 'Versión acotada del conocimiento para el canal público.', defaultModel: 'gemini-3.8-flash' },

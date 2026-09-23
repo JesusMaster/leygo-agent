@@ -7,6 +7,7 @@ import { qdrantService, QdrantKnowledgeService, KnowledgePayload } from './qdran
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { generarTexto } from '../agents/llm/model_factory.js';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
+import { commitmentsService, parsearTareas } from './commitments.service.js';
 
 dotenv.config();
 
@@ -88,6 +89,7 @@ export class MeetingIngestService {
     participants: string[];
     summary: string;
     agreements: string[];
+    tasks?: any[];
     details: string;
   }> {
     // Si viene con formato estándar de Google Meet ("Notas de Gemini") y tiene campos explícitos
@@ -119,8 +121,10 @@ export class MeetingIngestService {
   "date": "Fecha de la reunión en formato YYYY-MM-DD o texto aproximado si se menciona",
   "participants": ["Nombre de persona 1", "Nombre de persona 2"],
   "summary": "Resumen ejecutivo de los temas tratados (2 a 4 oraciones)",
-  "agreements": ["Acuerdo o decisión 1", "Acuerdo o compromiso 2"]
+  "agreements": ["Acuerdo o decisión 1", "Acuerdo o compromiso 2"],
+  "tasks": [{"owner": "Nombre del responsable (Jesús si es él)", "task": "Compromiso concreto y accionable", "counterpart": "Con quién o para quién (o null)", "due": "YYYY-MM-DD si se comprometió una fecha, si no null", "priority": "alta|media|baja"}]
 }
+Solo pon en "tasks" compromisos accionables con responsable claro (no decisiones ni contexto).
 
 Nombre de archivo o referencia: ${fileName}
 
@@ -143,6 +147,7 @@ ${content.substring(0, 25000)}`;
         participants: detectedAttendees.length > 0 ? detectedAttendees : (parsed.participants || []),
         summary: parsed.summary || content.substring(0, 1000),
         agreements: parsed.agreements || [],
+        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
         details: content,
       };
     } catch {
@@ -152,6 +157,7 @@ ${content.substring(0, 25000)}`;
         participants: detectedAttendees,
         summary: content.substring(0, 1000),
         agreements: [],
+        tasks: [],
         details: content,
       };
     }
@@ -233,6 +239,8 @@ ${content.substring(0, 25000)}`;
       section: 'Resumen Ejecutivo y Acuerdos',
       content: headerText,
       link,
+      agreements: structured.agreements,
+      tasks: parsearTareas(structured.tasks).strings,
     };
 
     await qdrantService.upsertKnowledge(
@@ -265,6 +273,12 @@ ${content.substring(0, 25000)}`;
         detailPayload
       );
       totalChunks++;
+    }
+
+    // Compromisos accionables → lista viva (entran como propuestos)
+    const tareas = parsearTareas(structured.tasks);
+    if (tareas.detectados.length) {
+      await commitmentsService.ingestarDetectados(tareas.detectados, { type: 'meet', ref: sourceId, title: finalTitle, link }).catch(() => {});
     }
 
     return {

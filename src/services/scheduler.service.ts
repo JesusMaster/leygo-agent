@@ -5,6 +5,7 @@ import { meetingIngestService } from './meeting_ingest.service.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { tokenTrackerService } from './token_tracker.service.js';
 import { scheduledTasksService } from './scheduled_tasks.service.js';
+import { commitmentsService } from './commitments.service.js';
 import { generarTexto } from '../agents/llm/model_factory.js';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
@@ -40,6 +41,14 @@ export class SchedulerService {
       defaults: process.env.MORNING_DIGEST_CRON && !horaDeCron(process.env.MORNING_DIGEST_CRON)
         ? { kind: 'cron', cron_expr: process.env.MORNING_DIGEST_CRON }
         : { kind: 'daily', time_of_day: digestHora },
+    });
+
+    scheduledTasksService.registrarIntegrada({
+      key: 'commitments_reminder',
+      titulo: 'Aviso de compromisos',
+      descripcion: 'Compromisos vencidos, los de hoy y los propuestos por revisar. Solo avisa si hay algo.',
+      run: async () => commitmentsService.textoAviso(),
+      defaults: { kind: 'daily', time_of_day: '09:00' },
     });
 
     scheduledTasksService.registrarIntegrada({
@@ -141,6 +150,9 @@ ${events.length === 0 ? 'Sin reuniones programadas para hoy.' : events.map(e => 
 --- CORREOS SIN LEER RECIENTES ---
 ${unreadEmails.length === 0 ? 'Bandeja al día sin correos sin leer recientes.' : unreadEmails.map(m => `- De: ${m.from} | Asunto: ${m.subject} (ID: ${m.id})`).join('\n')}
 
+--- COMPROMISOS (lista viva) ---
+${commitmentsService.textoDigest() || 'Sin vencidos ni compromisos para hoy.'}
+
 --- PENDIENTES DE TU DECISIÓN (escalamientos) ---
 ${pendingEscalations.length === 0 ? 'Nada pendiente de decisión.' : pendingEscalations.map((e: any) => `- [${e.id}] (${e.urgency}) ${e.topic} — pidió ${e.requester} por ${e.channel}: ${String(e.summary).slice(0, 180)}`).join('\n')}
 
@@ -148,6 +160,7 @@ Instrucciones de formato:
 - No pongas título ni fecha al inicio (ya van en el encabezado del mensaje): parte directo por la agenda.
 - Usa encabezados claros y viñetas concisas.
 - Resalta en negrita horas y nombres clave.
+- Si hay compromisos vencidos o para hoy, van en su propia sección con el id entre corchetes; los "propuestos sin revisar" se mencionan en una línea.
 - Si hay escalamientos pendientes, ábrelos en su propia sección al final con su ID entre corchetes: son decisiones que solo Jesús puede tomar y son lo más importante del digest.
 - Si hay un hueco importante en la agenda o temas que requieran foco, menciónalo brevemente al final.
 - Máximo 300 palabras.

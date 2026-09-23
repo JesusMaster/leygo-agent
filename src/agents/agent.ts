@@ -118,6 +118,10 @@ export function buildCoordinator(toolNames: string[] = ['*']) {
         Telegram y te devuelve un "lo reviso y te confirmo".
         - **Ver o cerrar escalamientos pendientes** (por ejemplo "qué tengo pendiente de
         decidir", "resuelve el escalamiento a1b2c3d4") → también 'triage_agent'.
+        - **Compromisos** (lo que Jesús debe a otros y lo que otros le deben): "¿qué tengo pendiente?",
+        "¿qué le debo a Sebastián?", "anota que le debo X a Y el viernes", "ya lo hice", "se corre al lunes",
+        "acepta el abc123", "¿cómo voy con mis compromisos?" → 'commitments_agent'. Pásale la frase completa
+        de Jesús (incluida la fecha relativa) y devuelve su lista tal cual, sin resumirla.
 
         # TEMAS VETADOS (APLICABLES A TERCEROS EXTERNOS O CONSULTAS PÚBLICAS)
 

@@ -33,6 +33,7 @@ const CASOS: Caso[] = [
   { metodo: 'PUT',    ruta: '/api/settings/env',         debeExigirClave: true,  nota: 'editar el .env' },
   { metodo: 'GET',    ruta: '/api/settings/llm',         debeExigirClave: true,  nota: 'proveedores LLM (keys)' },
   { metodo: 'POST',   ruta: '/api/settings/restart',     debeExigirClave: true,  nota: 'reiniciar backend' },
+  { metodo: 'GET',    ruta: '/api/commitments',          debeExigirClave: true,  nota: 'compromisos' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },

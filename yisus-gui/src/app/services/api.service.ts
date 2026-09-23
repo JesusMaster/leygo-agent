@@ -106,6 +106,16 @@ export interface AgenteLlm {
   advertencia: string | null;
 }
 export interface LlmSettings { presets: ProviderPreset[]; providers: LlmProvider[]; agentes: AgenteLlm[]; }
+export type CommitmentStatus = 'propuesto' | 'pendiente' | 'en_curso' | 'hecho' | 'cancelado' | 'descartado';
+export interface Commitment {
+  id: string; title: string; detail: string | null; owner: string; mine: number; counterpart: string | null;
+  due_date: string | null; proposed_due: string | null; status: CommitmentStatus; priority: 'alta' | 'media' | 'baja';
+  source_type: string | null; source_ref: string | null; source_title: string | null; source_link: string | null;
+  created_at: number; updated_at: number; completed_at: number | null; last_notified_at: number | null; score?: number;
+}
+export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
+export interface CommitmentsPage { hoy: string; items: Commitment[]; stats: Record<string, number>; }
+export interface BackfillEstado { corriendo: boolean; iniciado: number | null; terminado: number | null; puntos: number; procesados: number; saltados: number; nuevos: number; repetidos: number; error: string | null; ultimo: string | null; }
 export interface EnvVar { key: string; grupo: string; descripcion: string; secreto: boolean; caliente?: boolean; placeholder?: string; valor: string | null; definida: boolean; enArchivo: boolean; }
 
 @Injectable({ providedIn: 'root' })
@@ -261,6 +271,20 @@ export class ApiService {
   setLlmAssignment(agent: string, a: { provider: string; model: string } | null): Observable<{ agentes: AgenteLlm[] }> {
     return this.http.put<any>(`${this.baseUrl}/api/settings/llm/assignments/${agent}`, a || {});
   }
+  // ─── Compromisos ───────────────────────────────────────────────────────────
+  getCommitments(params: Record<string, string> = {}): Observable<CommitmentsPage> {
+    const qs = new URLSearchParams(params).toString();
+    return this.http.get<any>(`${this.baseUrl}/api/commitments${qs ? '?' + qs : ''}`);
+  }
+  searchCommitments(q: string): Observable<{ items: Commitment[] }> { return this.http.get<any>(`${this.baseUrl}/api/commitments/search?q=${encodeURIComponent(q)}&abiertos=0`); }
+  getCommitment(id: string): Observable<{ item: Commitment; updates: CommitmentUpdate[] }> { return this.http.get<any>(`${this.baseUrl}/api/commitments/${id}`); }
+  createCommitment(data: Partial<Commitment> & { title: string }): Observable<{ item: Commitment }> { return this.http.post<any>(`${this.baseUrl}/api/commitments`, data); }
+  updateCommitment(id: string, data: Partial<Commitment> & { note?: string }): Observable<{ item: Commitment }> { return this.http.put<any>(`${this.baseUrl}/api/commitments/${id}`, data); }
+  acceptCommitment(id: string, due_date?: string | null): Observable<{ item: Commitment }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/accept`, { due_date }); }
+  addCommitmentNote(id: string, text: string): Observable<{ updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notes`, { text }); }
+  deleteCommitment(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/commitments/${id}`); }
+  getCommitmentsBackfill(): Observable<BackfillEstado> { return this.http.get<any>(`${this.baseUrl}/api/commitments/backfill`); }
+  startCommitmentsBackfill(desde?: string): Observable<BackfillEstado> { return this.http.post<any>(`${this.baseUrl}/api/commitments/backfill`, { desde: desde || undefined }); }
   getLlmCatalogo(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/catalogo`); }
   getEnv(): Observable<{ ruta: string; vars: EnvVar[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/env`); }
   saveEnv(cambios: Record<string, string | null>): Observable<{ cambiadas: string[]; requierenReinicio: string[] }> {

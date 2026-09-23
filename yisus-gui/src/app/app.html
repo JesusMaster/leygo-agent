@@ -15,7 +15,7 @@
           <line style="fill:none;stroke:var(--text-main);stroke-width:10;stroke-miterlimit:10;" x1="50.386" y1="147.693" x2="50.386" y2="74.386" />
         </svg>
       </div>
-      <h1 class="logo-text">yisus</h1>
+      <h1 class="logo-text">leygo</h1>
       <button type="button" class="btn-icon sidebar-close" aria-label="Cerrar menú" (click)="menuOpen.set(false)"><i class="ph ph-x"></i></button>
     </div>
 
@@ -34,6 +34,9 @@
       </a>
       <a routerLink="/escalations" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-warning-octagon"></i></span><span class="label">Escalamientos</span>
+      </a>
+      <a routerLink="/commitments" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
+        <span class="icon"><i class="ph ph-check-square"></i></span><span class="label">Compromisos</span>
       </a>
       <a routerLink="/webhooks" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
         <span class="icon"><i class="ph ph-share-network"></i></span><span class="label">Webhooks</span>

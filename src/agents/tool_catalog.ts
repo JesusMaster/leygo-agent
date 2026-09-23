@@ -3,6 +3,7 @@ import { faqAgent } from './faqs.agent.js';
 import { accountAgent } from './account.agent.js';
 import { knowledgeAgent } from './knowledge.agent.js';
 import { triageAgent } from './triage.agent.js';
+import { commitmentsAgent } from './commitments.agent.js';
 import { publicKnowledgeAgent } from './public_knowledge.agent.js';
 import { scheduleReminderTool, listRemindersTool, triggerMorningDigestTool, scheduleTaskTool } from './tools/scheduler.tools.js';
 import {
@@ -30,6 +31,7 @@ export const TOOL_CATALOG: Record<string, any> = {
   faq_agent:        new AgentTool({ agent: faqAgent }),
   account_agent:    new AgentTool({ agent: accountAgent }),          // Gmail, Calendar, Drive, Chat
   triage_agent:     new AgentTool({ agent: triageAgent }),
+  commitments_agent: new AgentTool({ agent: commitmentsAgent }),        // lista viva de compromisos
 
   // Recordatorios y digest
   schedule_reminder:        scheduleReminderTool,
@@ -68,6 +70,7 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   faq:        ['faq_agent'],
   workspace:  ['account_agent'],
   triage:     ['triage_agent'],
+  compromisos: ['commitments_agent'],
   reminders:  ['schedule_reminder', 'schedule_task', 'list_scheduled_reminders', 'trigger_morning_digest'],
   webhooks:   ['get_recent_webhooks', 'create_custom_webhook', 'list_custom_webhooks', 'toggle_custom_webhook', 'get_custom_webhook_logs'],
   usage:      ['get_token_usage', 'set_monthly_budget', 'refresh_pricing_catalog'],
@@ -135,6 +138,7 @@ export const TOOL_GROUP_LABELS: Record<string, string> = {
   knowledge: 'Conocimiento y memoria',
   workspace: 'Google Workspace',
   triage:    'Escalamiento',
+  compromisos: 'Compromisos',
   reminders: 'Recordatorios y digest',
   webhooks:  'Webhooks',
   usage:     'Consumo y presupuesto',

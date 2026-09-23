@@ -10,6 +10,7 @@ export const routes: Routes = [
   { path: 'channels',     loadComponent: () => import('./components/channels/channels').then(m => m.ChannelsComponent), canActivate: [authGuard] },
   { path: 'tokens',       loadComponent: () => import('./components/tokens/tokens').then(m => m.TokensComponent), canActivate: [authGuard] },
   { path: 'escalations',  loadComponent: () => import('./components/escalations/escalations').then(m => m.EscalationsComponent), canActivate: [authGuard] },
+  { path: 'commitments',  loadComponent: () => import('./components/commitments/commitments').then(m => m.CommitmentsComponent), canActivate: [authGuard] },
   { path: 'webhooks',     loadComponent: () => import('./components/webhooks/webhooks').then(m => m.WebhooksComponent), canActivate: [authGuard] },
   { path: 'tasks',        loadComponent: () => import('./components/tasks/tasks').then(m => m.TasksComponent), canActivate: [authGuard] },
   { path: 'reminders',    redirectTo: 'tasks' },

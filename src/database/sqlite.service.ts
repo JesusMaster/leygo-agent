@@ -106,6 +106,30 @@ export interface UsageRecord {
   agent?: string;
 }
 
+export type CommitmentStatus = 'propuesto' | 'pendiente' | 'en_curso' | 'hecho' | 'cancelado' | 'descartado';
+export interface Commitment {
+  id: string;
+  title: string;
+  detail: string | null;
+  owner: string;             // responsable (nombre)
+  mine: number;              // 1 = lo debe Jesús, 0 = se lo deben a Jesús (seguimiento)
+  counterpart: string | null;
+  due_date: string | null;       // YYYY-MM-DD comprometida
+  proposed_due: string | null;   // sugerida por el agente, pendiente de visto bueno
+  status: CommitmentStatus;
+  priority: 'alta' | 'media' | 'baja';
+  source_type: string | null;    // google_chat | gmail | meet | manual | backfill
+  source_ref: string | null;
+  source_title: string | null;
+  source_link: string | null;
+  fingerprint: string | null;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+  last_notified_at: number | null;
+}
+export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
+
 export interface SystemConfig {
   key: string;
   value: string;
@@ -275,6 +299,42 @@ export class SqliteReminderService {
         a2a_token TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status, created_at DESC);
+    `);
+
+    // 9b. Compromisos (lista viva de acuerdos, con estado y feedback)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS commitments (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        detail TEXT,
+        owner TEXT NOT NULL DEFAULT 'Jesús',
+        mine INTEGER NOT NULL DEFAULT 1,
+        counterpart TEXT,
+        due_date TEXT,
+        proposed_due TEXT,
+        status TEXT NOT NULL DEFAULT 'propuesto',
+        priority TEXT NOT NULL DEFAULT 'media',
+        source_type TEXT,
+        source_ref TEXT,
+        source_title TEXT,
+        source_link TEXT,
+        fingerprint TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        last_notified_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status, due_date);
+      CREATE INDEX IF NOT EXISTS idx_commitments_fp ON commitments(fingerprint);
+      CREATE TABLE IF NOT EXISTS commitment_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        commitment_id TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        text TEXT NOT NULL,
+        by TEXT NOT NULL DEFAULT 'jesus'
+      );
+      CREATE INDEX IF NOT EXISTS idx_commitment_updates ON commitment_updates(commitment_id, at DESC);
     `);
 
     // 10. Tokens A2A administrables desde la GUI
@@ -937,6 +997,75 @@ export class SqliteReminderService {
 
   public markEscalationDelivered(id: string, note: string): void {
     this.db.prepare(`UPDATE escalations SET delivered_at = ?, delivery_note = ? WHERE id = ?`).run(Date.now(), note, id);
+  }
+
+  // ─── Compromisos ─────────────────────────────────────────────────────────
+
+  public createCommitment(c: Omit<Commitment, 'created_at' | 'updated_at' | 'completed_at' | 'last_notified_at'>): Commitment {
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO commitments (id, title, detail, owner, mine, counterpart, due_date, proposed_due, status, priority, source_type, source_ref, source_title, source_link, fingerprint, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(c.id, c.title, c.detail ?? null, c.owner, c.mine ? 1 : 0, c.counterpart ?? null, c.due_date ?? null, c.proposed_due ?? null, c.status, c.priority, c.source_type ?? null, c.source_ref ?? null, c.source_title ?? null, c.source_link ?? null, c.fingerprint ?? null, now, now);
+    return this.getCommitment(c.id)!;
+  }
+
+  public getCommitment(id: string): Commitment | null {
+    return (this.db.prepare(`SELECT * FROM commitments WHERE id = ?`).get(id) as Commitment) || null;
+  }
+
+  public updateCommitment(id: string, cambios: Partial<Omit<Commitment, 'id' | 'created_at'>>): Commitment | null {
+    const actual = this.getCommitment(id);
+    if (!actual) return null;
+    const n = { ...actual, ...cambios, updated_at: Date.now() };
+    this.db.prepare(`
+      UPDATE commitments SET title = ?, detail = ?, owner = ?, mine = ?, counterpart = ?, due_date = ?, proposed_due = ?, status = ?, priority = ?,
+        source_type = ?, source_ref = ?, source_title = ?, source_link = ?, fingerprint = ?, updated_at = ?, completed_at = ?, last_notified_at = ?
+      WHERE id = ?
+    `).run(n.title, n.detail ?? null, n.owner, n.mine ? 1 : 0, n.counterpart ?? null, n.due_date ?? null, n.proposed_due ?? null, n.status, n.priority,
+      n.source_type ?? null, n.source_ref ?? null, n.source_title ?? null, n.source_link ?? null, n.fingerprint ?? null, n.updated_at, n.completed_at ?? null, n.last_notified_at ?? null, id);
+    return this.getCommitment(id);
+  }
+
+  public deleteCommitment(id: string): boolean {
+    this.db.prepare(`DELETE FROM commitment_updates WHERE commitment_id = ?`).run(id);
+    const r = this.db.prepare(`DELETE FROM commitments WHERE id = ?`).run(id) as any;
+    return (r?.changes ?? 0) > 0;
+  }
+
+  /** Lista con filtros. `abiertos` = propuesto + pendiente + en_curso. */
+  public listCommitments(f: { status?: CommitmentStatus[]; mine?: boolean; vencidos?: boolean; sinFecha?: boolean; hasta?: string; q?: string; source_ref?: string; limit?: number } = {}): Commitment[] {
+    const where: string[] = [];
+    const args: any[] = [];
+    if (f.status?.length) { where.push(`status IN (${f.status.map(() => '?').join(',')})`); args.push(...f.status); }
+    if (f.mine !== undefined) { where.push(`mine = ?`); args.push(f.mine ? 1 : 0); }
+    if (f.vencidos) { where.push(`due_date IS NOT NULL AND due_date < date('now','localtime') AND status IN ('pendiente','en_curso')`); }
+    if (f.sinFecha) { where.push(`due_date IS NULL`); }
+    if (f.hasta) { where.push(`due_date IS NOT NULL AND due_date <= ?`); args.push(f.hasta); }
+    if (f.source_ref) { where.push(`source_ref = ?`); args.push(f.source_ref); }
+    if (f.q) { where.push(`(title LIKE ? OR detail LIKE ? OR counterpart LIKE ? OR owner LIKE ?)`); const like = `%${f.q}%`; args.push(like, like, like, like); }
+    const sql = `SELECT * FROM commitments ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY CASE status WHEN 'en_curso' THEN 0 WHEN 'pendiente' THEN 1 WHEN 'propuesto' THEN 2 ELSE 3 END,
+               CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC, created_at DESC
+      LIMIT ?`;
+    args.push(f.limit ?? 200);
+    return this.db.prepare(sql).all(...args) as Commitment[];
+  }
+
+  public commitmentStats(): Record<string, number> {
+    const rows = this.db.prepare(`SELECT status, COUNT(*) as n FROM commitments GROUP BY status`).all() as any[];
+    const out: Record<string, number> = { propuesto: 0, pendiente: 0, en_curso: 0, hecho: 0, cancelado: 0, descartado: 0, vencidos: 0 };
+    for (const r of rows) out[r.status] = r.n;
+    out.vencidos = (this.db.prepare(`SELECT COUNT(*) as n FROM commitments WHERE due_date IS NOT NULL AND due_date < date('now','localtime') AND status IN ('pendiente','en_curso')`).get() as any).n;
+    return out;
+  }
+
+  public addCommitmentUpdate(u: Omit<CommitmentUpdate, 'id'>): void {
+    this.db.prepare(`INSERT INTO commitment_updates (commitment_id, at, kind, text, by) VALUES (?, ?, ?, ?, ?)`).run(u.commitment_id, u.at, u.kind, u.text, u.by);
+  }
+
+  public listCommitmentUpdates(commitmentId: string, limit = 50): CommitmentUpdate[] {
+    return this.db.prepare(`SELECT * FROM commitment_updates WHERE commitment_id = ? ORDER BY at DESC LIMIT ?`).all(commitmentId, limit) as CommitmentUpdate[];
   }
 
   public listEscalations(status?: string, limit: number = 20): any[] {

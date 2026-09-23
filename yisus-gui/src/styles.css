@@ -50,7 +50,7 @@ h1, h2, h3, h4 { font-family: var(--font-title); font-weight: 600; color: var(--
 
 /* Cada vista ocupa el contenedor completo */
 app-chat, app-usage, app-channels, app-tokens, app-escalations,
-app-webhooks, app-tasks, app-settings, .view-container > :not(router-outlet) {
+app-webhooks, app-tasks, app-commitments, app-settings, .view-container > :not(router-outlet) {
   display: flex !important;
   flex: 1 !important;
   width: 100% !important;
@@ -91,6 +91,7 @@ app-webhooks, app-tasks, app-settings, .view-container > :not(router-outlet) {
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-head h2 { font-size: 24px; }
 .page-head .sub { color: var(--text-dim); font-size: 14px; margin-top: 4px; max-width: 70ch; }
+.page-head .sub a { color: var(--accent-primary); }
 
 .card {
   background: var(--bg-card); border: 1px solid var(--border-light);

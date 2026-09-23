@@ -22,6 +22,8 @@ export interface KnowledgePayload {
 
 export class QdrantKnowledgeService {
   private client: QdrantClient;
+  /** Acceso al cliente para colecciones auxiliares (compromisos). */
+  public get raw(): QdrantClient { return this.client; }
   private ollamaUrl: string;
   private ollamaModel: string;
 
