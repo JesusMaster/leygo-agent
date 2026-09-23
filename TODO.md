@@ -77,6 +77,8 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
 - [x] **2FA Man-in-the-Middle vía Telegram**:
   - Bot `@Leygo_bot` con teclado interactivo de botones (`Autorizar 5 min` / `Denegar`).
   - Ventana de gracia de 5 minutos para llamadas encadenadas sin repetición de alertas.
+  - **(22-09)** La ventana de gracia es **por canal** (se fija el canal al pedir la aprobación, no al responderla) y hay cooldown tras denegar (5 min) o expirar (60 s) para no inundar Telegram. `chat_find_dm` evita abrir historiales para ubicar a una persona. Test: `npm run check:2fa`.
+  - **(22-09)** `chat_read_messages` lee los más recientes primero (`orderBy createTime DESC`), marca los no leídos (`chat.users.readstate`) y acepta `sinceDays`. Script `npm run google:oauth` para regenerar el refresh token con los scopes completos.
 - [x] **Telegram Conversacional (Texto y Notas de Voz)**:
   - Bot interactivo bidireccional (`src/services/telegram_bot.service.ts`).
   - Transcripción nativa de notas de voz (`.oga`, `.ogg`, `.mp3`) con Gemini 2.5 Flash directamente sin dependencias de sistema (ffmpeg).
@@ -84,8 +86,9 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
   - Filtro de seguridad estricto que solo responde a `TELEGRAM_CHAT_ID`.
 - [x] **Background Scheduler & Morning Digest Proactivo**:
   - Servicio cron en background (`src/services/scheduler.service.ts`) configurado en timezone `America/Santiago`.
-  - **Morning Digest diario a las 08:30 CLT**: sintetiza Google Calendar del día + correos de Gmail sin leer y envía un resumen ejecutivo estructurado a Telegram.
+  - **Morning Digest diario a las 08:30 CLT**: sintetiza Google Calendar del día + correos de Gmail sin leer + escalamientos pendientes y envía un resumen ejecutivo a Telegram.
   - Sincronización nocturna automática de reuniones de Google Meet a las 20:00 CLT.
+  - **(22-09)** Digest, sync de Meet y consolidación nocturna ya no son crons fijos: son **rutinas del sistema** registradas como tareas programadas (`autonomous = 2`), editables desde la GUI (hora, canales, pausa, historial, ejecución manual). `MORNING_DIGEST_CRON`, `MEET_SYNC_CRON` y `CONTEXT_SYNC_CRON` solo se usan para sembrarlas la primera vez.
   - **Persistencia en SQLite (`data/reminders.db`)**: los recordatorios se guardan localmente en SQLite mediante el soporte nativo de Node.js (`node:sqlite`). Al reiniciar el servidor, recupera automáticamente los recordatorios pendientes para no perder ninguna instrucción programada.
   - Herramientas para el agente: `schedule_reminder`, `list_scheduled_reminders` y `trigger_morning_digest`.
 
@@ -123,7 +126,15 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
   - Herramientas: `escalate_to_jesus` (registra y avisa por Telegram con el contexto completo), `list_escalations` y `resolve_escalation` (solo cuando Jesús indica la decisión).
   - El Morning Digest ahora abre una sección con los escalamientos pendientes de decisión.
   - Regla de ruteo explícita en el Coordinator: sueldos, contrataciones, evaluaciones, opiniones sobre personas, compromisos legales/comerciales y credenciales van al triage, que NO responde el fondo.
-  - Pendiente: botones de resolución rápida en la tarjeta de Telegram (hoy se resuelve por conversación).
+  - **(22-09)** Resolución desde la GUI (vista Escalamientos) y la respuesta **vuelve a quien preguntó** (`escalation_delivery.service.ts`): Buzz → mención en el hilo; A2A → push al peer o nota interna en la siguiente conversación del mismo token.
+  - Pendiente: botones de resolución rápida en la tarjeta de Telegram (hoy se resuelve por conversación o GUI).
+- [x] **A2A bidireccional** ✅ (22-09): Yisus también es *cliente* A2A (`a2a_peers.service.ts`, herramientas `a2a_send_message` / `a2a_list_peers`, tokens A2A de otros agentes guardados en `a2a_peers`). Configurable desde la GUI (Tokens A2A → Agentes remotos, con prueba de conexión).
+- [x] **Proveedores LLM y modelo por agente** ✅ (22-09):
+  - Adaptadores `BaseLlm` propios para **OpenAI-compatible** (OpenAI, xAI, Moonshot, DeepSeek, Groq, Mistral, OpenRouter, Ollama `/v1`) y **Anthropic**, con function calling, contabilidad de tokens y reintentos ante 429/5xx (`src/agents/llm/`). Sin streaming hacia el chat (solo Gemini lo tiene).
+  - `DynamicLlm`: cada agente resuelve proveedor+modelo en cada turno desde `system_config` (`llm.providers`, `llm.assignments`). Cambios sin reiniciar. Override por ejecución (`conModelo`) para tareas programadas y webhooks.
+  - GUI Ajustes: Proveedores LLM (presets), Modelos por agente (incluye digest, consolidación e ingesta), Claves y variables (edita el `.env` con secretos enmascarados, reinicio del backend).
+  - Los errores del proveedor (sin crédito, RPM, caído) se muestran en el chat/Telegram/Buzz/A2A en vez de "(sin respuesta)".
+- [x] **Presupuesto de contexto** ✅ (22-09, `src/agents/llm/context_budget.ts`): las respuestas de herramientas ya no viajan duplicadas (`result` + `data`) y tienen tope por herramienta; el historial se recorta a una ventana por agente cortando en inicio de turno; Conocimiento/FAQ/Triage/Conocimiento público van sin historial entre turnos (compartían sesión con el Coordinator y arrastraban todo). Misma pregunta: $0,198 → $0,016. El tooltip de consumo del chat muestra llamadas por agente.
 
 ---
 
@@ -164,6 +175,12 @@ Archivo de seguimiento y control para el desarrollo evolutivo de **Yisus Agent**
   - **Endpoints REST**: `GET /api/usage`, `GET /api/usage/budget`, `POST /api/usage/budget`, `POST /api/usage/refresh-pricing` (100% compatibles con `UsageComponent` de Leygo GUI).
   - **Herramientas del Agente**: `get_token_usage`, `set_monthly_budget` y `refresh_pricing_catalog`.
 
+- [x] **GUI de administración (`yisus-gui`, Angular 21)** ✅ (21/22-09), calcada de Leygo:
+  - Inicio de sesión (usuario + contraseña scrypt en `.env`, `npm run gui:password`); la GUI ya no necesita la `ADMIN_API_KEY` (la muestra en Ajustes → Conexión para usar el API directo).
+  - Chat con markdown, pasos en vivo, tokens + costo por turno, adjuntos, detener; historial local.
+  - Consumo con historial paginado y filtros; Canales y tools; Tokens A2A (selector de herramientas en tabla) y Agentes remotos; Escalamientos; Smart Webhooks (proveedor + modelo entre los configurados); Tareas programadas (una vez / cada N min / diaria / cron; recordatorio, acción del agente con su propio modelo, o rutina del sistema; entrega multicanal Telegram / Google Chat / Buzz / Email / A2A; historial de corridas); Ajustes.
+  - Responsive (móvil/tablet). Cloudflare cachea el JS del dev server: conviene una regla *Bypass cache* para `gui-yisus`.
+
 ### Pendiente ⏳
 - [ ] **Fase 5 (AutoCoder Sandbox)**:
   - Capacidad para crear branches, ejecutar scripts en entorno aislado y proponer PRs directamente desde instrucciones del usuario.
@@ -186,7 +203,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Si `A2A_API_KEY` no está definida (hoy no está en `.env`), `/a2a/v1` queda público y cualquiera conversa con el Coordinator completo, que tiene acceso a Gmail, Drive y Google Chat.
   - `securityRequirements: []` en la Agent Card, incluso cuando hay API key configurada.
   - Nostr entra por el mismo Runner y las mismas tools que Telegram.
-  - **Pendiente**: definir tools permitidas por canal (Telegram = full, A2A/Nostr = solo lectura de conocimiento público) y exigir API key siempre.
+  - ✅ (21/22-09) Tools por canal en `config/channels.json`; A2A exige Bearer por token, con alcance por token validado al invocar. Buzz sigue con las 17 (ver §7).
 
 - [~] **Temas vetados recortados en el Coordinator** — repuestos en el agente PÚBLICO (A2A). En el Coordinator interno siguen recortados a propósito, porque ahí el interlocutor es el propio Jesús. Revisar si se quiere endurecer también para Buzz (`src/agents/agent.ts`):
   - Se eliminaron sueldos/compensaciones, contrataciones/despidos/evaluaciones y opiniones sobre personas específicas. Quedaron solo contratos y credenciales.
@@ -265,7 +282,7 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
   - Un solo Runner público para todos los tokens (antes uno por alcance).
   - Editable desde la GUI: skills públicas en "Canales y tools", alcance por token en "Tokens A2A".
   - Pendiente: `config/channels.json` le da a **Buzz** las 17 herramientas, incluida `account_agent`. Buzz es un canal con terceros; conviene recortarlo.
-  - Pendiente: la ventana de gracia del 2FA de Telegram es global (5 min). Si alguna vez se habilita `account_agent` por un canal no personal, hay que atarla al canal que pidió la aprobación.
+  - ✅ (22-09) La ventana de gracia del 2FA ya es por canal (se fija al pedir la aprobación).
 
 ### 🟡 Menores / Higiene
 
@@ -288,5 +305,25 @@ Hallazgos de la revisión completa del repo, ordenados por severidad. Ninguno co
 
 ### Pendiente ⏳
 - [ ] **Decidir el alcance de Buzz**: `config/channels.json` le da a Buzz las 17 herramientas, incluida `account_agent`. Buzz es un canal público de Nostr sin tokens; lo único que hoy frena una acción sobre la cuenta es la confirmación 2FA por Telegram. Propuesta: dejar `knowledge_public`, `faq_agent` y `triage_agent`.
-- [ ] **`setCurrentA2AScope` usa `AsyncLocalStorage.enterWith`**: muta el contexto actual en vez de envolver el resto de la petición. Si el alcance sobrevive a la petición (keep-alive), una llamada posterior podría verlo. La dirección del error es hacia *bloquear de más*, no hacia conceder, pero conviene pasarlo a `.run()` y verificarlo contra el servidor levantado.
-- [ ] **`ADMIN_API_KEY` sin definir desactiva el guard** (`return next()`), pensado para desarrollo local. Evaluar exigirla cuando `NODE_ENV=production`.
+- [x] **`setCurrentA2AScope` usa `AsyncLocalStorage.enterWith`** ✅ (22-09): el middleware ahora envuelve `next()` con `runWithA2AScope` (`.run()`); el alcance muere con la petición. `setCurrentA2AScope` queda solo para `check:permisos`.
+- [ ] **`ADMIN_API_KEY` sin definir desactiva el guard** (`return next()`), pensado para desarrollo local. Evaluar exigirla cuando `NODE_ENV=production`. (Hoy el guard acepta también la sesión de la GUI.)
+- [ ] **`/api/settings/env` edita el `.env` completo** desde la GUI (secretos enmascarados, pero se pueden sobrescribir). Está detrás del guard; si la GUI se expone fuera de la VPN/tunnel, conviene Cloudflare Access delante.
+
+---
+
+## 🧭 8. Pendientes abiertos (22-09-2026)
+
+Cosas conversadas y no cerradas, en orden de valor:
+
+- [ ] **Alcance de Buzz**: sigue con 17 herramientas, incluida `account_agent`. Propuesta: `knowledge_public`, `faq_agent`, `triage_agent`, `buzz_*`.
+- [ ] **Recarga en caliente de tools por canal**: Telegram, Buzz y API construyen su Coordinator al arrancar; un cambio en "Canales y tools" requiere reinicio (A2A no). Podría resolverse igual que los modelos (resolver el set de tools por turno).
+- [ ] **Topes de presupuesto que corten** y no solo avisen (`isOverBudget(channel)` ya existe).
+- [ ] **Botones de resolución rápida de escalamientos en Telegram**.
+- [ ] **Acciones rápidas de Calendar en Telegram** (aceptar / rechazar invitaciones).
+- [ ] **Buzz: abrir/continuar hilos por iniciativa propia** (evento raíz en `buzz_send_message`).
+- [ ] **2FA: acciones públicas que pregunten siempre** (no acogerse a la ventana de gracia).
+- [ ] **Watcher de Obsidian + borrado/renombrado + hashes incrementales + búsqueda híbrida** (§1).
+- [ ] **Purga/retención de memoria episódica** (§2).
+- [ ] **`apprecio_agent`** (GitHub/GitLab) y **AutoCoder Sandbox** (§4/§5).
+- [ ] **Override de modelo de una tarea también para los subagentes** (hoy solo aplica al Coordinator).
+- [ ] **Streaming para proveedores no-Gemini** (los adaptadores entregan la respuesta completa por turno).

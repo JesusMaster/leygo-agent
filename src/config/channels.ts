@@ -201,8 +201,18 @@ export function describeChannels() {
 // del protocolo lo lee para construir el agente con las herramientas correctas.
 const a2aScopeStorage = new AsyncLocalStorage<A2AScope>();
 
+/** Solo para pruebas: fija el alcance en el contexto actual. En producción usa `runWithA2AScope`. */
 export function setCurrentA2AScope(scope: A2AScope): void {
   a2aScopeStorage.enterWith(scope);
+}
+
+/**
+ * Envuelve el resto de la petición con su alcance: al terminar, el contexto
+ * desaparece solo. Con `enterWith` el alcance quedaba pegado al contexto del
+ * socket (keep-alive) y podía sobrevivir a la petición.
+ */
+export function runWithA2AScope<T>(scope: A2AScope, fn: () => T): T {
+  return a2aScopeStorage.run(scope, fn);
 }
 
 export function currentA2AScope(): A2AScope | undefined {

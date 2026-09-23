@@ -14,7 +14,7 @@ import type { Runner } from '@google/adk';
 import { DefaultRequestHandler, InMemoryTaskStore } from '@a2a-js/sdk/server';
 import { agentCardHandler, jsonRpcHandler, UserBuilder } from '@a2a-js/sdk/server/express';
 import type { RedisSessionService } from '../services/redis_session.service.js';
-import { resolveA2AScope, setCurrentA2AScope, describeChannels } from '../config/channels.js';
+import { resolveA2AScope, runWithA2AScope, describeChannels } from '../config/channels.js';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { yisusAgentCard } from './card.js';
 import { YisusAgentExecutor } from './executor.js';
@@ -89,9 +89,9 @@ function a2aAuth(req: express.Request, res: express.Response, next: express.Next
         return;
     }
 
-    // El executor lee este alcance para construir el agente con esas herramientas
-    setCurrentA2AScope(scope);
-    next();
+    // El executor lee este alcance para construir el agente con esas herramientas.
+    // `.run()` acota el alcance a esta petición (no queda pegado al socket keep-alive).
+    runWithA2AScope(scope, () => next());
 }
 
 export function mountA2A(
