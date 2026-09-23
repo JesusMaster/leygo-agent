@@ -24,17 +24,43 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
         <button class="btn-primary" (click)="abrirNueva()"><i class="ph ph-plus"></i> Nueva tarea</button>
       </div>
 
+      <div class="tabs">
+        <button class="tab" [class.on]="pestana() === 'mias'" (click)="ir('mias')"><i class="ph ph-user"></i> Mis tareas <span class="cnt">{{ mias().length }}</span></button>
+        <button class="tab" [class.on]="pestana() === 'sistema'" (click)="ir('sistema')"><i class="ph ph-puzzle-piece"></i> Rutinas del sistema <span class="cnt">{{ sistema().length }}</span></button>
+        <button class="tab" [class.on]="pestana() === 'finalizadas'" (click)="ir('finalizadas')"><i class="ph ph-check-circle"></i> Finalizadas <span class="cnt">{{ finalizadas().length }}</span></button>
+      </div>
+
       @if (!cargado()) {
         <div class="empty">Cargando tareas…</div>
-      } @else if (items().length === 0) {
+      } @else if (visibles().length === 0) {
         <div class="card empty-state">
-          <i class="ph ph-calendar-check"></i>
-          <h3>Todavía no hay tareas</h3>
-          <p>Programa un recordatorio de una vez, una rutina diaria o una expresión cron. También puedes pedírselo al agente por chat: "todos los días a las 8:45 revisa mi agenda".</p>
-          <button class="btn-primary" (click)="abrirNueva()"><i class="ph ph-plus"></i> Nueva tarea</button>
+          @switch (pestana()) {
+            @case ('mias') {
+              <i class="ph ph-calendar-check"></i>
+              <h3>Todavía no hay tareas tuyas</h3>
+              <p>Programa un recordatorio de una vez, una rutina diaria o una expresión cron. También puedes pedírselo al agente por chat: "todos los días a las 8:45 revisa mi agenda".</p>
+              <button class="btn-primary" (click)="abrirNueva()"><i class="ph ph-plus"></i> Nueva tarea</button>
+            }
+            @case ('sistema') {
+              <i class="ph ph-puzzle-piece"></i>
+              <h3>Sin rutinas del sistema</h3>
+              <p>Morning Digest, aviso de compromisos, sync de Meet y consolidación se pueden volver a programar desde "Nueva tarea".</p>
+            }
+            @default {
+              <i class="ph ph-check-circle"></i>
+              <h3>Nada finalizado</h3>
+              <p>Acá quedan las tareas de una sola vez que ya se ejecutaron.</p>
+            }
+          }
         </div>
       } @else {
-        @for (t of items(); track t.id) {
+        @if (pestana() === 'finalizadas') {
+          <div class="row" style="margin-bottom:12px">
+            <span class="spacer"></span>
+            <button class="btn-secondary" (click)="limpiarFinalizadas()"><i class="ph ph-broom"></i> Eliminar todas las finalizadas ({{ finalizadas().length }})</button>
+          </div>
+        }
+        @for (t of visibles(); track t.id) {
           <div class="task" [class.paused]="t.status === 'paused'" [class.done]="t.status === 'done'">
             <div class="task-head">
               <div class="task-badges">
@@ -221,6 +247,13 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
     }
   `,
   styles: [`
+    .tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--border-light); overflow-x: auto; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); font-size: 14px; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
+    .tab i { font-size: 17px; }
+    .tab:hover { color: var(--text-main); }
+    .tab.on { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+    .tab .cnt { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--bg-main); color: var(--text-dim); }
+    .tab.on .cnt { background: rgba(129,140,248,.18); color: var(--accent-primary); }
     .tb.sys { background: rgba(168,85,247,.14); color: #c084fc; }
     .tb.model { background: rgba(56,189,248,.14); color: #7dd3fc; text-transform: none; letter-spacing: 0; }
     .task { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; transition: border-color .15s; }
@@ -303,6 +336,18 @@ export class TasksComponent {
   private toast = inject(ToastService);
 
   items = signal<ScheduledTask[]>([]);
+  pestana = signal<'mias' | 'sistema' | 'finalizadas'>((localStorage.getItem('yisus_tasks_tab') as any) || 'mias');
+  mias = computed(() => this.items().filter((t) => t.autonomous !== 2 && t.status !== 'done'));
+  sistema = computed(() => this.items().filter((t) => t.autonomous === 2 && t.status !== 'done'));
+  finalizadas = computed(() => this.items().filter((t) => t.status === 'done'));
+  visibles = computed(() => this.pestana() === 'mias' ? this.mias() : this.pestana() === 'sistema' ? this.sistema() : this.finalizadas());
+  ir(p: 'mias' | 'sistema' | 'finalizadas') { this.pestana.set(p); try { localStorage.setItem('yisus_tasks_tab', p); } catch {} }
+  limpiarFinalizadas() {
+    const lista = this.finalizadas();
+    if (!lista.length || !confirm(`¿Eliminar ${lista.length} tarea(s) finalizada(s) y su historial?`)) return;
+    let pend = lista.length;
+    for (const t of lista) this.api.deleteTask(t.id).subscribe({ next: () => { if (--pend === 0) { this.toast.ok('Finalizadas eliminadas'); this.load(); } }, error: () => { if (--pend === 0) this.load(); } });
+  }
   cargado = signal(false);
   editando = signal<string | null>(null);
   editForm: { message: string; delivery: TaskDelivery[]; kind: TaskKind; run_at: string; interval_minutes: number | null; time_of_day: string; cron_expr: string; model: string } = { message: '', delivery: [{ channel: 'telegram' }], kind: 'daily', run_at: '', interval_minutes: null, time_of_day: '09:00', cron_expr: '', model: '' };
@@ -427,7 +472,7 @@ export class TasksComponent {
 
   // ─── Crear ───────────────────────────────────────────────────────────
   private formVacio() { return { message: '', autonomous: false, integrada: '', model: '', kind: 'once' as TaskKind, run_at: '', interval_minutes: null as number | null, time_of_day: '09:00', cron_expr: '', delivery: [{ channel: 'telegram' as TaskChannel }] as TaskDelivery[] }; }
-  abrirNueva() { this.form = this.formVacio(); this.modal.set(true); }
+  abrirNueva() { this.form = this.formVacio(); if (this.pestana() === 'sistema') { this.form.integrada = this.integradasDisponibles()[0]?.key || ''; this.form.kind = 'daily'; } this.modal.set(true); }
   cerrarModal() { if (!this.guardando()) this.modal.set(false); }
 
   formValido(): boolean {
