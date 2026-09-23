@@ -50,7 +50,7 @@ h1, h2, h3, h4 { font-family: var(--font-title); font-weight: 600; color: var(--
 
 /* Cada vista ocupa el contenedor completo */
 app-chat, app-usage, app-channels, app-tokens, app-escalations,
-app-webhooks, app-reminders, app-settings {
+app-webhooks, app-tasks, app-settings, .view-container > :not(router-outlet) {
   display: flex !important;
   flex: 1 !important;
   width: 100% !important;
