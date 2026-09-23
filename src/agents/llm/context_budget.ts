@@ -16,6 +16,8 @@
  */
 
 /** Máximo de caracteres del `result` de cada herramienta (por defecto 12k ≈ 3,5k tokens). */
+import { attachmentsService } from '../../services/attachments.service.js';
+
 const TOPE_RESULT_POR_TOOL: Record<string, number> = {
   drive_read_file: 30_000,
   gmail_read_email: 15_000,
@@ -149,7 +151,13 @@ export function neutralizarAdjuntosPrevios(contents: any[]): any[] {
         const json = JSON.stringify(fr.response);
         if (MARCADOR_ADJUNTO.test(json)) {
           MARCADOR_ADJUNTO.lastIndex = 0; cambio = true;
-          return { ...p, functionResponse: { ...fr, response: JSON.parse(json.replace(MARCADOR_ADJUNTO, '')) } };
+          // En la respuesta de la herramienta el marcador se cambia por la URL pública: así el
+          // agente puede repetir el enlace si le preguntan por el resultado, sin reenviar el archivo.
+          const conUrl = json.replace(MARCADOR_ADJUNTO, (m) => {
+            const id = (/adjunto\s*:\s*([a-f0-9-]+)/i.exec(m)?.[1] || '').replace(/-/g, '');
+            return JSON.stringify(attachmentsService.urlPublica(id)).slice(1, -1);
+          });
+          return { ...p, functionResponse: { ...fr, response: JSON.parse(conUrl) } };
         }
         MARCADOR_ADJUNTO.lastIndex = 0;
       }

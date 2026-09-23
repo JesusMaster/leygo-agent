@@ -20,7 +20,7 @@ import {
 } from '@a2a-js/sdk/server';
 import type { RedisSessionService } from '../services/redis_session.service.js';
 import { currentA2AScope } from '../config/channels.js';
-import { agentMessage, extractText, status } from './helpers.js';
+import { agentMessage, extractText, status, urlPart } from './helpers.js';
 import { attachmentsService } from '../services/attachments.service.js';
 import { sufijoFechaMensaje } from '../utils/fecha.js';
 
@@ -117,18 +117,27 @@ export class YisusAgentExecutor implements AgentExecutor {
                 return;
             }
 
-            // 4) Respuesta final → input-required (conversación multi-turno)
-            const finalText = replies.length
-                ? attachmentsService.comoEnlaces(replies[replies.length - 1])
+            // 4) Respuesta final. COMPLETED (terminal) salvo que Yisus esté preguntando algo
+            //    al interlocutor: antes se devolvía siempre input-required y los clientes
+            //    autónomos (OpenClaw) lo leían como "sigue pendiente" y preguntaban "estado"
+            //    una y otra vez, regenerando la imagen en cada vuelta. La conversación sigue
+            //    igual con el mismo contextId (la sesión ADK está keyed por contextId).
+            const crudo = replies.length
+                ? replies[replies.length - 1]
                 : errorModelo
                     ? `⚠️ El modelo no pudo responder: ${errorModelo}`
                     : 'Lo siento, no pude generar una respuesta. ¿Puedes reformular tu consulta?';
+            const { adjuntos } = attachmentsService.extraer(crudo);
+            const finalText = attachmentsService.comoEnlaces(crudo);
+            const fileParts = adjuntos.map((a) => urlPart(attachmentsService.urlPublica(a.id), a.mime, a.nombre));
+            const pregunta = /\?\s*$/.test(finalText.trim());
+            const estadoFinal = replies.length && !pregunta ? TaskState.TASK_STATE_COMPLETED : TaskState.TASK_STATE_INPUT_REQUIRED;
 
             bus.publish(AgentEvent.statusUpdate({
                 taskId, contextId,
                 status:   status(
-                    TaskState.TASK_STATE_INPUT_REQUIRED,
-                    agentMessage(finalText, taskId, contextId),
+                    estadoFinal,
+                    agentMessage(finalText, taskId, contextId, fileParts),
                 ),
                 metadata: undefined,
             }));

@@ -26,14 +26,24 @@ export function extractText(message: Message | undefined): string {
         .join('\n');
 }
 
+/** Parte de archivo por URL (imágenes/archivos generados por herramientas). */
+export function urlPart(url: string, mediaType: string, filename: string): Part {
+    return {
+        content:   { $case: 'url', value: url },
+        metadata:  undefined,
+        filename,
+        mediaType,
+    };
+}
+
 /** Mensaje del agente (Yisus) asociado a un task/context. */
-export function agentMessage(text: string, taskId: string, contextId: string): Message {
+export function agentMessage(text: string, taskId: string, contextId: string, extraParts: Part[] = []): Message {
     return {
         messageId:        randomUUID(),
         contextId,
         taskId,
         role:             Role.ROLE_AGENT,
-        parts:            [textPart(text)],
+        parts:            [textPart(text), ...extraParts],
         metadata:         undefined,
         extensions:       [],
         referenceTaskIds: [],

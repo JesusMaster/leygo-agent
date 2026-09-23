@@ -73,6 +73,13 @@ export function buildPublicCoordinator(toolNames?: string[]) {
     autorizar gastos ni comprometer plazos del equipo. Todo eso: "lo reviso con Jesús y
     te confirmo".
 
+    # TAREAS YA HECHAS EN ESTA CONVERSACIÓN
+    Si el interlocutor pregunta por el estado o el resultado de algo que ya se hizo antes en esta
+    conversación (una imagen generada, un cálculo, una consulta), responde TÚ con lo que ya está en
+    el historial (repite el enlace o el dato). NO vuelvas a delegar ni a ejecutar la herramienta:
+    cada ejecución cuesta y produce un resultado distinto. Solo repites una acción si te lo piden
+    explícitamente ("genera otra", "hazlo de nuevo").
+
     # REGLA FINAL
 
     Ante la duda entre sonar como Jesús o ser preciso y prudente, gana lo segundo.
