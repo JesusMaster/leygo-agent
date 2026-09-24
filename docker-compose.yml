@@ -1,0 +1,42 @@
+# Yisus Agent en producción: backend + GUI detrás de Caddy (TLS automático).
+# Un solo dominio: la GUI en / y la API en /api, /run, /a2a, … (mismo origen → sin CORS).
+services:
+  agent:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  gui:
+    build: ./yisus-gui
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-yisus.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [agent, gui]
+
+volumes:
+  caddy_data:
+  caddy_config:

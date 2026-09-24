@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+qdrant_storage
+yisus-gui
+docs
+scripts
+.git
+.env
+.env.*
+*.md
+*.log
+*.bak*

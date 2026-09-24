@@ -311,6 +311,8 @@ cd yisus-gui && npm install && npx ng build --watch --configuration development 
 
 ## 🚀 Instalación
 
+> Para producción (DigitalOcean, Docker Compose + Caddy) ver **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
 **Requisitos**: Node.js ≥ 22 (usa `node:sqlite` nativo), Redis, Qdrant (local o Cloud), MongoDB (solo para el FAQ de Apprecio), opcionalmente Ollama para embeddings.
 
 ```bash

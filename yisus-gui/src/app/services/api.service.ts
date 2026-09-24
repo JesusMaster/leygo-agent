@@ -138,9 +138,17 @@ export interface EnvVar { key: string; grupo: string; descripcion: string; secre
 export class ApiService {
   private http = inject(HttpClient);
 
-  /** Base del backend. Configurable desde Ajustes; por defecto el mismo host en :4000 */
+  /**
+   * Base del backend. Configurable desde Ajustes. Por defecto:
+   * - en desarrollo (ng serve, puerto 4200) → el mismo host en :4000;
+   * - en producción → el MISMO origen (Caddy sirve GUI y API bajo un dominio: sin CORS ni configuración).
+   */
   get baseUrl(): string {
-    return localStorage.getItem('yisus_api_url') || `${window.location.protocol}//${window.location.hostname}:4000`;
+    const guardada = localStorage.getItem('yisus_api_url');
+    if (guardada) return guardada;
+    const { protocol, hostname, port, origin } = window.location;
+    if (port === '4200' || hostname === 'localhost' || hostname === '127.0.0.1') return `${protocol}//${hostname}:4000`;
+    return origin;
   }
   setBaseUrl(url: string) { localStorage.setItem('yisus_api_url', url.replace(/\/$/, '')); }
 

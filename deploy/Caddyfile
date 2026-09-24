@@ -1,0 +1,27 @@
+# Un dominio para todo. DOMAIN viene del entorno de Caddy (docker-compose → .env: DOMAIN=yisus.tudominio.cl).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Backend: todo lo que no es la GUI.
+	@api path /api/* /run /run_sse /apps/* /a2a/* /.well-known/* /webhook /webhook/* /webhooks/* /graphql
+	handle @api {
+		reverse_proxy agent:4000 {
+			# SSE (/run_sse) y generación de imágenes tardan: no cortar a los 30 s por defecto.
+			transport http {
+				read_timeout 300s
+			}
+			flush_interval -1
+		}
+	}
+
+	# GUI (Angular estático).
+	handle {
+		reverse_proxy gui:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
