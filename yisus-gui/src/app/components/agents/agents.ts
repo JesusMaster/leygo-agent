@@ -291,7 +291,7 @@ export class AgentsComponent {
   probando = signal(false);
   canales = CANALES;
   form: CustomAgent | null = null;
-  paramsTxt: Record<number, string> = {};
+  paramsTxt: Record<number, string | undefined> = {};
   testArgs: Record<string, string> = {};
   testOut: Record<string, any> = {};
   envValores: Record<string, string> = {};

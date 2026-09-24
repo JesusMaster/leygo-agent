@@ -64,7 +64,6 @@
       "faq_agent",
       "triage_agent",
       "get_token_usage",
-      "nami",
       "banano"
     ]
   }
