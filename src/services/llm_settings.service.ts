@@ -27,7 +27,7 @@ export interface LlmProvider {
   updatedAt: string;
 }
 
-export interface LlmAssignment { provider: string; model: string; }
+export interface LlmAssignment { provider: string; model: string; /** modelo de respaldo si el principal falla por cuota/caída */ fallback?: { provider: string; model: string } | null; }
 
 export interface ProviderPreset {
   id: string;
@@ -73,6 +73,8 @@ export const PRESETS: ProviderPreset[] = [
 
 const KEY_PROVIDERS = 'llm.providers';
 const KEY_ASSIGNMENTS = 'llm.assignments';
+/** Respaldo global: se usa cuando el agente no tiene uno propio. */
+const KEY_FALLBACK = 'llm.fallback';
 
 function mask(v?: string | null): string | null {
   if (!v) return null;
@@ -193,19 +195,62 @@ class LlmSettingsService {
   setAssignment(agent: string, a: LlmAssignment | null) {
     if (!AGENTES_LLM.some((x) => x.name === agent)) throw new Error(`Agente desconocido: ${agent}`);
     const obj = { ...this.getAssignments() };
+    const previo = obj[agent];
     if (!a || !a.provider || !a.model) {
-      delete obj[agent];
+      // Sin principal: se conserva el respaldo si lo había (aplica sobre el Gemini por defecto)
+      if (previo?.fallback) obj[agent] = { provider: '', model: '', fallback: previo.fallback };
+      else delete obj[agent];
     } else {
       if (!this.getProvider(a.provider)) throw new Error(`Proveedor desconocido: ${a.provider}`);
-      obj[agent] = { provider: a.provider, model: a.model.trim() };
+      obj[agent] = { provider: a.provider, model: a.model.trim(), ...(previo?.fallback ? { fallback: previo.fallback } : {}) };
     }
     this.guardarAssignments(obj);
+  }
+
+  /** Respaldo por agente (null = quitar; hereda el global). */
+  setFallback(agent: string, f: { provider: string; model: string } | null) {
+    if (!AGENTES_LLM.some((x) => x.name === agent)) throw new Error(`Agente desconocido: ${agent}`);
+    const obj = { ...this.getAssignments() };
+    const previo = obj[agent] || { provider: '', model: '' };
+    if (!f || !f.provider || !f.model) {
+      const { fallback: _f, ...resto } = previo;
+      if (resto.provider && resto.model) obj[agent] = resto; else delete obj[agent];
+    } else {
+      if (!this.getProvider(f.provider)) throw new Error(`Proveedor desconocido: ${f.provider}`);
+      obj[agent] = { ...previo, fallback: { provider: f.provider, model: f.model.trim() } };
+    }
+    this.guardarAssignments(obj);
+  }
+
+  getGlobalFallback(): { provider: string; model: string } | null {
+    try { const v = JSON.parse(sqliteReminderService.getConfig(KEY_FALLBACK, 'null')); return v && v.provider && v.model ? v : null; } catch { return null; }
+  }
+
+  setGlobalFallback(f: { provider: string; model: string } | null) {
+    if (f && (!f.provider || !f.model)) f = null;
+    if (f && !this.getProvider(f.provider)) throw new Error(`Proveedor desconocido: ${f.provider}`);
+    sqliteReminderService.setConfig(KEY_FALLBACK, JSON.stringify(f ? { provider: f.provider, model: f.model.trim() } : null));
+  }
+
+  /**
+   * Respaldo efectivo de un agente: el propio, o el global. Nunca el mismo
+   * proveedor+modelo que el principal (no tendría sentido reintentar lo mismo).
+   */
+  resolveFallback(agent: string): { provider: LlmProvider; model: string } | null {
+    const a = this.getAssignments()[agent];
+    const f = a?.fallback || this.getGlobalFallback();
+    if (!f) return null;
+    const provider = this.getProvider(f.provider);
+    if (!provider || !provider.enabled) return null;
+    const principal = this.resolve(agent);
+    if (principal && principal.provider.id === provider.id && principal.model === f.model) return null;
+    return { provider, model: f.model };
   }
 
   /** Lo que usa el DynamicLlm en cada turno. null = Gemini por defecto del agente. */
   resolve(agent: string): { provider: LlmProvider; model: string } | null {
     const a = this.getAssignments()[agent];
-    if (!a) return null;
+    if (!a || !a.provider || !a.model) return null;
     const provider = this.getProvider(a.provider);
     if (!provider || !provider.enabled) return null;
     return { provider, model: a.model };
@@ -246,11 +291,16 @@ class LlmSettingsService {
     return AGENTES_LLM.map((ag) => {
       const a = asig[ag.name];
       const prov = a ? this.getProvider(a.provider) : undefined;
+      const fb = a?.fallback || null;
+      const fbProv = fb ? this.getProvider(fb.provider) : undefined;
+      const global = this.getGlobalFallback();
       return {
         ...ag,
-        assignment: a || null,
-        efectivo: a && prov && prov.enabled ? { provider: prov.name, model: a.model } : { provider: 'Google Gemini (.env)', model: ag.defaultModel },
-        advertencia: a && (!prov ? 'el proveedor ya no existe' : !prov.enabled ? 'el proveedor está desactivado' : !prov.apiKey && prov.kind !== 'ollama' && prov.kind !== 'openai_compatible' ? 'el proveedor no tiene API key' : null),
+        assignment: a && a.provider && a.model ? { provider: a.provider, model: a.model } : null,
+        fallback: fb,
+        fallbackEfectivo: fb && fbProv ? { provider: fbProv.name, model: fb.model, origen: 'agente' } : global ? { provider: this.getProvider(global.provider)?.name || global.provider, model: global.model, origen: 'global' } : null,
+        efectivo: a && a.provider && prov && prov.enabled ? { provider: prov.name, model: a.model } : { provider: 'Google Gemini (.env)', model: ag.defaultModel },
+        advertencia: a && a.provider && (!prov ? 'el proveedor ya no existe' : !prov.enabled ? 'el proveedor está desactivado' : !prov.apiKey && prov.kind !== 'ollama' && prov.kind !== 'openai_compatible' ? 'el proveedor no tiene API key' : null),
       };
     });
   }

@@ -107,6 +107,8 @@ export interface LlmProviderInput { id?: string; name: string; kind: ProviderKin
 export interface AgenteLlm {
   name: string; titulo: string; descripcion: string; defaultModel: string;
   assignment: { provider: string; model: string } | null;
+  fallback?: { provider: string; model: string } | null;
+  fallbackEfectivo?: { provider: string; model: string; origen: 'agente' | 'global' } | null;
   efectivo: { provider: string; model: string };
   advertencia: string | null;
 }
@@ -289,6 +291,13 @@ export class ApiService {
   getLlmModels(providerId: string): Observable<{ models: string[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/providers/${providerId}/models`); }
   testLlm(providerId: string, model: string): Observable<{ ok: boolean; ms: number; respuesta?: string; error?: string }> {
     return this.http.post<any>(`${this.baseUrl}/api/settings/llm/providers/${providerId}/test`, { model });
+  }
+  setLlmFallback(agent: string, f: { provider: string; model: string } | null): Observable<{ agentes: AgenteLlm[] }> {
+    return this.http.put<any>(`${this.baseUrl}/api/settings/llm/assignments/${agent}/fallback`, f || {});
+  }
+  getGlobalFallback(): Observable<{ fallback: { provider: string; model: string } | null }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/fallback`); }
+  setGlobalFallback(f: { provider: string; model: string } | null): Observable<{ fallback: any; agentes: AgenteLlm[] }> {
+    return this.http.put<any>(`${this.baseUrl}/api/settings/llm/fallback`, f || {});
   }
   setLlmAssignment(agent: string, a: { provider: string; model: string } | null): Observable<{ agentes: AgenteLlm[] }> {
     return this.http.put<any>(`${this.baseUrl}/api/settings/llm/assignments/${agent}`, a || {});

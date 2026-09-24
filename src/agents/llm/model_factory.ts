@@ -86,6 +86,13 @@ export class DynamicLlm extends BaseLlm {
     }
   }
 
+  /** Cliente de respaldo configurado (Ajustes → Modelos por agente), o null. */
+  respaldo(): BaseLlm | null {
+    const r = llmSettingsService.resolveFallback(this.agentName);
+    if (!r) return null;
+    try { return construirLlm(r.provider, r.model, this.agentName); } catch { return null; }
+  }
+
   async *generateContentAsync(llmRequest: any, stream?: boolean, abortSignal?: AbortSignal): AsyncGenerator<any, void> {
     const llm = this.actual();
     if (llmRequest && typeof llmRequest === 'object') {
@@ -95,12 +102,53 @@ export class DynamicLlm extends BaseLlm {
         console.log(`✂️  [LLM] ${this.agentName}: contexto ${(r.antes / 1000).toFixed(0)}k → ${(r.despues / 1000).toFixed(0)}k chars${r.recortados ? ` (${r.recortados} mensajes antiguos fuera)` : ''}`);
       }
     }
-    yield* llm.generateContentAsync(llmRequest, stream, abortSignal);
+
+    // Failover: si el principal falla por algo transitorio (cuota, sobrecarga, caída) y hay
+    // respaldo configurado, la MISMA petición se repite con el respaldo. Los adaptadores
+    // propios no lanzan: devuelven un primer evento con errorCode; el Gemini del ADK lanza.
+    const fb = this.respaldo();
+    const gen = llm.generateContentAsync(llmRequest, stream, abortSignal);
+    let primero: IteratorResult<any>;
+    try {
+      primero = await gen.next();
+    } catch (err: any) {
+      if (fb && esTransitorio(err)) { yield* this.conRespaldo(fb, llm, llmRequest, stream, abortSignal, describirError(err)); return; }
+      throw err;
+    }
+    if (!primero.done && primero.value?.errorCode && fb && esTransitorio(primero.value)) {
+      yield* this.conRespaldo(fb, llm, llmRequest, stream, abortSignal, primero.value.errorMessage || primero.value.errorCode);
+      return;
+    }
+    if (!primero.done) yield primero.value;
+    yield* gen;
+  }
+
+  private async *conRespaldo(fb: BaseLlm, principal: BaseLlm, llmRequest: any, stream: boolean | undefined, abortSignal: AbortSignal | undefined, motivo: string): AsyncGenerator<any, void> {
+    console.warn(`🔁 [LLM] ${this.agentName}: ${principal.model} falló (${String(motivo).slice(0, 120)}) → respaldo ${fb.model}`);
+    if (llmRequest && typeof llmRequest === 'object') llmRequest.model = fb.model;
+    yield* fb.generateContentAsync(llmRequest, stream, abortSignal);
   }
 
   async connect(llmRequest: any): Promise<any> {
     return (this.actual() as any).connect(llmRequest);
   }
+}
+
+/**
+ * ¿Vale la pena reintentar con otro modelo? Cuota/velocidad (429), sobrecarga o caída
+ * del proveedor (5xx, "high demand", "unavailable", "overloaded"), red. NO: errores
+ * de la petición (400, contexto, schema), auth (401/403) ni contenido bloqueado.
+ */
+export function esTransitorio(e: any): boolean {
+  const code = String(e?.errorCode ?? e?.status ?? e?.code ?? e?.response?.status ?? '').toUpperCase();
+  const msg = String(e?.errorMessage ?? e?.message ?? e ?? '').toLowerCase();
+  if (/^(429|500|502|503|504|529|NETWORK|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|INTERNAL)$/.test(code)) return true;
+  if (/^(400|401|403|404)$/.test(code)) return false;
+  return /high demand|unavailable|overloaded|rate limit|ratelimit|quota|resource_exhausted|too many requests|try again later|timed? ?out|econnreset|fetch failed|socket hang up|\b(429|503|502|529)\b/.test(msg);
+}
+
+function describirError(e: any): string {
+  return String(e?.message || e?.errorMessage || e || 'error').replace(/\s+/g, ' ');
 }
 
 export function modelFor(agentName: string, fallbackModel: string): DynamicLlm {

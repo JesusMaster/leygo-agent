@@ -2,17 +2,28 @@ import { ChangeDetectorRef, Component, inject, input, output, signal } from '@an
 import { FormsModule } from '@angular/forms';
 import { AgenteLlm, ApiService, LlmProvider } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
+import { ModelPickerComponent } from '../model-picker/model-picker';
 
 interface Fila { agente: AgenteLlm; provider: string; model: string; sucio: boolean; }
 
 /** Tabla agente → proveedor + modelo. Aplica en el siguiente turno, sin reiniciar. */
 @Component({
   selector: 'app-agent-models',
-  imports: [FormsModule],
+  imports: [FormsModule, ModelPickerComponent],
   template: `
     <div class="card">
       <h3>Modelo por agente</h3>
       <p class="card-sub">Cada agente puede usar un proveedor distinto. "Por defecto" es el Gemini del <code>.env</code>. Los cambios aplican en la siguiente llamada, sin reiniciar.</p>
+
+      <div class="global">
+        <div class="info">
+          <strong><i class="ph ph-lifebuoy"></i> Respaldo global</strong>
+          <div class="desc">Si el modelo principal de un agente falla por cuota, sobrecarga o caída del proveedor (429, 503, "high demand"…), la misma petición se repite con este modelo. Un agente puede tener su propio respaldo más abajo. Conviene que sea de <em>otro</em> proveedor.</div>
+        </div>
+        <div class="controles">
+          <app-model-picker [value]="globalFallback()" etiquetaDefecto="Sin respaldo" (valueChange)="guardarGlobal($event)" />
+        </div>
+      </div>
 
       <div class="lista">
         @for (f of filas(); track f.agente.name) {
@@ -46,6 +57,10 @@ interface Fila { agente: AgenteLlm; provider: string; model: string; sucio: bool
               @if (resultado()[f.agente.name]; as r) {
                 <div class="res" [class.ok]="r.ok" [class.bad]="!r.ok">{{ r.ok ? (r.ms + ' ms · ' + r.respuesta) : r.error }}</div>
               }
+              <div class="respaldo">
+                <span class="dim"><i class="ph ph-lifebuoy"></i> Respaldo:</span>
+                <app-model-picker [value]="refRespaldo(f.agente)" [etiquetaDefecto]="f.agente.fallbackEfectivo?.origen === 'global' ? ('Global (' + f.agente.fallbackEfectivo!.model + ')') : 'Sin respaldo'" (valueChange)="guardarRespaldo(f, $event)" />
+              </div>
             </div>
           </div>
         }
@@ -66,6 +81,9 @@ interface Fila { agente: AgenteLlm; provider: string; model: string; sucio: bool
     .res { flex-basis: 100%; font-size: 12px; }
     .res.ok { color: var(--ok); }
     .res.bad { color: var(--danger); }
+    .global { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 12px 14px; margin-bottom: 8px; border-radius: 10px; background: var(--bg-main); border: 1px solid var(--border-light); }
+    .respaldo { flex-basis: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .respaldo app-model-picker { flex: 1 1 320px; }
   `],
 })
 export class AgentModelsComponent {
@@ -82,8 +100,32 @@ export class AgentModelsComponent {
   probando = signal<string | null>(null);
   resultado = signal<Record<string, { ok: boolean; ms: number; respuesta?: string; error?: string }>>({});
 
+  globalFallback = signal<string>('');
+
   ngOnChanges() {
     this.filas.set(this.agentes().map((a) => ({ agente: a, provider: a.assignment?.provider || '', model: a.assignment?.model || '', sucio: false })));
+    this.api.getGlobalFallback().subscribe({ next: (r) => { this.globalFallback.set(r.fallback ? `${r.fallback.provider}/${r.fallback.model}` : ''); this.cdr.markForCheck(); }, error: () => {} });
+  }
+
+  refRespaldo(a: AgenteLlm): string { return a.fallback ? `${a.fallback.provider}/${a.fallback.model}` : ''; }
+
+  private partir(ref: string): { provider: string; model: string } | null {
+    const i = (ref || '').indexOf('/');
+    return i > 0 ? { provider: ref.slice(0, i), model: ref.slice(i + 1) } : null;
+  }
+
+  guardarGlobal(ref: string) {
+    this.api.setGlobalFallback(this.partir(ref)).subscribe({
+      next: () => { this.globalFallback.set(ref || ''); this.toast.ok(ref ? 'Respaldo global guardado' : 'Respaldo global quitado'); this.cambio.emit(); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
+    });
+  }
+
+  guardarRespaldo(f: Fila, ref: string) {
+    this.api.setLlmFallback(f.agente.name, this.partir(ref)).subscribe({
+      next: () => { this.toast.ok(`${f.agente.titulo}: respaldo ${ref ? 'guardado' : 'quitado'}`); this.cambio.emit(); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar'),
+    });
   }
 
   cambiarProveedor(f: Fila, provider: string) {
