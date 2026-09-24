@@ -15,7 +15,7 @@ import { RedisSessionService } from './services/redis_session.service.js';
 import { telegramBotService } from './services/telegram_bot.service.js';
 import { schedulerService } from './services/scheduler.service.js';
 import { scheduledTasksService } from './services/scheduled_tasks.service.js';
-import { beginUsageScope, flushUsageScope } from './utils/usage_collector.js';
+import { beginUsageScope, flushUsageScope, anotarPasosDeEvento } from './utils/usage_collector.js';
 import { mountA2A } from './a2a/index.js';
 import { nostrGatewayService } from './services/nostr_gateway.service.js';
 
@@ -105,9 +105,12 @@ server.start().then(async () => {
     scheduledTasksService.setAgentRunner(async (instruccion, taskId, modelo) => {
         const appName = APP_NAME;
         const userId = 'jesus';
-        const sessionId = `task-${taskId}`;
-        let session = await sessionService.getSession({ appName, userId, sessionId });
-        if (!session) session = await sessionService.createSession({ appName, userId, sessionId });
+        // Sesión NUEVA en cada ejecución: antes era `task-<id>` fija y una tarea diaria arrastraba
+        // el historial de todas sus corridas anteriores (agenda + recordatorios de cada día), así
+        // que el costo de entrada crecía sin parar (35k tokens a la 5.ª corrida). Lo que la tarea
+        // necesita recordar (recordatorios ya creados) lo consulta con sus herramientas.
+        const sessionId = `task-${taskId}-${Date.now().toString(36)}`;
+        const session = await sessionService.createSession({ appName, userId, sessionId });
 
         const hoy = new Date().toLocaleString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago', dateStyle: 'full', timeStyle: 'short' });
         const prompt = `[Tarea programada — ${hoy}] ${instruccion}\n\nEjecuta la tarea ahora y responde con el resultado, sin pedir confirmación ni hacer preguntas.`;
@@ -118,6 +121,7 @@ server.start().then(async () => {
         // La tarea puede fijar su propio proveedor/modelo para el Coordinator (como los webhooks).
         await conModelo('Coordinator', modelo, async () => {
             for await (const event of telegramRunner.runAsync({ userId, sessionId: session.id, newMessage: { role: 'user', parts: [{ text: prompt }] } })) {
+                anotarPasosDeEvento(event);
                 if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
                 for (const part of event.content?.parts || []) {
                     if (part.text && event.author !== 'user') texto += part.text;
