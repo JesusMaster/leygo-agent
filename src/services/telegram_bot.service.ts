@@ -5,7 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import { Runner } from '@google/adk';
 import { RedisSessionService } from './redis_session.service.js';
 import { telegramAuthService } from './telegram_auth.service.js';
-import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
+import { beginUsageScope, flushUsageScope, anotarPasosDeEvento } from '../utils/usage_collector.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 import { tokenTrackerService } from './token_tracker.service.js';
 import { attachmentsService } from './attachments.service.js';
@@ -521,6 +521,7 @@ export class TelegramBotService {
         sessionId: session.id,
         newMessage: turno.newMessage,
       })) {
+        anotarPasosDeEvento(event);
         if ((event as any).errorMessage) errorModelo = (event as any).errorMessage;
         if (event.content?.parts) {
           for (const part of event.content.parts) {

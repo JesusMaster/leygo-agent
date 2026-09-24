@@ -963,7 +963,7 @@ export class NostrGatewayService {
 
       const replies: string[] = [];
       let errorModelo = '';
-      const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
+      const { beginUsageScope, flushUsageScope, anotarPasosDeEvento } = await import('../utils/usage_collector.js');
       beginUsageScope('buzz', sessionId, `[Buzz] ${prompt}`);
 
       for await (const event of this.runner.runAsync({
@@ -971,6 +971,7 @@ export class NostrGatewayService {
         sessionId,
         newMessage,
       })) {
+        anotarPasosDeEvento(event);
         if ((event as any)?.errorMessage) errorModelo = (event as any).errorMessage;
         const parts = (event as any)?.content?.parts;
         const isPartial = (event as any)?.partial === true;

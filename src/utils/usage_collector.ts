@@ -19,7 +19,9 @@ export interface UsageScope {
   threadId: string;
   label: string;
   /** clave: "<agente>::<modelo>" */
-  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number; cachedTokens: number; thoughtsTokens: number; llamadas: number }>;
+  totals: Map<string, { agent: string; model: string; inputTokens: number; outputTokens: number; cachedTokens: number; thoughtsTokens: number; images: number; llamadas: number }>;
+  /** Herramientas invocadas en el turno, en orden ("agente→tool"); para entender por qué un turno costó lo que costó */
+  pasos: string[];
 }
 
 const storage = new AsyncLocalStorage<UsageScope>();
@@ -31,6 +33,7 @@ export function beginUsageScope(channel: UsageChannel, threadId: string, label: 
     threadId: threadId || 'system',
     label: (label || '').slice(0, 150),
     totals: new Map(),
+    pasos: [],
   };
   storage.enterWith(scope);
   return scope;
@@ -38,6 +41,15 @@ export function beginUsageScope(channel: UsageChannel, threadId: string, label: 
 
 export function currentUsageScope(): UsageScope | undefined {
   return storage.getStore();
+}
+
+/** Anota las llamadas a herramientas que trae un evento del Runner (functionCall) en el scope del turno. */
+export function anotarPasosDeEvento(event: any): void {
+  const scope = storage.getStore();
+  if (!scope || !Array.isArray(event?.content?.parts)) return;
+  for (const p of event.content.parts) {
+    if (p?.functionCall?.name && scope.pasos.length < 60) scope.pasos.push(`${event.author || '?'}→${p.functionCall.name}`);
+  }
 }
 
 // telegram_auth necesita saber el canal para acotar su ventana de gracia, pero
@@ -49,26 +61,28 @@ export function currentUsageScope(): UsageScope | undefined {
  * Registra el consumo de UNA llamada al modelo. Si hay un scope abierto acumula
  * (se persiste al cerrar el turno); si no, persiste de inmediato como 'system'.
  */
-export function recordModelUsage(model: string, inputTokens: number, outputTokens: number, agent: string = 'unknown', extra: { cachedTokens?: number; thoughtsTokens?: number } = {}): void {
-  if (inputTokens <= 0 && outputTokens <= 0) return;
+export function recordModelUsage(model: string, inputTokens: number, outputTokens: number, agent: string = 'unknown', extra: { cachedTokens?: number; thoughtsTokens?: number; images?: number } = {}): void {
+  const images = Math.max(0, extra.images || 0);
+  if (inputTokens <= 0 && outputTokens <= 0 && images <= 0) return;
   const cachedTokens = Math.max(0, extra.cachedTokens || 0);
   const thoughtsTokens = Math.max(0, extra.thoughtsTokens || 0);
 
   const scope = storage.getStore();
   if (!scope) {
     tokenTrackerService
-      .logUsage('(llamada fuera de un turno)', model, inputTokens, outputTokens, 'system', 'system', agent, { cachedTokens, thoughtsTokens })
+      .logUsage('(llamada fuera de un turno)', model, inputTokens, outputTokens, 'system', 'system', agent, { cachedTokens, thoughtsTokens, images })
       .catch(() => {});
     return;
   }
 
   const key = `${agent}::${model}`;
-  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0, cachedTokens: 0, thoughtsTokens: 0, llamadas: 0 };
+  const acc = scope.totals.get(key) || { agent, model, inputTokens: 0, outputTokens: 0, cachedTokens: 0, thoughtsTokens: 0, images: 0, llamadas: 0 };
   acc.llamadas += 1;
   acc.inputTokens += inputTokens;
   acc.outputTokens += outputTokens;
   acc.cachedTokens += cachedTokens;
   acc.thoughtsTokens += thoughtsTokens;
+  acc.images += images;
   scope.totals.set(key, acc);
 }
 
@@ -85,7 +99,7 @@ export function summarizeUsageScope(): UsageSummaryTurno {
   const out: UsageSummaryTurno = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, thoughtsTokens: 0, totalTokens: 0, costUsd: 0, aproximado: false, porAgente: [] };
   if (!scope) return out;
   for (const t of scope.totals.values()) {
-    const { costUsd: cost, prices } = tokenTrackerService.costFor(t.model, t.inputTokens, t.outputTokens, t.cachedTokens);
+    const { costUsd: cost, prices } = tokenTrackerService.costFor(t.model, t.inputTokens, t.outputTokens, t.cachedTokens, t.images);
     out.inputTokens += t.inputTokens;
     out.outputTokens += t.outputTokens;
     out.cachedTokens += t.cachedTokens;
@@ -105,7 +119,7 @@ export async function flushUsageScope(): Promise<void> {
 
   for (const t of scope.totals.values()) {
     await tokenTrackerService
-      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent, { cachedTokens: t.cachedTokens, thoughtsTokens: t.thoughtsTokens, llamadas: t.llamadas })
+      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent, { cachedTokens: t.cachedTokens, thoughtsTokens: t.thoughtsTokens, llamadas: t.llamadas, pasos: scope.pasos, images: t.images })
       .catch(() => {});
   }
   scope.totals.clear();

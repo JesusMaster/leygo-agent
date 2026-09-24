@@ -110,6 +110,10 @@ export interface UsageRecord {
   calls?: number;
   /** override | catalogo | local | familia | default (los dos últimos: costo aproximado) */
   price_source?: string;
+  /** JSON: herramientas invocadas en el turno, en orden ("agente→tool") */
+  steps?: string | null;
+  /** imágenes generadas (modelos de imagen: se cobran por unidad) */
+  images?: number;
 }
 
 export type CommitmentStatus = 'propuesto' | 'pendiente' | 'en_curso' | 'hecho' | 'cancelado' | 'descartado';
@@ -644,6 +648,8 @@ export class SqliteReminderService {
       if (!existing.has('thoughts_tokens')) this.db.exec(`ALTER TABLE usage_history ADD COLUMN thoughts_tokens INTEGER DEFAULT 0`);
       if (!existing.has('price_source'))    this.db.exec(`ALTER TABLE usage_history ADD COLUMN price_source TEXT`);
       if (!existing.has('calls'))           this.db.exec(`ALTER TABLE usage_history ADD COLUMN calls INTEGER DEFAULT 1`);
+      if (!existing.has('steps'))           this.db.exec(`ALTER TABLE usage_history ADD COLUMN steps TEXT`);
+      if (!existing.has('images'))          this.db.exec(`ALTER TABLE usage_history ADD COLUMN images INTEGER DEFAULT 0`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_channel ON usage_history(channel)`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_history(agent)`);
     } catch (err: any) {
@@ -653,8 +659,8 @@ export class SqliteReminderService {
 
   public logTokenUsage(record: Omit<UsageRecord, 'id'>): UsageRecord {
     const stmt = this.db.prepare(`
-      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent, cached_tokens, thoughts_tokens, price_source, calls)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent, cached_tokens, thoughts_tokens, price_source, calls, steps, images)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       record.timestamp,
@@ -669,14 +675,16 @@ export class SqliteReminderService {
       record.cached_tokens || 0,
       record.thoughts_tokens || 0,
       record.price_source || null,
-      record.calls || 1
+      record.calls || 1,
+      record.steps || null,
+      record.images || 0
     );
     return record;
   }
 
   /** Filas de consumo desde una fecha (para retarifar con los precios vigentes). */
-  public listUsageSince(sinceIso: string): Array<{ id: number; model: string; input_tokens: number; output_tokens: number; cached_tokens: number; cost_usd: number }> {
-    return this.db.prepare(`SELECT id, model, input_tokens, output_tokens, COALESCE(cached_tokens, 0) as cached_tokens, cost_usd FROM usage_history WHERE timestamp >= ?`).all(sinceIso) as any[];
+  public listUsageSince(sinceIso: string): Array<{ id: number; model: string; input_tokens: number; output_tokens: number; cached_tokens: number; images: number; cost_usd: number }> {
+    return this.db.prepare(`SELECT id, model, input_tokens, output_tokens, COALESCE(cached_tokens, 0) as cached_tokens, COALESCE(images, 0) as images, cost_usd FROM usage_history WHERE timestamp >= ?`).all(sinceIso) as any[];
   }
 
   public updateUsageCost(id: number, costUsd: number, priceSource: string): void {

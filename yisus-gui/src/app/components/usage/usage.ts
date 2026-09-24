@@ -94,7 +94,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
           @if (precios().length === 0) { <div class="empty">Aún no hay modelos usados</div> }
           @else {
             <table>
-              <tr><th>Modelo</th><th>Fuente</th><th class="num">Entrada</th><th class="num">Caché</th><th class="num">Salida</th><th class="num">Este mes</th><th style="width:300px">Precio manual (in / caché / out)</th></tr>
+              <tr><th>Modelo</th><th>Fuente</th><th class="num">Entrada</th><th class="num">Caché</th><th class="num">Salida</th><th class="num">Imagen</th><th class="num">Este mes</th><th style="width:300px">Precio manual (in / caché / out)</th></tr>
               @for (p of precios(); track p.model) {
                 <tr>
                   <td><code>{{ p.model }}</code></td>
@@ -109,6 +109,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                   <td class="num">{{ '$' + p.input.toFixed(3) }}</td>
                   <td class="num">{{ p.cached != null ? ('$' + p.cached.toFixed(3)) : '—' }}</td>
                   <td class="num">{{ '$' + p.output.toFixed(3) }}</td>
+                  <td class="num">{{ p.imagen != null ? ('$' + p.imagen.toFixed(3) + ' c/u') : '—' }}</td>
                   <td class="num">{{ gastoModelo(p.model) }}</td>
                   <td>
                     <div class="row">
@@ -345,8 +346,10 @@ export class UsageComponent {
     });
   }
 
-  detalleFila(r: { input_tokens: number; output_tokens: number; cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string }): string {
+  detalleFila(r: { input_tokens: number; output_tokens: number; cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string; steps?: string | null; images?: number }): string {
     const partes = [`${r.calls || 1} llamada${(r.calls || 1) === 1 ? '' : 's'} al modelo`];
+    if (r.images) partes.push(`${r.images} imagen${r.images === 1 ? '' : 'es'} generada${r.images === 1 ? '' : 's'}`);
+    try { const pasos: string[] = r.steps ? JSON.parse(r.steps) : []; if (pasos.length) partes.push(`herramientas: ${pasos.join(', ')}`); } catch { /* sin pasos */ }
     if (r.cached_tokens) partes.push(`${r.cached_tokens.toLocaleString('es-CL')} tokens de entrada en caché`);
     if (r.thoughts_tokens) partes.push(`${r.thoughts_tokens.toLocaleString('es-CL')} de razonamiento`);
     if (r.price_source === 'familia' || r.price_source === 'default') partes.push('precio aproximado');

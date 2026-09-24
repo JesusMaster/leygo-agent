@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
 // ─── Tipos que devuelve el backend ──────────────────────────────────────────
-export interface ModelPrice { input: number; output: number; cached: number | null; source: 'override' | 'catalogo' | 'local' | 'familia' | 'default'; key: string | null; }
+export interface ModelPrice { input: number; output: number; cached: number | null; imagen?: number | null; source: 'override' | 'catalogo' | 'local' | 'familia' | 'default'; key: string | null; }
 export interface UsageByModel   { model: string; count: number; input_tokens: number; output_tokens: number; cached_tokens: number; total_cost: number; aproximados: number; price: ModelPrice; }
 export interface PriceRow extends ModelPrice { model: string; override: { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number } | null; }
 export interface CatalogoInfo { modelos: number; actualizado: string | null; }
@@ -14,7 +14,7 @@ export interface BudgetStatus   { channel: string; currentCost: number; budget: 
 export interface UsageRecord {
   id?: number; timestamp: string; user_input: string; model: string;
   input_tokens: number; output_tokens: number; cost_usd: number;
-  cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string;
+  cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string; steps?: string | null; images?: number;
   thread_id: string; channel?: string; agent?: string;
 }
 

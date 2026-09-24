@@ -503,7 +503,7 @@ ${comoTrabajas}
       agente: m.name,
       log: () => {},
       now: () => new Date().toISOString(),
-      ...(t.network ? { fetch: fetchSeguro() } : {}),
+      ...(t.network ? { fetch: fetchSeguro(m.name) } : {}),
       ...(m.memory ? { memory: this.memoriaDe(m) } : {}),
     };
   }

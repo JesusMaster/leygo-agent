@@ -1,6 +1,7 @@
 import vm from 'node:vm';
 import { Worker } from 'node:worker_threads';
 import { attachmentsService } from '../../services/attachments.service.js';
+import { recordModelUsage } from '../../utils/usage_collector.js';
 
 /**
  * Ejecuta el código de una herramienta de agente personalizado en un Worker
@@ -87,8 +88,27 @@ export async function ejecutar(code: string, args: any, ctx: SandboxCtx, nombre 
   });
 }
 
+/**
+ * Consumo de las llamadas que una herramienta hace DIRECTAMENTE a la API de Gemini
+ * (p. ej. generar una imagen): no pasan por los adaptadores del ADK, así que se
+ * miden aquí leyendo usageMetadata. Las imágenes se cuentan aparte (se cobran por unidad).
+ */
+function medirLlamadaGemini(url: string, json: any, agente: string): void {
+  try {
+    const m = /generativelanguage\.googleapis\.com\/v1(?:beta)?\/models\/([^:/?]+)/i.exec(url);
+    const u = json?.usageMetadata;
+    if (!m || !u) return;
+    const modelo = decodeURIComponent(m[1]);
+    const partes: any[] = json?.candidates?.[0]?.content?.parts || [];
+    const images = partes.filter((p) => p?.inlineData?.mimeType?.startsWith('image/')).length;
+    recordModelUsage(`gemini/${modelo}`, u.promptTokenCount || 0, (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0), agente, {
+      cachedTokens: u.cachedContentTokenCount || 0, thoughtsTokens: u.thoughtsTokenCount || 0, images,
+    });
+  } catch { /* medir nunca rompe la herramienta */ }
+}
+
 /** fetch restringido para herramientas con `network: true`: solo https, respuesta acotada. */
-export function fetchSeguro(): NonNullable<SandboxCtx['fetch']> {
+export function fetchSeguro(agente = 'custom_tool'): NonNullable<SandboxCtx['fetch']> {
   return async (url: string, init?: any) => {
     if (!/^https:\/\//i.test(url)) throw new Error('Solo se permiten URLs https://');
     const ctrl = new AbortController();
@@ -99,6 +119,7 @@ export function fetchSeguro(): NonNullable<SandboxCtx['fetch']> {
       const text = (await res.text()).slice(0, 12_000_000);
       let json: any = null;
       try { json = JSON.parse(text); } catch { /* no es JSON */ }
+      if (json) medirLlamadaGemini(url, json, agente);
       return { status: res.status, ok: res.ok, text, json };
     } finally { clearTimeout(timer); }
   };

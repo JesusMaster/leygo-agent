@@ -20,6 +20,8 @@ export interface ModelPrices {
   outputPricePer1M: number;
   /** Tokens de entrada leídos desde caché (Gemini/OpenAI/Anthropic): ~10 % del input. Si falta, se cobran como input. */
   cachedPricePer1M?: number;
+  /** Modelos de generación de imágenes: precio por imagen producida (LiteLLM output_cost_per_image) */
+  imagePriceEach?: number;
   source: PriceSource;
   /** Clave del catálogo con la que calzó (o el modelo en overrides) */
   key?: string;
@@ -147,10 +149,12 @@ export class TokenTrackerService {
         const outputCost = (val.output_cost_per_token || 0) * 1_000_000;
         if (inputCost > 0 || outputCost > 0) {
           const cached = val.cache_read_input_token_cost != null ? (val.cache_read_input_token_cost || 0) * 1_000_000 : undefined;
+          const porImagen = typeof val.output_cost_per_image === 'number' ? val.output_cost_per_image : undefined;
           this.memoryPricingCache.set(key.toLowerCase(), {
             inputPricePer1M: inputCost,
             outputPricePer1M: outputCost,
             ...(cached != null ? { cachedPricePer1M: cached } : {}),
+            ...(porImagen != null ? { imagePriceEach: porImagen } : {}),
             source: 'catalogo',
             key: key.toLowerCase(),
           });
@@ -294,14 +298,19 @@ export class TokenTrackerService {
   }
 
   /** Costo en USD de una llamada. Los tokens cacheados se descuentan del input y se cobran a su tarifa. */
-  public costFor(model: string, inputTokens: number, outputTokens: number, cachedTokens = 0): { costUsd: number; prices: ModelPrices } {
+  public costFor(model: string, inputTokens: number, outputTokens: number, cachedTokens = 0, images = 0): { costUsd: number; prices: ModelPrices } {
     const prices = this.getPrices(model);
     const cached = Math.min(Math.max(0, cachedTokens || 0), Math.max(0, inputTokens || 0));
     const inputNormal = Math.max(0, (inputTokens || 0) - cached);
     const tarifaCache = prices.cachedPricePer1M != null ? prices.cachedPricePer1M : prices.inputPricePer1M;
+    // Imágenes generadas: se cobran por unidad (LiteLLM output_cost_per_image); los tokens de salida
+    // que la API reporta por la imagen (~1.3k por imagen) se descuentan para no cobrarlos dos veces.
+    const nImg = Math.max(0, images || 0);
+    const outTokens = Math.max(0, (outputTokens || 0) - (nImg && prices.imagePriceEach ? nImg * 1290 : 0));
     const costUsd = (inputNormal / 1_000_000) * prices.inputPricePer1M
       + (cached / 1_000_000) * tarifaCache
-      + (Math.max(0, outputTokens || 0) / 1_000_000) * prices.outputPricePer1M;
+      + (outTokens / 1_000_000) * prices.outputPricePer1M
+      + nImg * (prices.imagePriceEach || 0);
     return { costUsd, prices };
   }
 
@@ -347,13 +356,14 @@ export class TokenTrackerService {
     threadId: string = 'system',
     channel: UsageChannel = 'system',
     agent: string = 'system',
-    extra: { cachedTokens?: number; thoughtsTokens?: number; llamadas?: number } = {}
+    extra: { cachedTokens?: number; thoughtsTokens?: number; llamadas?: number; pasos?: string[]; images?: number } = {}
   ): Promise<UsageRecord> {
     const inTokens = Math.max(0, inputTokens || 0);
     const outTokens = Math.max(0, outputTokens || 0);
     const cachedTokens = Math.max(0, extra.cachedTokens || 0);
     const thoughtsTokens = Math.max(0, extra.thoughtsTokens || 0);
-    const { costUsd: totalCost, prices } = this.costFor(model, inTokens, outTokens, cachedTokens);
+    const images = Math.max(0, extra.images || 0);
+    const { costUsd: totalCost, prices } = this.costFor(model, inTokens, outTokens, cachedTokens, images);
 
     const timestamp = new Date().toISOString();
     const truncatedInput = (userInput || '').length > 150 
@@ -374,6 +384,8 @@ export class TokenTrackerService {
       thoughts_tokens: thoughtsTokens,
       price_source: prices.source,
       calls: Math.max(1, extra.llamadas || 1),
+      images,
+      steps: extra.pasos?.length ? JSON.stringify(extra.pasos.slice(0, 60)) : null,
     };
 
     const saved = sqliteReminderService.logTokenUsage(record);
@@ -561,7 +573,7 @@ export class TokenTrackerService {
     const filas = sqliteReminderService.listUsageSince(sinceIso);
     let antes = 0, despues = 0;
     for (const f of filas) {
-      const { costUsd, prices } = this.costFor(f.model, f.input_tokens, f.output_tokens, f.cached_tokens);
+      const { costUsd, prices } = this.costFor(f.model, f.input_tokens, f.output_tokens, f.cached_tokens, f.images);
       antes += f.cost_usd || 0;
       despues += costUsd;
       const nuevo = parseFloat(costUsd.toFixed(6));
@@ -576,7 +588,7 @@ export class TokenTrackerService {
    * Tabla de precios: modelos usados en los últimos 90 días + overrides, con el
    * precio que se les aplica hoy y de dónde sale (para Consumo → Precios).
    */
-  public listPrices(): Array<{ model: string; input: number; output: number; cached: number | null; source: PriceSource; key: string | null; override: PriceOverride | null }> {
+  public listPrices(): Array<{ model: string; input: number; output: number; cached: number | null; imagen: number | null; source: PriceSource; key: string | null; override: PriceOverride | null }> {
     const desde = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
     const usados = sqliteReminderService.getUsageByModel(desde).map((r) => r.model);
     const modelos = new Set<string>([...usados, ...this.leerOverrides().keys()]);
@@ -585,7 +597,7 @@ export class TokenTrackerService {
       const p = this.getPrices(model);
       const k = model.toLowerCase();
       const sinPrefijo = k.includes('/') ? k.slice(k.lastIndexOf('/') + 1) : k;
-      return { model, input: p.inputPricePer1M, output: p.outputPricePer1M, cached: p.cachedPricePer1M ?? null, source: p.source, key: p.key || null, override: ov.get(k) || ov.get(sinPrefijo) || null };
+      return { model, input: p.inputPricePer1M, output: p.outputPricePer1M, cached: p.cachedPricePer1M ?? null, imagen: p.imagePriceEach ?? null, source: p.source, key: p.key || null, override: ov.get(k) || ov.get(sinPrefijo) || null };
     });
   }
 }

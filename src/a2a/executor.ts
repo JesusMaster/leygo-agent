@@ -38,7 +38,32 @@ export class YisusAgentExecutor implements AgentExecutor {
         private readonly sessionService: RedisSessionService,
     ) {}
 
+    /**
+     * Un turno a la vez por contextId. Los clientes autónomos (OpenClaw) mandan la
+     * siguiente pregunta mientras la anterior sigue corriendo; dos Runners sobre la
+     * misma sesión ADK se pisan (functionCalls sin respuesta en el historial → el
+     * modelo repite herramientas y el turno cuesta 3-4 llamadas en vez de 1).
+     */
+    private readonly colas = new Map<string, Promise<void>>();
+
     execute = async (ctx: RequestContext, bus: ExecutionEventBus): Promise<void> => {
+        const anterior = this.colas.get(ctx.contextId) || Promise.resolve();
+        let liberar!: () => void;
+        const mio = new Promise<void>((res) => { liberar = res; });
+        const cadena = anterior.then(() => mio);
+        this.colas.set(ctx.contextId, cadena);
+        const espera = Date.now();
+        await anterior;
+        if (Date.now() - espera > 1500) console.log(`⏳ [A2A] ${ctx.contextId.slice(0, 12)}: turno esperó ${((Date.now() - espera) / 1000).toFixed(1)}s a que terminara el anterior`);
+        try {
+            await this.ejecutarTurno(ctx, bus);
+        } finally {
+            liberar();
+            if (this.colas.get(ctx.contextId) === cadena) this.colas.delete(ctx.contextId);
+        }
+    };
+
+    private ejecutarTurno = async (ctx: RequestContext, bus: ExecutionEventBus): Promise<void> => {
         const { taskId, contextId } = ctx;
         this.contexts.set(taskId, contextId);
 
@@ -87,13 +112,14 @@ export class YisusAgentExecutor implements AgentExecutor {
             const replies: string[] = [];
             let errorModelo = '';
 
-            const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
+            const { beginUsageScope, flushUsageScope, anotarPasosDeEvento } = await import('../utils/usage_collector.js');
             beginUsageScope('a2a', contextId, `[A2A:${scope.name}] ${userText}`);
 
             for await (const event of runner.runAsync({
                 userId, sessionId: session.id, newMessage,
             })) {
                 if (this.cancelled.has(taskId)) break;
+                anotarPasosDeEvento(event);
                 if ((event as any)?.errorMessage) errorModelo = (event as any).errorMessage;
                 const parts = (event as any)?.content?.parts;
                 const isPartial = (event as any)?.partial === true;

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import express from 'express';
 import { Runner } from '@google/adk';
 import { customAgentsService } from '../agents/custom/custom_agents.service.js';
-import { beginUsageScope, flushUsageScope, summarizeUsageScope } from '../utils/usage_collector.js';
+import { beginUsageScope, flushUsageScope, summarizeUsageScope, anotarPasosDeEvento } from '../utils/usage_collector.js';
 import { USAGE_CHANNELS } from '../services/token_tracker.service.js';
 import { RedisSessionService } from '../services/redis_session.service.js';
 import { telegramBotService } from '../services/telegram_bot.service.js';
@@ -363,6 +363,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
                 events.push({ author: turno.directo!.name, content: { role: 'model', parts: [{ text: turno.aviso }] } });
             } else {
                 for await (const event of turno.runner.runAsync({ userId, sessionId: session.id, newMessage: turno.newMessage })) {
+                    anotarPasosDeEvento(event);
                     events.push(event);
                 }
             }
@@ -400,6 +401,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
                 res.write(`data: ${JSON.stringify({ author: turno.directo!.name, content: { role: 'model', parts: [{ text: turno.aviso }] } })}\n\n`);
             } else {
                 for await (const event of turno.runner.runAsync({ userId, sessionId: session.id, newMessage: turno.newMessage })) {
+                    anotarPasosDeEvento(event);
                     res.write(`data: ${JSON.stringify(event)}\n\n`);
                 }
             }
