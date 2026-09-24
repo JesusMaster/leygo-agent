@@ -178,6 +178,9 @@ export class ApiService {
   refreshPricing(): Observable<{ updated: boolean; catalogo: CatalogoInfo }> {
     return this.http.post<any>(`${this.baseUrl}/api/usage/refresh-pricing`, {});
   }
+  rewindSession(sessionId: string, userIndex: number): Observable<{ removed: number; existed: boolean }> {
+    return this.http.post<any>(`${this.baseUrl}/apps/yisus/users/gui/sessions/${encodeURIComponent(sessionId)}/rewind`, { userIndex });
+  }
   repriceUsage(since?: string): Observable<{ filas: number; antes: number; despues: number }> { return this.http.post<any>(`${this.baseUrl}/api/usage/reprice`, since ? { since } : {}); }
   getPrices(): Observable<{ catalogo: CatalogoInfo; prices: PriceRow[] }> { return this.http.get<any>(`${this.baseUrl}/api/usage/prices`); }
   setPrice(model: string, precio: { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number | null } | null): Observable<{ prices: PriceRow[] }> {

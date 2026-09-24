@@ -88,6 +88,18 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
             } @else {
               <div class="bubble mine"><div class="md" [innerHTML]="m.text | markdown"></div></div>
             }
+
+            @if (!m.streaming) {
+              <div class="acciones">
+                <button type="button" class="acc" title="Copiar texto" (click)="copiar(m)"><i class="ph ph-copy"></i></button>
+                @if (m.role === 'user') {
+                  <button type="button" class="acc" title="Editar y reenviar: lo que vino después se descarta" [disabled]="chat.thinking()" (click)="editar($index)"><i class="ph ph-pencil-simple"></i></button>
+                  <button type="button" class="acc" title="Reiniciar la conversación desde aquí (vuelve a enviar este mensaje; lo posterior se descarta)" [disabled]="chat.thinking()" (click)="reiniciarDesde($index)"><i class="ph ph-arrow-counter-clockwise"></i></button>
+                } @else {
+                  <button type="button" class="acc" title="Regenerar esta respuesta" [disabled]="chat.thinking()" (click)="regenerar($index)"><i class="ph ph-arrows-clockwise"></i></button>
+                }
+              </div>
+            }
           </div>
         }
       </div>
@@ -136,6 +148,12 @@ const TEXTO_EXT = /\.(txt|md|markdown|csv|json|ya?ml|xml|html?|css|js|ts|tsx|jsx
     .chat-body { flex: 1; overflow-y: auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 18px; }
 
     .msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 82%; }
+    .acciones { display: flex; gap: 2px; margin-top: 4px; opacity: .35; transition: opacity .15s; }
+    .msg:hover .acciones, .msg:focus-within .acciones { opacity: 1; }
+    @media (hover: none) { .acciones { opacity: .7; } }
+    .acc { border: 0; background: transparent; color: var(--text-dim); padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1; }
+    .acc:hover { background: var(--bg-input); color: var(--text-main); }
+    .acc:disabled { opacity: .4; cursor: default; }
     .msg.mine { align-self: flex-end; align-items: flex-end; }
     .meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; color: var(--text-dim); }
     .meta .who { font-weight: 600; color: var(--text-main); }
@@ -280,6 +298,41 @@ export class ChatComponent {
     else if (ev.key === 'ArrowUp') { ev.preventDefault(); this.sugerenciaIdx.set((this.sugerenciaIdx() - 1 + lista.length) % lista.length); }
     else if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); this.elegirMencion(lista[this.sugerenciaIdx()]); }
     else if (ev.key === 'Escape') { this.sugerencias.set([]); }
+  }
+
+  // ─── Acciones por mensaje ─────────────────────────────────────────────
+  async copiar(m: ChatMessage) {
+    try { await navigator.clipboard.writeText(m.text || ''); this.toast.ok('Copiado'); }
+    catch { this.toast.error('No se pudo copiar'); }
+  }
+
+  /** Quita el mensaje y lo posterior, y deja el texto en el cuadro para corregirlo. */
+  async editar(idx: number) {
+    if (this.chat.thinking()) return;
+    try {
+      const r = await this.chat.rebobinar(idx);
+      if (!r) return;
+      this.texto = r.text;
+      if (r.adjuntos?.length) this.pendientes.set(r.adjuntos);
+      queueMicrotask(() => { const ta = document.querySelector<HTMLTextAreaElement>('.input-row textarea'); if (ta) { ta.focus(); this.ajustar(ta); } });
+    } catch (e: any) { this.toast.error(e?.message || 'No se pudo editar'); }
+  }
+
+  /** Vuelve a mandar ese mismo mensaje; lo que vino después se descarta. */
+  async reiniciarDesde(idx: number) {
+    if (this.chat.thinking()) return;
+    try {
+      const r = await this.chat.rebobinar(idx);
+      if (r) void this.chat.send(r.text, r.adjuntos || []);
+    } catch (e: any) { this.toast.error(e?.message || 'No se pudo reiniciar'); }
+  }
+
+  /** Regenera una respuesta: rebobina hasta el mensaje de usuario anterior y lo reenvía. */
+  async regenerar(idx: number) {
+    const lista = this.chat.messages();
+    let i = idx;
+    while (i >= 0 && lista[i].role !== 'user') i--;
+    if (i >= 0) await this.reiniciarDesde(i);
   }
 
   ajustar(ta: HTMLTextAreaElement) {

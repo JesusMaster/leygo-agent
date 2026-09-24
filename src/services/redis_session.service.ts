@@ -163,6 +163,33 @@ export class RedisSessionService extends BaseSessionService {
     await this.redis.sisremove(this.indexKey(appName, userId), sessionId);
   }
 
+  // ─── rewind ──────────────────────────────────────────────────────────────
+
+  /**
+   * Recorta la sesión ANTES del k-ésimo mensaje de usuario con texto (0-based):
+   * ese mensaje y todo lo posterior desaparecen. Es lo que necesita "editar" o
+   * "reiniciar desde aquí" en el chat: la GUI cuenta sus burbujas de usuario y
+   * manda el índice, así no depende del texto exacto (que lleva el sufijo de fecha).
+   * Devuelve cuántos eventos se quitaron, o -1 si la sesión no existe.
+   */
+  async rewind({ appName, userId, sessionId, userIndex }: { appName: string; userId: string; sessionId: string; userIndex: number }): Promise<number> {
+    const key = this.sessionKey(appName, userId, sessionId);
+    const storedData = await this.redis.find(key);
+    if (!storedData) return -1;
+    const stored = JSON.parse(storedData as string) as Session;
+    const esUsuarioConTexto = (e: any) => e?.author === 'user' && Array.isArray(e?.content?.parts) && e.content.parts.some((p: any) => typeof p?.text === 'string' && p.text.trim()) && !e.content.parts.some((p: any) => p?.functionResponse);
+    let visto = -1;
+    let corte = -1;
+    for (let i = 0; i < stored.events.length; i++) {
+      if (esUsuarioConTexto(stored.events[i])) { visto++; if (visto === userIndex) { corte = i; break; } }
+    }
+    if (corte < 0) return 0;
+    const quitados = stored.events.length - corte;
+    const toStore: Session = { ...stored, events: stored.events.slice(0, corte), lastUpdateTime: Date.now() / 1000 };
+    await this.redis.saveTTL(key, JSON.stringify(toStore), SESSION_TTL_SECONDS);
+    return quitados;
+  }
+
   // ─── appendEvent ─────────────────────────────────────────────────────────
 
   async appendEvent({ session, event }: AppendEventRequest): Promise<Event> {

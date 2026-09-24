@@ -37,6 +37,7 @@ const CASOS: Caso[] = [
   { metodo: 'POST',   ruta: '/api/agents/generate',      debeExigirClave: true,  nota: 'crear agentes con IA' },
   { metodo: 'POST',   ruta: '/api/agents/generate/stream', debeExigirClave: true, nota: 'crear agentes con IA (SSE)' },
   { metodo: 'GET',    ruta: '/api/adjuntos/0123456789abcdef0123456789abcdef', debeExigirClave: false, nota: 'adjunto generado (URL-capacidad, 404 si no existe)' },
+  { metodo: 'POST',   ruta: '/apps/yisus/users/gui/sessions/x/rewind', debeExigirClave: true, nota: 'rebobinar sesión (editar / reiniciar desde aquí)' },
 
   // Publicas a proposito
   { metodo: 'POST',   ruta: '/webhook',                  debeExigirClave: false, nota: 'Telegram entrante' },

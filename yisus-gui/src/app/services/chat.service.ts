@@ -1,3 +1,4 @@
+import { firstValueFrom } from 'rxjs';
 import { Injectable, inject, signal } from '@angular/core';
 import { ApiService } from './api.service';
 
@@ -83,6 +84,29 @@ export class ChatService {
   cancelar() {
     this.abort?.abort();
     this.abort = null;
+  }
+
+  /**
+   * Vuelve la conversación al estado ANTERIOR al mensaje de usuario en la posición `idx`
+   * (índice dentro de messages): se quitan ese mensaje y todo lo posterior, tanto acá como
+   * en la sesión del backend. Devuelve el texto del mensaje quitado (para editar/reenviar).
+   */
+  async rebobinar(idx: number): Promise<{ text: string; adjuntos?: Adjunto[] } | null> {
+    const lista = this.messages();
+    const m = lista[idx];
+    if (!m || m.role !== 'user') return null;
+    this.cancelar();
+    // k-ésimo mensaje de usuario (así lo cuenta el backend en la sesión)
+    const userIndex = lista.slice(0, idx).filter((x) => x.role === 'user').length;
+    try {
+      await firstValueFrom(this.api.rewindSession(this.sessionId(), userIndex));
+    } catch (err: any) {
+      throw new Error(err?.error?.error || 'No se pudo rebobinar la sesión');
+    }
+    this.messages.set(lista.slice(0, idx));
+    this.guardarHistorial();
+    this.thinking.set(false);
+    return { text: m.text, adjuntos: m.adjuntos };
   }
 
   async send(text: string, adjuntos: Adjunto[] = []): Promise<void> {

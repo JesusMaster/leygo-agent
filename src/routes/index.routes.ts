@@ -340,6 +340,17 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         }
     );
 
+    // Recortar la sesión antes del k-ésimo mensaje de usuario (editar / reiniciar desde aquí)
+    app.post('/apps/:appName/users/:userId/sessions/:sessionId/rewind', express.json(), async (req, res) => {
+        try {
+            const userIndex = Number(req.body?.userIndex);
+            if (!Number.isInteger(userIndex) || userIndex < 0) return res.status(400).json({ error: 'userIndex inválido' });
+            const { appName, userId, sessionId } = req.params;
+            const quitados = await sessionService.rewind({ appName, userId, sessionId, userIndex });
+            res.json({ status: 'success', removed: Math.max(0, quitados), existed: quitados >= 0 });
+        } catch (e: any) { res.status(500).json({ error: e.message }); }
+    });
+
     // Ejecutar agente (equivalente a POST /run del api_server nativo)
     app.post('/run', express.json(), async (req, res) => {
         const { appName, userId, sessionId, newMessage } = req.body;
