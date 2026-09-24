@@ -18,6 +18,14 @@ usermod -aG docker yisus
 mkdir -p /home/yisus/.ssh && cp -n /root/.ssh/authorized_keys /home/yisus/.ssh/ 2>/dev/null || true
 chown -R yisus:yisus /home/yisus/.ssh && chmod 700 /home/yisus/.ssh
 
+# Swap de 2 GB: el build de Angular (ng build) pide ~1,5 GB de pico; con 2 GB de RAM sin swap muere por OOM.
+# En operación el servicio usa < 1 GB, así que el swap casi no se toca (swappiness bajo).
+if ! swapon --show | grep -q '/swapfile'; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  sysctl -w vm.swappiness=10 >/dev/null && echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+fi
+
 # Firewall: solo SSH, HTTP y HTTPS
 ufw default deny incoming
 ufw default allow outgoing

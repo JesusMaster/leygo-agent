@@ -18,7 +18,7 @@ flowchart LR
 ## 0. Antes de empezar
 
 - **Solo puede haber UNA instancia viva**: Telegram (polling), Buzz (misma identidad Nostr) y las rutinas programadas se duplican si el Mac y el servidor corren a la vez. El día del corte: apaga el `npm run dev` local.
-- Droplet recomendado: **Ubuntu 24.04, 2 vCPU / 4 GB** (Basic, ~US$24/mes). 2 GB funciona, pero la generación de imágenes mueve base64 de varios MB y Angular se compila en el propio Droplet.
+- Droplet recomendado: **Ubuntu 24.04, 1 vCPU / 2 GB** (Basic, ~US$12/mes). En operación el servicio usa menos de 1 GB (Redis, Qdrant, Mongo y Ollama son externos); los 2 GB son por el **build de Angular** en el propio Droplet, que pide ~1,5 GB de pico. El script de setup agrega 2 GB de swap por si acaso. Si algún día prefieres 1 GB (US$6), hay que construir las imágenes fuera (GitHub Actions → registry) y que el Droplet solo haga `pull`.
 - Dominio: un registro **A** `yisus.tudominio.cl → IP del Droplet`. Si lo pones detrás de Cloudflare (proxy naranja), usa modo SSL *Full (strict)*; con `index.html` en `no-cache` no hace falta regla de Bypass.
 
 ## 1. Crear el Droplet
