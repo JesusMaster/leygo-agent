@@ -50,7 +50,13 @@ A2A_BASE_URL=https://yisus.tudominio.cl
 GUI_ORIGIN=https://yisus.tudominio.cl     # mismo origen: CORS deja de importar, pero queda bien puesto
 DATA_DIR=/app/data                        # ruta DENTRO del contenedor (volumen ./data)
 NODE_ENV=production
+GUI_PASSWORD_HASH='scrypt$…$…'            # ¡entre comillas simples! (ver nota)
 ```
+
+> **Valores con `$`** (el hash de `GUI_PASSWORD_HASH`, contraseñas, etc.) van **entre comillas simples**.
+> `docker compose` interpola `$VAR` dentro del `.env` y, sin comillas, el hash llegaría recortado al
+> contenedor (verías `WARN The "f7f1…" variable is not set` y el login fallaría). `deploy.sh` lo comprueba
+> antes de construir; `npm run gui:password` ya imprime la línea con comillas.
 
 Y copia los datos de tu Mac (base SQLite, agentes personalizados, catálogo de precios):
 

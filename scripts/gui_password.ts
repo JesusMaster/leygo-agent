@@ -17,6 +17,7 @@ rl.question('', (pw) => {
   if (!pw || pw.length < 8) { console.error('Mínimo 8 caracteres.'); process.exit(1); }
   console.log('\nPega estas dos líneas en tu .env y reinicia:\n');
   console.log(`GUI_USER=${process.env.GUI_USER || 'jleiva@dcanje.com'}`);
-  console.log(`GUI_PASSWORD_HASH=${GuiAuthService.hashPassword(pw)}\n`);
+  // Entre comillas simples: el hash lleva `$` y docker compose / la shell lo interpolarían.
+  console.log(`GUI_PASSWORD_HASH='${GuiAuthService.hashPassword(pw)}'\n`);
   process.exit(0);
 });
