@@ -921,7 +921,10 @@ export class NostrGatewayService {
       (t[1]?.toLowerCase() === this.publicKeyHex.toLowerCase() || t[1] === this.publicKeyNpub)
     );
 
-    const mentionsName = /\b@?yisus\b/i.test(content) || content.includes(this.publicKeyNpub);
+    // La mención por nombre se busca con las URLs quitadas: "https://yisus.openip.cl/…" no es
+    // hablarle a Yisus (Nacho le pasó a NachoBot una imagen alojada en el dominio y Yisus se metió).
+    const sinUrls = (content || '').replace(/\bhttps?:\/\/\S+/gi, ' ').replace(/\b[\w-]+(\.[\w-]+)+(\/\S*)?/g, ' ');
+    const mentionsName = /(^|[^\w.-])@?yisus\b/i.test(sinUrls) || content.includes(this.publicKeyNpub);
 
     const eventReplyIds = event.tags?.filter((t: any) => t[0] === 'e').map((t: any) => t[1]) || [];
     const isReplyToMe = await this.isThreadOrReplyActive(eventReplyIds);
