@@ -1,14 +1,16 @@
-# Dependencies
+# ─── Dependencias ────────────────────────────────────────────────────────────
 node_modules/
 .pnp
 .pnp.js
 
-# Build and Compilation outputs
+# ─── Build ───────────────────────────────────────────────────────────────────
 dist/
 build/
 *.tsbuildinfo
+# caché del compilador Angular
+yisus-gui/.angular/
 
-# Environment variables & secrets (CRITICAL: Never commit credentials)
+# ─── Secretos (NUNCA se commitean) ───────────────────────────────────────────
 .env
 .env.*
 !.env.example
@@ -19,14 +21,23 @@ service_account*.json
 *.pem
 *.key
 
-# Local Databases, storage & Vector DBs
+# ─── Datos locales (data/) ───────────────────────────────────────────────────
+# Se versionan SOLO los manifiestos de agentes personalizados (data/agents):
+# son parte del "clon" y no contienen claves (las claves van al .env).
 data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 data/*.sqlite
 data/*.sqlite-journal
+# imágenes/archivos generados por herramientas (caducan a los 7 días)
+data/adjuntos/
+# catálogo de precios: se descarga solo (2,5 MB, cambia a diario)
+data/litellm_cost.json
 qdrant_storage/
 *.rdb
 
-# Logs & Monitoring
+# ─── Logs ────────────────────────────────────────────────────────────────────
 logs/
 *.log
 npm-debug.log*
@@ -34,13 +45,17 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Backups & Temporary files
+# ─── Respaldos y temporales ──────────────────────────────────────────────────
 *.bak
+*.bak-*
 *.tmp
 *.temp
+*.orig
 scratch/
+# scripts de prueba efímeros
+_t.ts
 
-# Operating System files
+# ─── Sistema operativo ───────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
@@ -49,7 +64,7 @@ scratch/
 ehthumbs.db
 Thumbs.db
 
-# IDE & Editors
+# ─── IDE ─────────────────────────────────────────────────────────────────────
 .idea/
 .vscode/*
 !.vscode/settings.json
@@ -57,8 +72,3 @@ Thumbs.db
 *.swp
 *.swo
 *~
-data/*.db-journal
-*.bak-*
-
-# Angular cache
-yisus-gui/.angular/

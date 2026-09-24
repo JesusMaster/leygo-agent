@@ -1,324 +1,436 @@
 # 🤖 Yisus Agent
 
-> **Clon digital y asistente ejecutivo y operacional de Jesús Leiva (CTO de Apprecio)**  
-> Construido sobre **Google ADK (Agent Development Kit)**, **TypeScript**, **Nostr (Buzz)**, **Telegram**, **MongoDB**, **Redis** y **Qdrant Vector DB**.
+> **Clon digital y asistente ejecutivo de Jesús Leiva (CTO de Apprecio).**
+> Backend multi-agente en **TypeScript** sobre **Google ADK**, con **GUI Angular** (`yisus-gui`), canales **Telegram · Buzz (Nostr) · A2A · API**, memoria en **Qdrant**, estado en **SQLite + Redis**, y proveedores LLM intercambiables (Gemini, OpenAI, Anthropic, Moonshot, xAI, DeepSeek, Groq, Mistral, OpenRouter, Ollama).
 
 ---
 
-## 📋 Tabla de Contenidos
-1. [Visión General](#-visión-general)
-2. [Arquitectura del Sistema](#-arquitectura-del-sistema)
-3. [Flujo de Ejecución y Autorización](#-flujo-de-ejecución-y-autorización)
-4. [Canales de Comunicación](#-canales-de-comunicación)
-5. [Agentes y Herramientas](#-agentes-y-herramientas)
-6. [Memoria y Recuperación (RAG)](#-memoria-y-recuperación-rag)
-7. [Servicios en Segundo Plano & Cron Jobs](#-servicios-en-segundo-plano--cron-jobs)
-8. [Token Tracker y Control de Presupuesto](#-token-tracker-y-control-de-presupuesto)
-9. [Instalación y Puesta en Marcha](#-instalación-y-puesta-en-marcha)
-10. [Variables de Entorno](#-variables-de-entorno)
-11. [Scripts Disponibles](#-scripts-disponibles)
+## 📋 Tabla de contenidos
+
+1. [Visión general](#-visión-general)
+2. [Arquitectura](#-arquitectura)
+3. [Cómo se procesa un turno](#-cómo-se-procesa-un-turno)
+4. [Canales](#-canales)
+5. [Agentes y herramientas](#-agentes-y-herramientas)
+6. [Self agents: agentes creados por IA](#-self-agents-agentes-creados-por-ia)
+7. [Adjuntos (imágenes y archivos)](#-adjuntos-imágenes-y-archivos)
+8. [Compromisos](#-compromisos)
+9. [Memoria (RAG)](#-memoria-rag)
+10. [Rutinas y tareas programadas](#-rutinas-y-tareas-programadas)
+11. [Modelos LLM: proveedores, asignación y respaldo](#-modelos-llm-proveedores-asignación-y-respaldo)
+12. [Costos: medición y presupuesto](#-costos-medición-y-presupuesto)
+13. [Seguridad](#-seguridad)
+14. [GUI (yisus-gui)](#-gui-yisus-gui)
+15. [Instalación](#-instalación)
+16. [Variables de entorno](#-variables-de-entorno)
+17. [Scripts](#-scripts)
+18. [Estructura del repositorio](#-estructura-del-repositorio)
 
 ---
 
-## 🧠 Visión General
+## 🧠 Visión general
 
-**Yisus** representa el criterio técnico, estilo directo y capacidad operativa de **Jesús Leiva**. No es un bot convencional de atención al cliente ni un asistente genérico:
-- **Tono auténtico y natural**: Escribe con el estilo conversacional habitual de Jesús en WhatsApp/Slack (directo, breve, informal, sin muletillas corporativas como "¿en qué te puedo colaborar?").
-- **Identidad transparente**: Si se le pregunta directamente, aclara que es un agente digital y puede escalar decisiones al Jesús real.
-- **Firma ejecutiva en correos**: Todos los borradores y correos en Gmail se redactan y firman estrictamente como **Jesús Leiva** (o *Jesús Leiva | CTO Apprecio*).
-- **Operación multi-canal**: Se conecta simultáneamente a salas de trabajo descentralizadas en **Buzz (Nostr)**, bots privados en **Telegram**, agentes de IA mediante el protocolo **A2A**, y APIs REST/SSE.
+**Yisus** representa el criterio técnico, el estilo directo y la capacidad operativa de Jesús:
+
+- **Tono propio**: escribe como Jesús en WhatsApp/Slack (directo, breve, sin muletillas corporativas). Si le preguntan, aclara que es un agente y escala al Jesús real lo que corresponde.
+- **Un Coordinator, muchos especialistas**: el Coordinator entiende, rutea y responde; los subagentes (cuenta Google, conocimiento, FAQ, triage, compromisos, agentes personalizados) hacen el trabajo.
+- **Human-in-the-loop**: las acciones sensibles (enviar correos, publicar en Buzz, resolver escalamientos) piden confirmación por Telegram; lo que otros deciden por Jesús se registra como *escalamiento*.
+- **Multi-canal con permisos por canal**: cada canal monta su propio set de herramientas (`config/channels.json`); por A2A cada token tiene su alcance.
+- **Costos bajo control**: cada llamada al modelo se mide (tokens, caché, razonamiento, imágenes) y se tarifa con precios reales; hay presupuestos por canal y modelo de respaldo si el principal falla.
 
 ---
 
-## 🏛️ Arquitectura del Sistema
+## 🏛️ Arquitectura
 
 ```mermaid
 flowchart TD
-    subgraph Canales ["🌐 Canales de Entrada"]
-        Nostr["Buzz / Nostr Relay\n(NIP-01, 10, 29, 42)"]
-        Tg["Telegram Bot\n(Polling & Auth Cards)"]
-        A2A["Protocolo A2A\n(/.well-known/agent-card.json)"]
-        RestApi["API REST & SSE\n(/api/run, /api/run_sse)"]
-        Webhooks["Custom Webhooks\n(/api/webhook/:id)"]
+    subgraph Canales ["🌐 Canales de entrada"]
+        GUI["GUI Angular<br/>(yisus-gui · /run_sse)"]
+        Tg["Telegram Bot<br/>(polling · tarjetas 2FA)"]
+        Buzz["Buzz / Nostr<br/>(kind 9, NIP-42)"]
+        A2A["A2A 1.0<br/>(/a2a/v1 · tokens por alcance)"]
+        Hooks["Webhooks<br/>(/api/webhook/:id)"]
+        Cron["Rutinas y tareas<br/>programadas"]
     end
 
-    subgraph Core ["⚡ Núcleo Orquestador (Google ADK)"]
-        Gateway["Nostr Gateway\nService"]
-        TgService["Telegram Bot\nService"]
-        A2AService["A2A Executor\nService"]
-        Tracker["TokenTracker &\nBudget Service"]
-        
-        Coordinator["🤖 Coordinator Agent\n(TrackedGemini - gemini-3.8-flash)"]
+    subgraph Core ["⚡ Núcleo (Google ADK)"]
+        Coord["🤖 Coordinator (Yisus)<br/>telegram · buzz · api"]
+        Pub["🌍 Coordinator público<br/>(A2A: sin datos privados)"]
+        Direct["@mención directa<br/>(salta el Coordinator)"]
+        LLM["DynamicLlm<br/>proveedor+modelo por agente<br/>presupuesto de contexto · failover"]
     end
 
-    subgraph Especialistas ["🎯 Agentes Especialistas (AgentTool)"]
-        AccountAgent["Account Agent\n(Google Workspace)"]
-        KnowledgeAgent["Knowledge Agent\n(RAG episódico/semántico)"]
-        FaqAgent["FAQ Agent\n(Políticas y procesos)"]
-        SchedulerTools["Scheduler &\nReminder Tools"]
-        NostrTools["Buzz Outbound\nTools"]
-        WebhookTools["Webhook Mgmt\nTools"]
+    subgraph Sub ["🎯 Subagentes (AgentTool)"]
+        Acc["account_agent<br/>Gmail · Calendar · Drive · Chat"]
+        Kn["knowledge_agent /<br/>knowledge_public"]
+        Faq["faq_agent"]
+        Tri["triage_agent<br/>(escalamientos)"]
+        Com["commitments_agent"]
+        Build["agent_builder<br/>(programa agentes)"]
+        Custom["Agentes personalizados<br/>nami · banano · yutu …<br/>(tools JS en sandbox)"]
     end
 
-    subgraph Storage ["💾 Persistencia & Memoria"]
-        Redis[("Redis DB\n• Sesiones ADK\n• Checkpoint Nostr\n• Control de Hilos")]
-        Mongo[("MongoDB\n• Recordatorios\n• Webhooks\n• Usage Logs")]
-        Qdrant[("Qdrant Vector DB\n• Minutas Meet\n• Hilos Gmail/Chat\n• Contexto")]
+    subgraph Data ["💾 Datos"]
+        SQLite[("SQLite (data/reminders.db)<br/>consumo · compromisos · tareas<br/>escalamientos · tokens A2A · config")]
+        Redis[("Redis<br/>sesiones ADK · hilos Buzz")]
+        Qdrant[("Qdrant<br/>core_knowledge · episodic_memory<br/>commitments · agent_&lt;slug&gt;")]
+        Files[("data/agents · data/adjuntos<br/>data/litellm_cost.json")]
     end
 
-    Nostr --> Gateway --> Coordinator
-    Tg --> TgService --> Coordinator
-    A2A --> A2AService --> Coordinator
-    RestApi --> Coordinator
-    Webhooks --> Coordinator
+    GUI --> Coord
+    Tg --> Coord
+    Buzz --> Coord
+    Hooks --> Coord
+    Cron --> Coord
+    A2A --> Pub
+    GUI -. "@nami …" .-> Direct
+    Tg -. "@nami …" .-> Direct
+    Direct --> Custom
 
-    Coordinator --> Tracker
-    Coordinator --> AccountAgent
-    Coordinator --> KnowledgeAgent
-    Coordinator --> FaqAgent
-    Coordinator --> SchedulerTools
-    Coordinator --> NostrTools
-    Coordinator --> WebhookTools
+    Coord --> Acc & Kn & Faq & Tri & Com & Build & Custom
+    Pub --> Kn & Faq & Tri & Custom
+    Coord --> LLM
+    Pub --> LLM
+    Sub --> LLM
 
-    Coordinator -.-> Redis
-    AccountAgent -.-> Mongo
-    KnowledgeAgent -.-> Qdrant
-    Tracker -.-> Mongo
+    Coord -.-> Redis
+    Pub -.-> Redis
+    LLM -.-> SQLite
+    Kn -.-> Qdrant
+    Com -.-> SQLite & Qdrant
+    Custom -.-> Files & Qdrant
 ```
+
+**Reglas que sostienen el diseño**
+
+- El Coordinator de cada canal se construye con las herramientas de ese canal (`config/channels.json`) **más** los agentes personalizados que declaran ese canal en su manifiesto, sin repetir nombres.
+- El Coordinator público (A2A) no tiene acceso a Gmail/Calendar/Drive ni a los compromisos de escritura; cada token A2A recibe además un subconjunto de herramientas.
+- Los subagentes corren sin historial (`includeContents: 'none'`): reciben la consulta, responden, y no arrastran contexto entre turnos. Es lo que los hace baratos.
 
 ---
 
-## 🔄 Flujo de Ejecución y Autorización
-
-Para acciones críticas (como enviar correos en Gmail, agendar eventos o publicar mensajes en canales corporativos), el agente solicita confirmación explícita mediante **Tarjetas Interactivas en Telegram**:
+## 🔄 Cómo se procesa un turno
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Usuario as Usuario (Buzz / Web)
-    participant Coord as Coordinator Agent
-    participant TgAuth as TelegramAuthService
-    actor Jesus as Jesús Leiva (Telegram)
-    participant Google as Google APIs / Servicios
+    actor U as Usuario
+    participant Ch as Canal (GUI/Telegram/…)
+    participant P as prepararTurno
+    participant C as Coordinator
+    participant L as DynamicLlm
+    participant S as Subagente / tool
+    participant T as TokenTracker
 
-    Usuario->>Coord: "Envía un correo a Felipe confirmando la reunión"
-    Coord->>Coord: Determina que es una acción protegida
-    Coord->>TgAuth: requestApproval(Gmail, "Enviar correo a felipe@...")
-    TgAuth->>Jesus: 📲 Tarjeta interactiva con botón [✅ Aprobar] [❌ Rechazar]
-    
-    alt Usuario aprueba en Telegram
-        Jesus->>TgAuth: Click en [✅ Aprobar]
-        TgAuth-->>Coord: Aprobado (Ventana de gracia activa por 5m)
-        Coord->>Google: Ejecuta createDraft / sendEmail
-        Google-->>Coord: Éxito
-        Coord-->>Usuario: "Listo, correo enviado a Felipe 👍"
-    else Usuario rechaza o expira
-        Jesus->>TgAuth: Click en [❌ Rechazar]
-        TgAuth-->>Coord: Rechazado
-        Coord-->>Usuario: "No fue autorizado el envío del correo."
+    U->>Ch: mensaje
+    Ch->>P: texto (+ sufijo "[enviado: fecha hora]")
+    alt empieza con @slug de un agente personalizado
+        P->>S: runner directo (misma sesión, sin Coordinator)
+    else
+        P->>C: runner del canal
     end
+    C->>L: petición (instrucción + tools + historial)
+    L->>L: presupuesto de contexto (recorte anclado, adjuntos viejos fuera)
+    L->>L: modelo principal · si 429/5xx → respaldo
+    L-->>C: respuesta / functionCall
+    C->>S: ejecuta herramienta o delega
+    S-->>C: resultado (adjuntos → marcador [[adjunto:ID]])
+    C-->>Ch: texto final
+    Ch-->>U: texto · imagen/archivo según el canal
+    C->>T: tokens (entrada, caché, razonamiento, imágenes) por agente y modelo
 ```
 
----
+Detalles que importan:
 
-## 📡 Canales de Comunicación
-
-### 1. Nostr Gateway (Buzz Bridge)
-Permite al agente interactuar en salas y canales descentralizados de **Buzz** (`wss://apprecio.communities.buzz.xyz`):
-* **Protocolos Nostr**:
-  * **NIP-01**: Sincronización de perfil de Yisus (Kind 0: avatar, display name, biografía).
-  * **NIP-10 & NIP-29**: Respuestas en hilos de conversación y eventos de canal de grupo (Kind 9).
-  * **NIP-42**: Autenticación criptográfica obligatoria con firma del reto mediante clave privada `nsec`.
-* **Resiliencia & Conectividad**:
-  * Implementación WebSocket nativa con protocolo `ws` (soporta ping/pong real a nivel de frame, evitando caídas silenciosas).
-  * **Watchdog activo**: Envío periódico de pruebas y renovación programada de suscripción.
-  * **Cola de respuestas pendientes**: Si el socket se desconecta mientras el modelo procesa una respuesta, el mensaje se encola y se despacha inmediatamente tras la reconexión.
-  * **Memoria de Hilos en Redis**: Seguimiento continuo de conversaciones en hilos activos, permitiendo responder preguntas de seguimiento sin necesidad de volver a escribir `@Yisus`.
-
-### 2. Telegram Bot
-* **Modos**: Long Polling o Webhook.
-* **Funciones**:
-  * Interfaz de conversación privada directa con Jesús.
-  * Panel de autorización de herramientas protegidas (*Human-in-the-loop*).
-  * Envío proactivo de recordatorios y del **Morning Digest** matutino.
-  * Menú de *Quick Actions* para consultas rápidas de agenda y estado del sistema.
-
-### 3. Protocolo A2A (Agent-to-Agent)
-* Endpoint compatible con el estándar **A2A v1**.
-* Expone la tarjeta de capacidades del agente en `/.well-known/agent-card.json`.
-* Permite a otros agentes del ecosistema (como Perseo, Tulio, NachoBot o A2) coordinar tareas a través de `/a2a/v1`.
-
-### 4. API REST & SSE (Server-Sent Events)
-* `POST /api/run`: Ejecución directa de prompts con respuesta JSON completa.
-* `GET /api/run_sse`: Streaming en tiempo real de eventos del agente vía SSE.
-* `GET /api/usage`: Métricas de consumo de tokens y costos en USD.
-* `GET /api/usage/budget` & `POST /api/usage/budget`: Consulta y configuración dinámica de presupuestos por canal compatible con la interfaz gráfica **Leygo GUI**.
+- **Fecha y hora** viajan en el mensaje del usuario, no en la instrucción: así instrucción + herramientas + historial son un prefijo estable y Gemini reutiliza el **caché de prompt** (~90 % de descuento en esos tokens).
+- **Presupuesto de contexto** (`src/agents/llm/context_budget.ts`): respuestas de herramientas acotadas por tool, ventana de historial por agente (Coordinator 90k chars) con corte **anclado** (no se mueve en cada turno), marcadores de adjuntos de turnos anteriores neutralizados.
+- **Sesiones**: GUI y API usan una sesión por conversación; Telegram abre una nueva tras 4 h sin mensajes (`TELEGRAM_SESSION_IDLE_MIN`) o con `/nueva`; las tareas programadas usan sesión nueva en cada corrida; A2A usa el `contextId` del cliente y procesa **un turno a la vez** por contexto.
 
 ---
 
-## 🛠️ Agentes y Herramientas
+## 📡 Canales
 
-| Componente | Tipo | Descripción |
+| Canal | Entrada | Particularidades |
 | :--- | :--- | :--- |
-| **`Coordinator`** | `LlmAgent` | Agente raíz. Gestiona el contexto, define la personalidad y rutea tareas a especialistas. |
-| **`accountAgent`** | `AgentTool` | Integración profunda con **Google Workspace**: Gmail (lectura, borradores, envío), Calendar (eventos, agenda diaria), Drive (búsqueda de archivos y transcripciones) y Google Chat. |
-| **`knowledgeAgent`**| `AgentTool` | RAG episódico sobre **Qdrant**: consulta transcripciones de reuniones pasadas, acuerdos y contexto histórico de hilos. |
-| **`faqAgent`** | `AgentTool` | Respuestas sobre lineamientos de la empresa, políticas internas y preguntas frecuentes. |
-| **`schedulerTools`**| `Tools` | Programación, listado y cancelación de recordatorios diferidos. Disparo manual del Morning Digest. |
-| **`nostrTools`** | `Tools` | Envío proactivo de mensajes a canales de Buzz (`buzz_send_message`) y verificación del estado del bridge (`buzz_status`). |
-| **`webhookTools`** | `Tools` | Creación y administración de webhooks inteligentes con procesamiento de IA. |
-| **`usageTools`** | `Tools` | Monitoreo de tokens consumidos, consulta de presupuestos y actualización de tarifas de modelos. |
+| **GUI** (`yisus-gui`) | `POST /run_sse` (SSE) | Streaming de eventos, pasos por agente, costo por turno, adjuntos inline, `@agente` con autocompletado, editar/reenviar/regenerar (rebobina la sesión del backend). |
+| **Telegram** | long polling | Chat privado con Jesús, tarjetas de autorización (2FA de herramientas), recordatorios y avisos, fotos/documentos generados, `/nueva`. |
+| **Buzz (Nostr)** | relay `wss://…buzz.xyz` | NIP-01/10/29/42, watchdog y cola de reenvío. Responde con mención (`@Yisus`, sin contar URLs/dominios) o en hilos activos **solo a sus interlocutores** y nunca a mensajes dirigidos a otro (`@NachoBot …`). |
+| **A2A 1.0** | `POST /a2a/v1` (JSON-RPC) | Card en `/.well-known/agent-card.json`. Tokens con alcance por herramienta (`Tokens A2A` en la GUI), peers remotos (Yisus como cliente A2A). Tareas terminan en `COMPLETED`; adjuntos como partes `url` y como artifact. |
+| **Webhooks** | `POST /api/webhook/:id` | Webhooks personalizados con instrucción, proveedor/modelo propio y entrega a canales. |
+| **API** | `/run`, `/run_sse`, `/api/*` | Protegida por `ADMIN_API_KEY` o sesión de la GUI (`admin_guard.ts`). `npm run check:rutas` verifica qué queda público. |
 
 ---
 
-## 🔍 Memoria y Recuperación (RAG)
+## 🛠️ Agentes y herramientas
 
-El agente utiliza **Qdrant** como almacén vectorial con colecciones optimizadas:
-* **Colección `episodic_memory`**:
-  * Indexa minutas de reuniones de Google Meet generadas por Gemini.
-  * Almacena metadatos críticos: participantes, decisiones tomadas, tareas asignadas, enlaces a documentos de Drive y fecha.
-* **Colección `context_memory`**:
-  * Almacena hilos consolidados de Gmail y Google Chat.
-* **Embeddings soportados**:
-  * **Ollama local/remoto** (`nomic-embed-text:latest`) por defecto.
-  * **Google Gemini** (`gemini-embedding-001`) como proveedor alternativo configurable.
+| Agente | Rol |
+| :--- | :--- |
+| **`Coordinator`** (Yisus) | Raíz de los canales de Jesús. Personalidad, ruteo, respuesta final. Recibe la lista de agentes personalizados de forma dinámica (sin reiniciar). |
+| **`public_coordinator`** | Raíz de A2A. Mismo criterio, sin datos privados; no ejecuta de nuevo lo ya hecho en la conversación. |
+| **`account_agent`** | Google Workspace: Gmail, Calendar, Drive, Google Chat (con formato nativo de Chat). |
+| **`knowledge_agent`** / **`knowledge_public`** | RAG sobre Qdrant: minutas, hilos consolidados, notas de Obsidian (la versión pública solo lo no confidencial). |
+| **`faq_agent`** | Políticas, procesos y preguntas frecuentes de Apprecio. |
+| **`triage_agent`** | Escalamientos: lo que no debe decidir el clon (sueldos, contrataciones, compromisos legales…) se registra y se le pregunta a Jesús; la respuesta vuelve a quien preguntó. |
+| **`commitments_agent`** | Lista viva de compromisos (ver abajo). Escritura solo desde canales de Jesús. |
+| **`agent_builder`** | Agente programador: crea y modifica agentes personalizados a partir de lenguaje natural. Solo desde canales de Jesús. |
+| **Agentes personalizados** | `nami`, `banano`, `yutu`, … creados por el builder; ver siguiente sección. |
+
+Los grupos de herramientas y su disponibilidad por canal viven en `src/agents/tool_catalog.ts` y `config/channels.json`, editables desde la GUI (*Canales y tools*).
 
 ---
 
-## ⏰ Servicios en Segundo Plano & Cron Jobs
+## 🧩 Self agents: agentes creados por IA
 
-El `SchedulerService` orquesta automáticamente las siguientes rutinas periódicas:
+Pídele al Coordinator (o usa *Agentes → Crear con IA* en la GUI):
+
+> "Crea un agente que me ayude en los estudios de vuelo: convierte km a millas náuticas y calcula el top of descent. Se llama Nami y tiene la personalidad de un instructor de vuelo."
 
 ```mermaid
 flowchart LR
-    Cron["node-cron Engine"]
-    
-    Cron -->|08:30 CLT (Lun-Vie)| Digest["Morning Digest\n• Agenda Google Calendar\n• Correos prioritarios\n• Notificación a Telegram"]
-    Cron -->|20:00 CLT (Lun-Vie)| Meet["Meet Ingest Sync\n• Revisa Drive\n• Extrae notas de Gemini\n• Upsert en Qdrant"]
-    Cron -->|21:00 CLT (Lun-Vie)| Context["Context Consolidation\n• Hilos Gmail & Chat\n• Resúmenes vectoriales"]
-    Cron -->|03:00 CLT (Domingos)| Pricing["LiteLLM Pricing Updater\n• Sincroniza tarifas\nde 2,000+ modelos"]
+    J["Jesús"] -->|petición| B["agent_builder"]
+    B -->|list_provider_models| M["Modelos reales<br/>de los proveedores"]
+    B -->|create_custom_agent| V{"Validación<br/>+ tests"}
+    V -- falla --> B
+    V -- ok --> F["data/agents/&lt;slug&gt;/agent.json<br/>+ soul.md"]
+    F --> H["Montaje en caliente<br/>en los Coordinators del canal"]
+    H --> C["Disponible: Coordinator · @slug directo · A2A (si el token lo tiene)"]
 ```
 
+- **Manifiesto** (`agent.json`): nombre, personalidad (*soul*), descripción de ruteo, herramientas (JSON Schema + código JS + tests), variables de entorno, memoria propia, modelo, canales.
+- **Sandbox**: el código de cada herramienta corre en un `worker_thread` con `node:vm` sin prototipos ni acceso a `require/process/fs`; `ctx.fetch` solo https y solo si la herramienta declara `network`; timeout duro (10 s, 90 s con red). Probado contra escapes y bucles infinitos.
+- **Variables**: `AGENT_<SLUG>_<VAR>` en el `.env` (o `<VAR>` global), editables desde la GUI.
+- **Memoria propia** opcional: colección `agent_<slug>` en Qdrant con `memory_search` / `memory_save`.
+- **Modelos reales**: el builder consulta los modelos que ofrece cada proveedor antes de programar una herramienta que llame a un LLM/API (nunca adivina nombres).
+- **Edición en línea** en la GUI: soul, herramientas (con prueba individual), variables, canales, modelo; "Probar" abre un chat directo con el agente; el progreso de la creación se ve en tiempo real.
+- **Mención directa**: `@nami …` en GUI, API o Telegram va directo al agente, sin Coordinator, sobre la misma sesión (≈10× más barato). En Buzz y A2A decide el Coordinator.
+
 ---
 
-## 💰 Token Tracker y Control de Presupuesto
+## 🖼️ Adjuntos (imágenes y archivos)
 
-Cada invocación del modelo Gemini (`TrackedGemini`) registra detalladamente el uso en MongoDB y memoria:
-* **Canales monitoreados**: `telegram`, `buzz`, `a2a`, `api`, `system`.
-* **Presupuestos independientes**: Se pueden definir límites mensuales en dólares para cada canal (por ejemplo: $5 USD global, $3 USD Buzz, $2 USD Telegram).
-* **Alerta de umbrales**: Notifica cuando el consumo se acerca o supera el límite configurado.
+Una herramienta devuelve `{ adjuntos: [{ tipo, mime, base64, nombre, caption }] }`. El sandbox lo guarda en `data/adjuntos/<id>` (id aleatorio de 128 bits, caduca a los 7 días) **antes** de que el resultado llegue al modelo, que solo ve una referencia con el marcador `[[adjunto:ID]]`. Cada canal lo convierte:
+
+| Canal | Cómo llega |
+| :--- | :--- |
+| GUI | imagen inline / enlace |
+| Telegram | `sendPhoto` / `sendDocument` (multipart) |
+| Google Chat, Buzz | enlace público `https://<PUBLIC_BASE_URL>/api/adjuntos/<id>` |
+| A2A | parte `{ url, filename, mediaType }` + artifact |
+
+Las llamadas que una herramienta hace directamente a la API de Gemini (p. ej. `gemini-3.1-flash-image`) se miden igual: tokens e **imágenes por unidad**.
 
 ---
 
-## 🚀 Instalación y Puesta en Marcha
+## ✅ Compromisos
 
-### 1. Requisitos Previos
-* **Node.js** >= 20.x
-* **Docker & Docker Compose** (para ejecutar Redis, MongoDB y Qdrant localmente)
+Lista viva de lo que Jesús debe y lo que le deben, con estados `propuesto → pendiente → en_curso → hecho / cancelado / descartado`.
 
-### 2. Infraestructura Base
-Si no cuentas con instancias existentes, puedes iniciar las bases de datos requeridas:
+- **Fuentes**: consolidación nocturna de Gmail/Chat, ingesta de minutas de Meet, y a mano (chat, GUI). El backfill (`npm run commitments:backfill`) recorre la memoria episódica existente.
+- **Sin duplicados**: candidatos por similitud léxica y semántica (Qdrant); los dudosos los decide una llamada al modelo por lote.
+- **Fechas propuestas** según prioridad (alta +2, media +5, baja +10 días hábiles); Jesús acepta o cambia.
+- **Notificaciones**: al cerrar, se elige el canal para avisar a la contraparte (Telegram, Google Chat, correo…); *friendly reminder* manual o automático para lo que le deben.
+- **Digest**: el Morning Digest incluye la sección de compromisos; la rutina *Aviso de compromisos* (09:00) le avisa a Jesús lo que vence.
+- Disponible en GUI (`/commitments`), Telegram, API, Buzz y A2A (solo lectura en canales externos).
+
+---
+
+## 🔍 Memoria (RAG)
+
+Colecciones en **Qdrant** (embeddings con Ollama `nomic-embed-text` o `gemini-embedding-001`, `EMBEDDING_PROVIDER`):
+
+| Colección | Contenido |
+| :--- | :--- |
+| `core_knowledge` | Conocimiento base: notas de Obsidian (`npm run sync:obsidian`), arquitectura y documentación de Apprecio. |
+| `episodic_memory` | Minutas de Google Meet (participantes, decisiones, tareas, enlaces) e hilos consolidados de Gmail y Google Chat. |
+| `commitments` | Índice semántico de compromisos (dedup y búsqueda). |
+| `agent_<slug>` | Memoria propia de cada agente personalizado que la active. |
+
+Qdrant Cloud exige índices de payload para filtrar; el servicio los crea al arrancar (`asegurarIndices`).
+
+---
+
+## ⏰ Rutinas y tareas programadas
+
+Todo vive en **Tareas programadas** (GUI `/tasks`): las rutinas de sistema (registradas por código, no se borran), las tareas creadas por Jesús (desde el chat o la GUI, con proveedor/modelo propio y entrega a canales) y una pestaña de finalizadas.
+
+```mermaid
+flowchart LR
+    S["SchedulerService<br/>(America/Santiago)"]
+    S -->|"08:30 diario"| D["Morning Digest<br/>agenda · correos · escalamientos · compromisos"]
+    S -->|"08:45 diario (de Jesús)"| A["Revisar agenda y<br/>programar recordatorios"]
+    S -->|"09:00 diario"| R["Aviso de compromisos<br/>+ friendly reminders automáticos"]
+    S -->|"20:00 L-V"| M["Meet Ingest → Qdrant<br/>+ compromisos"]
+    S -->|"21:00 L-V"| C["Consolidación Gmail/Chat → Qdrant<br/>+ compromisos"]
+    S -->|"cada 6 h"| P["Catálogo de precios LiteLLM"]
+```
+
+Cada corrida abre una sesión nueva (una tarea diaria no arrastra el historial de las anteriores).
+
+---
+
+## 🧮 Modelos LLM: proveedores, asignación y respaldo
+
+- **Proveedores** (GUI *Ajustes → Proveedores LLM*): Gemini, OpenAI, Anthropic, xAI, Moonshot (Kimi), DeepSeek, Groq, Mistral, OpenRouter, Ollama y cualquier API compatible con OpenAI. Claves enmascaradas, prueba de conexión, lista de modelos desde la API del proveedor.
+- **Asignación por agente** (*Modelos por agente*): cada agente (Coordinator, subagentes, digest, consolidación, ingesta, webhooks, tareas) resuelve proveedor+modelo **en cada llamada** desde `system_config`; cambia sin reiniciar. Los adaptadores propios (`src/agents/llm/`) implementan function calling, contabilidad de tokens y reintentos ante 429/5xx.
+- **Respaldo (failover)**: un modelo de respaldo global y/o por agente. Si el principal falla con un error transitorio (429, 5xx, "high demand", "unavailable", red), la misma petición se repite con el respaldo dentro del mismo turno. No reintenta errores de petición, de clave ni de modelo inexistente. Conviene que el respaldo sea de **otro** proveedor.
+- **Override por ejecución**: tareas programadas y webhooks pueden fijar su propio modelo para el Coordinator.
+
+---
+
+## 💰 Costos: medición y presupuesto
+
+- Cada llamada al modelo se registra en SQLite (`usage_history`) por **canal, agente y modelo**, con tokens de entrada, **en caché**, de salida, de **razonamiento**, **imágenes generadas**, número de llamadas del turno y las herramientas invocadas.
+- **Precios**: manual (GUI *Consumo → Precios por modelo*) → catálogo **LiteLLM** (se refresca a diario, busca `<proveedor>/<modelo>`) → familia → default. Cada fila guarda la fuente; lo aproximado se marca con ≈. "Retarifar mes" recalcula con los precios vigentes.
+- **Presupuestos** mensuales en USD, global y por canal, con alertas.
+- El tooltip de cada turno en el chat muestra tokens, caché, razonamiento y costo por agente.
+
+---
+
+## 🔐 Seguridad
+
+- `ADMIN_API_KEY` o sesión de la GUI (usuario + hash scrypt, `npm run gui:password`) para `/run`, `/run_sse`, `/api/*` y la administración; `npm run check:rutas` comprueba que nada sensible quede abierto.
+- A2A: tokens `yisus_…` con alcance por herramienta (`npm run check:permisos`); la clave de administración **nunca** viaja por A2A.
+- Herramientas protegidas piden confirmación por Telegram (`npm run check:2fa`); Buzz y A2A no pueden crear agentes ni modificar compromisos.
+- Código de agentes personalizados aislado en sandbox (ver arriba).
+- Los adjuntos son URLs-capacidad (id aleatorio, caducan); nada de claves en las URLs.
+- Secretos solo en `.env` (ignorado por git); los manifiestos de agentes no contienen claves.
+
+---
+
+## 🖥️ GUI (yisus-gui)
+
+Angular 21 (zoneless, signals). Vistas: **Chat** (streaming, pasos, costos, adjuntos, `@agente`, editar/regenerar), **Consumo** (turnos, precios, presupuestos), **Canales y tools**, **Tokens A2A** (tokens y peers remotos), **Escalamientos**, **Compromisos**, **Agentes** (self agents), **Webhooks**, **Tareas programadas**, **Ajustes** (proveedores LLM, modelos por agente con respaldo, claves y variables del `.env`, reinicio). Funciona en móvil (teclado iOS, sidebar con scroll).
+
 ```bash
-# Redis (puerto 6379)
-docker run -d --name redis-yisus -p 6379:6379 redis:alpine
+cd yisus-gui && npm install && npx ng build --watch --configuration development   # sirve dist/yisus-gui/browser
+```
 
-# MongoDB (puerto 27017)
-docker run -d --name mongo-yisus -p 27017:27017 mongo:7
+> Si la GUI se sirve detrás de Cloudflare, crea una regla *Bypass cache* para el host: si no, cada deploy requiere recarga forzada.
 
-# Qdrant Vector DB (puerto 6333)
+---
+
+## 🚀 Instalación
+
+**Requisitos**: Node.js ≥ 22 (usa `node:sqlite` nativo), Redis, Qdrant (local o Cloud), MongoDB (solo para el FAQ de Apprecio), opcionalmente Ollama para embeddings.
+
+```bash
+# Infraestructura local
+docker run -d --name redis-yisus  -p 6379:6379 redis:alpine
 docker run -d --name qdrant-yisus -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant
-```
+docker run -d --name mongo-yisus  -p 27017:27017 mongo:7
 
-### 3. Instalación de Dependencias
-```bash
-git clone <url-del-repositorio>
-cd yisus-agent
+# Backend
+git clone <url-del-repositorio> && cd yisus-agent
 npm install
+cp .env.example .env            # completa claves
+npm run nostr:id                # identidad Nostr (Buzz)
+npm run google:oauth            # refresh token de Google Workspace
+npm run gui:password            # usuario/contraseña de la GUI
+npm run dev                     # tsx watch src/index.ts (puerto 4000)
 ```
 
-### 4. Configurar Variables de Entorno
-Copia el archivo de ejemplo y completa las credenciales:
-```bash
-cp .env.example .env
-```
-
-### 5. Generar o Verificar Identidad Nostr
-Para interactuar con Buzz, el bot necesita su par de claves criptográficas:
-```bash
-npm run nostr:id
-```
-*(Esto creará `.nostr_keys.json` con la clave privada `nsec` y pública `npub`, excluido por seguridad en `.gitignore`)*.
-
-### 6. Ejecutar en Modo Desarrollo
-```bash
-npm run dev
-```
+La primera vez, el catálogo de precios se descarga solo; `data/` se crea con SQLite, agentes y adjuntos.
 
 ---
 
-## 🔐 Variables de Entorno
+## 🔐 Variables de entorno
 
-A continuación se resumen las variables clave del archivo `.env`:
+Las principales (ver `.env.example` para la lista completa):
 
 ```ini
-# Configuración del Servidor
+# Servidor
 PORT=4000
-NODE_ENV=development
 ADK_APP_NAME=yisus
+DATA_DIR=                       # carpeta absoluta de datos (por defecto ./data)
+PUBLIC_BASE_URL=https://yisus.openip.cl   # base pública de la API (adjuntos, A2A); si falta usa A2A_BASE_URL
+SCHEDULER_TZ=America/Santiago
 
-# Base de Datos Redis
+# Modelos
+GEMINI_API_KEY=                 # Gemini por defecto; los demás proveedores se configuran en la GUI
+AGENT_<SLUG>_<VAR>=             # variables de agentes personalizados (p. ej. AGENT_BANANO_GEMINI_API_KEY)
+
+# Datos
 REDIS_HOST=localhost
 REDIS_PORT=6379
-REDIS_DB=0
-
-# Base de Datos MongoDB
-MONGO_URI=mongodb://localhost:27017/yisus_agent
-
-# Proveedor de IA (Google Gemini)
-GEMINI_API_KEY=AIzaSy...
-
-# Qdrant Vector DB & Embeddings
 QDRANT_URL=http://localhost:6333
-EMBEDDING_PROVIDER=ollama
-OLLAMA_BASE_URL=https://ollama.openip.cl
+QDRANT_API_KEY=
+MONGO_URI=mongodb://localhost:27017/appLucia
+EMBEDDING_PROVIDER=ollama       # ollama | gemini
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_EMBED_MODEL=nomic-embed-text:latest
 
-# Telegram Bot
-TELEGRAM_BOT_TOKEN=123456789:ABCdef...
-TELEGRAM_CHAT_ID=987654321
+# Google Workspace (OAuth2)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=
+GOOGLE_REDIRECT_URI=
 
-# Nostr Gateway (Buzz)
+# Telegram
+TELEGRAM_TOKEN=
+TELEGRAM_CHAT_ID=
+TELEGRAM_SESSION_IDLE_MIN=240   # sesión nueva tras N minutos sin mensajes
+
+# Buzz (Nostr)
 NOSTR_ENABLED=true
 NOSTR_RELAY_URL=wss://apprecio.communities.buzz.xyz
-NOSTR_CHANNELS=3ebb4231-e162-477e-ad68-bdc568c5d3d5
+NOSTR_PRIVATE_KEY=
+NOSTR_CHANNELS=
 NOSTR_REQUIRE_MENTION=true
-NOSTR_RESUBSCRIBE_SECONDS=30
 
-# Google Workspace (OAuth2)
-GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPX-...
-GOOGLE_REFRESH_TOKEN=1//04...
+# A2A
+A2A_API_KEY=                    # sin esta clave /a2a/v1 no se monta
+A2A_BASE_URL=https://yisus.openip.cl
 
-# Control de Presupuesto (USD)
-MONTHLY_BUDGET_USD=5
-MONTHLY_BUDGET_USD_BUZZ=3
+# Administración y GUI
+ADMIN_API_KEY=
+GUI_ORIGIN=https://gui-yisus.openip.cl,http://localhost:4200
+GUI_USER=
+GUI_PASSWORD_HASH=
+
+# Presupuestos (USD/mes)
+MONTHLY_BUDGET_USD=10
 MONTHLY_BUDGET_USD_TELEGRAM=2
+MONTHLY_BUDGET_USD_BUZZ=3
+MONTHLY_BUDGET_USD_A2A=3
 ```
 
 ---
 
-## 📜 Scripts Disponibles
+## 📜 Scripts
 
-* `npm run dev`: Inicia el servidor en modo desarrollo con recarga en caliente (`tsx watch`).
-* `npm run build`: Compila el proyecto TypeScript hacia JavaScript en `./dist`.
-* `npm start`: Ejecuta la versión compilada en producción.
-* `npm run nostr:id`: Muestra las llaves Nostr del agente o genera un nuevo par seguro.
-* `npm run sync:meet`: Ejecuta manualmente la sincronización de minutas de Google Meet hacia Qdrant.
-* `npm run sync:context`: Dispara la consolidación manual de hilos de Gmail y Google Chat.
-* `npm run sync:obsidian`: Sincroniza notas de conocimiento local en Obsidian hacia Qdrant.
+| Script | Qué hace |
+| :--- | :--- |
+| `npm run dev` / `build` / `start` | Desarrollo con recarga (`tsx watch`) / compilar / producción. |
+| `npm run nostr:id` | Muestra o genera la identidad Nostr del agente. |
+| `npm run google:oauth` | Flujo OAuth para obtener el refresh token de Google Workspace. |
+| `npm run gui:password` | Genera el hash de contraseña de la GUI. |
+| `npm run sync:meet` / `sync:context` / `sync:obsidian` | Ingestas manuales hacia Qdrant. |
+| `npm run commitments:backfill` | Extrae compromisos de la memoria episódica existente. |
+| `npm run check:rutas` / `check:permisos` / `check:2fa` | Verificaciones de seguridad (rutas públicas, alcance de tokens A2A, herramientas con 2FA). |
 
 ---
 
-<p align="center">
-  <b>Yisus Agent</b> • Diseñado para la eficiencia técnica y ejecutiva de Apprecio.
-</p>
+## 🗂️ Estructura del repositorio
+
+```
+src/
+  agents/            Coordinator, público, subagentes, catálogo de tools
+    llm/             adaptadores (OpenAI-compatible, Anthropic), DynamicLlm, presupuesto de contexto
+    custom/          self agents: servicio, sandbox (worker + vm)
+    tools/           herramientas por dominio (google, commitments, builder, …)
+  a2a/               servidor A2A (card, executor, helpers)
+  services/          telegram, nostr, scheduler, tareas, compromisos, adjuntos, precios, sesiones Redis…
+  routes/            API REST (index, admin, settings, commitments, agents) y guard
+  database/          SQLite (node:sqlite) y Mongo
+  utils/             usage_collector (medición por turno), fecha, logger ADK
+config/channels.json herramientas por canal
+data/                SQLite, agentes personalizados, adjuntos, catálogo de precios (parcialmente ignorado por git)
+docs/openclaw/       skill para que OpenClaw consuma a Yisus por A2A
+scripts/             utilidades y verificaciones
+yisus-gui/           GUI Angular
+TODO.md              estado del proyecto y pendientes
+```
+
+---
+
+<p align="center"><b>Yisus Agent</b> · Diseñado para la eficiencia técnica y ejecutiva de Apprecio.</p>
