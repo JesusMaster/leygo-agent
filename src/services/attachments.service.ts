@@ -139,7 +139,8 @@ class AttachmentsService {
   comoEnlaces(texto: string): string {
     return (texto || '').replace(MARCADOR, (_m, id) => {
       const a = this.get(id);
-      return a ? `${a.tipo === 'imagen' ? '🖼️' : '📎'} ${a.nombre}: ${this.urlPublica(a.id)}` : '';
+      // La URL va sola en su línea: los clientes que extraen enlaces por regex no se confunden con el nombre
+      return a ? `${a.tipo === 'imagen' ? 'Imagen' : 'Archivo'} ${a.nombre}:\n${this.urlPublica(a.id)}` : '';
     });
   }
 }

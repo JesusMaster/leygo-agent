@@ -71,7 +71,7 @@ if (app) {
     if (origin && (origenesPermitidos.includes('*') || origenesPermitidos.includes(origin))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key, Authorization, X-API-Key');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key, Authorization, X-API-Key, A2A-Version, A2A-Extensions');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
