@@ -313,6 +313,47 @@ export class NostrGatewayService {
     }, 1500);
   }
 
+  /** ¿El mensaje va dirigido explícitamente a otro participante (y no a Yisus)? */
+  private mencionaAOtro(event: any, content: string): boolean {
+    const yo = [this.publicKeyHex.toLowerCase(), this.publicKeyNpub];
+    const pTags: string[] = (event.tags || []).filter((t: any) => t[0] === 'p' || t[0] === 'mention').map((t: any) => String(t[1] || ''));
+    const aMi = pTags.some((pk) => yo.includes(pk.toLowerCase()) || yo.includes(pk));
+    if (aMi) return false;
+    const otros = pTags.filter((pk) => !yo.includes(pk.toLowerCase()) && !yo.includes(pk));
+    // Menciones por nombre al inicio del mensaje: "@NachoBot …", "NachoBot: …"
+    const porNombre = /^\s*@?([A-Za-z0-9_.-]{2,40})\b[:,]?\s/.exec(content || '');
+    const nombreOtro = !!porNombre && !/^yisus$/i.test(porNombre[1]) && (content.trim().startsWith('@') || /:$/.test(porNombre[0].trim()));
+    return otros.length > 0 || nombreOtro;
+  }
+
+  /** Quiénes han hablado con Yisus en un hilo (mencionándolo o respondiéndole). */
+  private interlocutores = new Map<string, Set<string>>();
+
+  private async registrarInterlocutor(threadRootId: string, pubkey: string): Promise<void> {
+    if (!threadRootId || !pubkey) return;
+    const set = this.interlocutores.get(threadRootId) || new Set<string>();
+    set.add(pubkey);
+    this.interlocutores.set(threadRootId, set);
+    try {
+      const redis = await this.getRedis();
+      if (redis) { await redis.sadd(`nostr:thread:${threadRootId}:interlocutores`, pubkey); await redis.expire(`nostr:thread:${threadRootId}:interlocutores`, 86400 * 7); }
+    } catch {}
+  }
+
+  private async esInterlocutorDelHilo(threadRootId: string, pubkey: string): Promise<boolean> {
+    if (!threadRootId || !pubkey) return false;
+    if (this.interlocutores.get(threadRootId)?.has(pubkey)) return true;
+    try {
+      const redis = await this.getRedis();
+      if (redis && (await redis.sismember(`nostr:thread:${threadRootId}:interlocutores`, pubkey))) {
+        const set = this.interlocutores.get(threadRootId) || new Set<string>();
+        set.add(pubkey); this.interlocutores.set(threadRootId, set);
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   /**
    * Registra un hilo como activo donde Yisus participa
    */
@@ -885,22 +926,32 @@ export class NostrGatewayService {
     const eventReplyIds = event.tags?.filter((t: any) => t[0] === 'e').map((t: any) => t[1]) || [];
     const isReplyToMe = await this.isThreadOrReplyActive(eventReplyIds);
 
-    if (this.requireMention && !mentionsPubkey && !mentionsName && !isReplyToMe) {
-      console.log(`⏭️ [NostrGateway] Omitido: Sin mención ("Yisus" o "@Yisus") ni hilo activo (mentionsPubkey=${mentionsPubkey}, mentionsName=${mentionsName}, isReplyToMe=${isReplyToMe}) en "${content.slice(0, 40)}"`);
+    const rootTag = event.tags?.find((t: any) => t[0] === 'e' && (t[3] === 'root' || !t[3]));
+    const anyETag = event.tags?.find((t: any) => t[0] === 'e');
+    const threadRootId = rootTag ? rootTag[1] : (anyETag ? anyETag[1] : event.id);
+
+    // Un hilo activo NO significa "todo lo que se diga ahí es para Yisus". En salas con
+    // varios bots y personas, sin mención explícita Yisus solo sigue la conversación con
+    // quien ya hablaba con él (sus interlocutores del hilo), y nunca cuando el mensaje va
+    // dirigido a otro (@NachoBot …, p-tag a otro pubkey).
+    const mencionaAOtro = this.mencionaAOtro(event, content);
+    const esInterlocutor = await this.esInterlocutorDelHilo(threadRootId, event.pubkey);
+    const mencionado = mentionsPubkey || mentionsName;
+
+    if (this.requireMention && !mencionado && !(isReplyToMe && esInterlocutor && !mencionaAOtro)) {
+      const motivo = !isReplyToMe ? 'sin mención ni hilo activo' : mencionaAOtro ? 'va dirigido a otro' : 'el remitente no conversaba con Yisus en este hilo';
+      console.log(`⏭️ [NostrGateway] Omitido (${motivo}) en "${content.slice(0, 40)}"`);
       await this.markEventSeen(event.id);
       await this.saveCheckpoint(event.created_at);
       return;
     }
 
-    // 5) Registrar raíz del hilo activo para continuidad permanente
-    const rootTag = event.tags?.find((t: any) => t[0] === 'e' && (t[3] === 'root' || !t[3]));
-    const anyETag = event.tags?.find((t: any) => t[0] === 'e');
-    const threadRootId = rootTag ? rootTag[1] : (anyETag ? anyETag[1] : event.id);
-
+    // 5) Registrar raíz del hilo activo y al remitente como interlocutor
     await this.markThreadActive(threadRootId);
     for (const replyId of eventReplyIds) {
       await this.markThreadActive(replyId);
     }
+    await this.registrarInterlocutor(threadRootId, event.pubkey);
 
     // 6) Limpiar mención del prompt
     let cleanPrompt = content
