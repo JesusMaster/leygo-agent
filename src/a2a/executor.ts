@@ -20,7 +20,8 @@ import {
 } from '@a2a-js/sdk/server';
 import type { RedisSessionService } from '../services/redis_session.service.js';
 import { currentA2AScope } from '../config/channels.js';
-import { agentMessage, extractText, status, urlPart } from './helpers.js';
+import { randomUUID } from 'node:crypto';
+import { agentMessage, extractText, status, urlPart, textPart } from './helpers.js';
 import { attachmentsService } from '../services/attachments.service.js';
 import { sufijoFechaMensaje } from '../utils/fecha.js';
 
@@ -132,6 +133,26 @@ export class YisusAgentExecutor implements AgentExecutor {
             const fileParts = adjuntos.map((a) => urlPart(attachmentsService.urlPublica(a.id), a.mime, a.nombre));
             const pregunta = /\?\s*$/.test(finalText.trim());
             const estadoFinal = replies.length && !pregunta ? TaskState.TASK_STATE_COMPLETED : TaskState.TASK_STATE_INPUT_REQUIRED;
+
+            // La respuesta también va como ARTIFACT del task: varios clientes A2A (los que
+            // tratan la tarea como "trabajo con resultado") leen task.artifacts y no
+            // status.message; sin esto veían la tarea completada pero "sin resultado".
+            if (replies.length) {
+                bus.publish(AgentEvent.artifactUpdate({
+                    taskId, contextId,
+                    artifact: {
+                        artifactId:  randomUUID(),
+                        name:        adjuntos.length ? adjuntos[0].nombre : 'respuesta',
+                        description: adjuntos.length ? `Respuesta de Yisus con ${adjuntos.length} adjunto(s)` : 'Respuesta de Yisus',
+                        parts:       [textPart(finalText), ...fileParts],
+                        metadata:    undefined,
+                        extensions:  [],
+                    } as any,
+                    append:    false,
+                    lastChunk: true,
+                    metadata:  undefined,
+                }));
+            }
 
             bus.publish(AgentEvent.statusUpdate({
                 taskId, contextId,
