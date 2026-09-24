@@ -18,7 +18,10 @@ fi
 
 git pull --ff-only
 mkdir -p data
-docker compose build --pull
+# Una imagen a la vez: en 2 GB de RAM los dos builds en paralelo se quedan sin memoria.
+docker compose build --pull agent
+docker compose build --pull gui
+docker compose pull -q caddy
 docker compose up -d --remove-orphans
 docker image prune -f >/dev/null
 

@@ -4,6 +4,7 @@ FROM node:22-bookworm-slim AS build
 # Toolchain para módulos nativos (better-sqlite3 llega como peer opcional de @google/adk).
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
+ENV NODE_OPTIONS=--max-old-space-size=2048
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci

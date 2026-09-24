@@ -1,4 +1,9 @@
-import { google } from 'googleapis';
+// Paquetes por API (no `googleapis` completo): tsc dejaba de compilar en 2 GB de RAM por sus 180 APIs.
+import { gmail as gmailApi } from '@googleapis/gmail';
+import { calendar as calendarApi } from '@googleapis/calendar';
+import { drive as driveApi } from '@googleapis/drive';
+import { chat as chatApi } from '@googleapis/chat';
+import { OAuth2Client, JWT } from 'google-auth-library';
 import { messageFormatter } from '../utils/message_formatter.js';
 import { attachmentsService } from './attachments.service.js';
 
@@ -11,7 +16,7 @@ export class GoogleWorkspaceService {
 
     // 1. Prioridad: OAuth2 con Refresh Token (recomendado para cuenta de usuario)
     if (clientId && clientSecret && refreshToken) {
-      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+      const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
       oauth2Client.setCredentials({ refresh_token: refreshToken });
       return oauth2Client;
     }
@@ -19,7 +24,7 @@ export class GoogleWorkspaceService {
     // 2. Alternativa: Service Account
     if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
       const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-      return new google.auth.JWT({
+      return new JWT({
         email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
         key: privateKey,
         scopes: [
@@ -40,7 +45,7 @@ export class GoogleWorkspaceService {
   async getUserEmail(): Promise<string | null> {
     try {
       const auth = this.getAuthClient();
-      const gmail = google.gmail({ version: 'v1', auth });
+      const gmail = gmailApi({ version: 'v1', auth });
       const res = await gmail.users.getProfile({ userId: 'me' });
       return res.data.emailAddress || null;
     } catch {
@@ -53,7 +58,7 @@ export class GoogleWorkspaceService {
   // ─────────────────────────────────────────────────────────────
   async searchEmails(query: string = '', maxResults: number = 5) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const listRes = await gmail.users.messages.list({
       userId: 'me',
@@ -96,7 +101,7 @@ export class GoogleWorkspaceService {
 
   async readEmail(messageId: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const res = await gmail.users.messages.get({
       userId: 'me',
@@ -152,7 +157,7 @@ export class GoogleWorkspaceService {
    */
   async searchRecentGmailThreads(query: string = '', maxResults: number = 10, sinceHours?: number) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const antiNoiseFilter = '-category:promotions -category:social -from:noreply -from:no-reply -from:notifications@github.com -from:sentry.io';
 
@@ -183,7 +188,7 @@ export class GoogleWorkspaceService {
    */
   async getGmailThread(threadId: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const res = await gmail.users.threads.get({
       userId: 'me',
@@ -240,7 +245,7 @@ export class GoogleWorkspaceService {
     replyToMessageId?: string
   ) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     // Codificación MIME RFC 2047 para caracteres no ASCII en cabeceras de correo (tildes, eñes, etc.)
     const encodeMimeHeader = (text: string): string => {
@@ -368,7 +373,7 @@ export class GoogleWorkspaceService {
    */
   async sendDraft(draftId: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const res = await gmail.users.drafts.send({
       userId: 'me',
@@ -389,7 +394,7 @@ export class GoogleWorkspaceService {
    */
   async deleteDraft(draftId: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     await gmail.users.drafts.delete({
       userId: 'me',
@@ -404,7 +409,7 @@ export class GoogleWorkspaceService {
 
   async markEmailsAsRead(messageIds: string[]) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const results = await Promise.all(
       messageIds.map(async (id) => {
@@ -451,7 +456,7 @@ export class GoogleWorkspaceService {
 
   async getOrCreateLabel(name: string, colorName?: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const listRes = await gmail.users.labels.list({ userId: 'me' });
     const existing = (listRes.data.labels || []).find(
@@ -511,7 +516,7 @@ export class GoogleWorkspaceService {
 
   async addLabelToEmails(messageIds: string[], labelName: string, colorName?: string) {
     const auth = this.getAuthClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = gmailApi({ version: 'v1', auth });
 
     const label = await this.getOrCreateLabel(labelName, colorName);
     if (!label.id) {
@@ -555,7 +560,7 @@ export class GoogleWorkspaceService {
   // ─────────────────────────────────────────────────────────────
   async listCalendarEvents(timeMin?: string, timeMax?: string, maxResults: number = 10) {
     const auth = this.getAuthClient();
-    const calendar = google.calendar({ version: 'v3', auth });
+    const calendar = calendarApi({ version: 'v3', auth });
 
     const start = timeMin || new Date().toISOString();
     const res = await calendar.events.list({
@@ -588,7 +593,7 @@ export class GoogleWorkspaceService {
     attendees: string[] = []
   ) {
     const auth = this.getAuthClient();
-    const calendar = google.calendar({ version: 'v3', auth });
+    const calendar = calendarApi({ version: 'v3', auth });
 
     const event = {
       summary,
@@ -622,7 +627,7 @@ export class GoogleWorkspaceService {
    */
   async searchDriveFiles(query: string = '', maxResults: number = 10, rawQuery?: string) {
     const auth = this.getAuthClient();
-    const drive = google.drive({ version: 'v3', auth });
+    const drive = driveApi({ version: 'v3', auth });
 
     let q = "trashed = false";
     if (rawQuery) {
@@ -649,7 +654,7 @@ export class GoogleWorkspaceService {
 
   async readDriveFileContent(fileId: string, mimeType?: string) {
     const auth = this.getAuthClient();
-    const drive = google.drive({ version: 'v3', auth });
+    const drive = driveApi({ version: 'v3', auth });
 
     // Si es un Google Doc, se exporta como texto plano
     if (mimeType?.includes('google-apps.document') || !mimeType) {
@@ -713,7 +718,7 @@ export class GoogleWorkspaceService {
 
   async listChatSpaces(pageSize: number = 20) {
     const auth = this.getAuthClient();
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = chatApi({ version: 'v1', auth });
 
     const res = await chat.spaces.list({
       pageSize,
@@ -753,7 +758,7 @@ export class GoogleWorkspaceService {
   async getChatSpaceReadState(spaceName: string): Promise<string | null> {
     try {
       const auth = this.getAuthClient();
-      const chat = google.chat({ version: 'v1', auth });
+      const chat = chatApi({ version: 'v1', auth });
       const id = spaceName.replace(/^spaces\//, '');
       const res = await chat.users.spaces.getSpaceReadState({ name: `users/me/spaces/${id}/spaceReadState` });
       return res.data.lastReadTime || null;
@@ -773,7 +778,7 @@ export class GoogleWorkspaceService {
     if (!q) return null;
 
     const auth = this.getAuthClient();
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = chatApi({ version: 'v1', auth });
 
     if (q.includes('@')) {
       try {
@@ -823,7 +828,7 @@ export class GoogleWorkspaceService {
    */
   async readChatMessages(spaceName: string, maxMessages: number = 100, sinceIso?: string) {
     const auth = this.getAuthClient();
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = chatApi({ version: 'v1', auth });
 
     const allMessages: any[] = [];
     let pageToken: string | undefined = undefined;
@@ -929,7 +934,7 @@ export class GoogleWorkspaceService {
   async sendChatMessage(spaceName: string, text: string, threadName?: string) {
     text = attachmentsService.comoEnlaces(text);
     const auth = this.getAuthClient();
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = chatApi({ version: 'v1', auth });
 
     const requestBody: any = {
       text,

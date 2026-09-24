@@ -12,7 +12,7 @@
  * 3. Reemplázalo en .env y reinicia.
  */
 import 'dotenv/config';
-import { google } from 'googleapis';
+import { OAuth2Client } from 'google-auth-library';
 import readline from 'node:readline';
 
 export const SCOPES = [
@@ -36,7 +36,7 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
-const oauth2 = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+const oauth2 = new OAuth2Client(clientId, clientSecret, redirectUri);
 const url = oauth2.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: SCOPES });
 
 console.log('\n1) Abre esta URL, autoriza y copia el código:\n');

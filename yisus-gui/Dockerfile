@@ -1,5 +1,7 @@
 # ── Yisus GUI (Angular) ──────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS build
+# Heap explícito: en contenedores V8 se autolimita a ~1 GB y el build de Angular puede superarlo.
+ENV NODE_OPTIONS=--max-old-space-size=2048
 WORKDIR /gui
 COPY package*.json ./
 RUN npm ci
