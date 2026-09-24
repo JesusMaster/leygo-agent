@@ -347,7 +347,7 @@ export class TokenTrackerService {
     threadId: string = 'system',
     channel: UsageChannel = 'system',
     agent: string = 'system',
-    extra: { cachedTokens?: number; thoughtsTokens?: number } = {}
+    extra: { cachedTokens?: number; thoughtsTokens?: number; llamadas?: number } = {}
   ): Promise<UsageRecord> {
     const inTokens = Math.max(0, inputTokens || 0);
     const outTokens = Math.max(0, outputTokens || 0);
@@ -373,6 +373,7 @@ export class TokenTrackerService {
       cached_tokens: cachedTokens,
       thoughts_tokens: thoughtsTokens,
       price_source: prices.source,
+      calls: Math.max(1, extra.llamadas || 1),
     };
 
     const saved = sqliteReminderService.logTokenUsage(record);

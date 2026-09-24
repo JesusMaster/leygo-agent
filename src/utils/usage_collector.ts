@@ -105,7 +105,7 @@ export async function flushUsageScope(): Promise<void> {
 
   for (const t of scope.totals.values()) {
     await tokenTrackerService
-      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent, { cachedTokens: t.cachedTokens, thoughtsTokens: t.thoughtsTokens })
+      .logUsage(scope.label, t.model, t.inputTokens, t.outputTokens, scope.threadId, scope.channel, t.agent, { cachedTokens: t.cachedTokens, thoughtsTokens: t.thoughtsTokens, llamadas: t.llamadas })
       .catch(() => {});
   }
   scope.totals.clear();

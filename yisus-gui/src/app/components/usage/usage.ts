@@ -195,7 +195,7 @@ import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
                   <td>{{ r.agent || '—' }}</td>
                   <td style="color:var(--text-dim)">{{ r.model }}</td>
                   <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" [title]="r.user_input">{{ r.user_input }}</td>
-                  <td class="num">{{ r.input_tokens.toLocaleString('es-CL') }} / {{ r.output_tokens.toLocaleString('es-CL') }}</td>
+                  <td class="num" [title]="detalleFila(r)">{{ r.input_tokens.toLocaleString('es-CL') }} / {{ r.output_tokens.toLocaleString('es-CL') }}@if ((r.calls || 1) > 1) { <span class="badge dim" style="margin-left:6px" title="Llamadas al modelo en este turno: cada vuelta del loop de herramientas reenvía el contexto completo">×{{ r.calls }}</span> }</td>
                   <td class="num">{{ '$' + r.cost_usd.toFixed(4) }}</td>
                 </tr>
               }
@@ -343,6 +343,14 @@ export class UsageComponent {
       next: (r) => { this.toast.ok(r?.updated ? 'Catálogo de precios actualizado' : 'El catálogo ya estaba al día'); if (r?.catalogo) this.catalogo.set(r.catalogo); this.cargarPrecios(); this.load(); },
       error: () => this.toast.error('No se pudo actualizar el catálogo'),
     });
+  }
+
+  detalleFila(r: { input_tokens: number; output_tokens: number; cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string }): string {
+    const partes = [`${r.calls || 1} llamada${(r.calls || 1) === 1 ? '' : 's'} al modelo`];
+    if (r.cached_tokens) partes.push(`${r.cached_tokens.toLocaleString('es-CL')} tokens de entrada en caché`);
+    if (r.thoughts_tokens) partes.push(`${r.thoughts_tokens.toLocaleString('es-CL')} de razonamiento`);
+    if (r.price_source === 'familia' || r.price_source === 'default') partes.push('precio aproximado');
+    return partes.join(' · ');
   }
 
   retarifar() {

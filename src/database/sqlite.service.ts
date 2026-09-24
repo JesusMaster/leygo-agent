@@ -106,6 +106,8 @@ export interface UsageRecord {
   agent?: string;
   cached_tokens?: number;
   thoughts_tokens?: number;
+  /** llamadas al modelo dentro del turno (cada vuelta del loop de herramientas reenvía el contexto) */
+  calls?: number;
   /** override | catalogo | local | familia | default (los dos últimos: costo aproximado) */
   price_source?: string;
 }
@@ -641,6 +643,7 @@ export class SqliteReminderService {
       if (!existing.has('cached_tokens'))   this.db.exec(`ALTER TABLE usage_history ADD COLUMN cached_tokens INTEGER DEFAULT 0`);
       if (!existing.has('thoughts_tokens')) this.db.exec(`ALTER TABLE usage_history ADD COLUMN thoughts_tokens INTEGER DEFAULT 0`);
       if (!existing.has('price_source'))    this.db.exec(`ALTER TABLE usage_history ADD COLUMN price_source TEXT`);
+      if (!existing.has('calls'))           this.db.exec(`ALTER TABLE usage_history ADD COLUMN calls INTEGER DEFAULT 1`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_channel ON usage_history(channel)`);
       this.db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_history(agent)`);
     } catch (err: any) {
@@ -650,8 +653,8 @@ export class SqliteReminderService {
 
   public logTokenUsage(record: Omit<UsageRecord, 'id'>): UsageRecord {
     const stmt = this.db.prepare(`
-      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent, cached_tokens, thoughts_tokens, price_source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO usage_history (timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, channel, agent, cached_tokens, thoughts_tokens, price_source, calls)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       record.timestamp,
@@ -665,7 +668,8 @@ export class SqliteReminderService {
       record.agent || 'unknown',
       record.cached_tokens || 0,
       record.thoughts_tokens || 0,
-      record.price_source || null
+      record.price_source || null,
+      record.calls || 1
     );
     return record;
   }

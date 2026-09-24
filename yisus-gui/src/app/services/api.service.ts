@@ -14,6 +14,7 @@ export interface BudgetStatus   { channel: string; currentCost: number; budget: 
 export interface UsageRecord {
   id?: number; timestamp: string; user_input: string; model: string;
   input_tokens: number; output_tokens: number; cost_usd: number;
+  cached_tokens?: number; thoughts_tokens?: number; calls?: number; price_source?: string;
   thread_id: string; channel?: string; agent?: string;
 }
 
