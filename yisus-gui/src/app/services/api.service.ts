@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { apiBaseUrl } from '../utils/api-url';
 
 // ─── Tipos que devuelve el backend ──────────────────────────────────────────
 export interface ModelPrice { input: number; output: number; cached: number | null; imagen?: number | null; source: 'override' | 'catalogo' | 'local' | 'familia' | 'default'; key: string | null; }
@@ -143,13 +144,7 @@ export class ApiService {
    * - en desarrollo (ng serve, puerto 4200) → el mismo host en :4000;
    * - en producción → el MISMO origen (Caddy sirve GUI y API bajo un dominio: sin CORS ni configuración).
    */
-  get baseUrl(): string {
-    const guardada = localStorage.getItem('yisus_api_url');
-    if (guardada) return guardada;
-    const { protocol, hostname, port, origin } = window.location;
-    if (port === '4200' || hostname === 'localhost' || hostname === '127.0.0.1') return `${protocol}//${hostname}:4000`;
-    return origin;
-  }
+  get baseUrl(): string { return apiBaseUrl(); }
   setBaseUrl(url: string) { localStorage.setItem('yisus_api_url', url.replace(/\/$/, '')); }
 
   // ─── Estado ───────────────────────────────────────────────────────────

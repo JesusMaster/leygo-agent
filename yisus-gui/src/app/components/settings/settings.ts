@@ -88,7 +88,7 @@ const TAB_KEY = 'yisus_settings_tab';
 
       <div class="card">
         <h3>Conexión</h3>
-        <p class="card-sub">Por defecto apunta al mismo host en el puerto 4000.</p>
+        <p class="card-sub">Vacío = automático: el mismo dominio en producción, o el puerto 4000 en desarrollo (localhost).</p>
         <label class="field">
           <span>URL del backend</span>
           <input type="text" [(ngModel)]="url" placeholder="http://localhost:4000" />

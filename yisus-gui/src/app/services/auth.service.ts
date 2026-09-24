@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { apiBaseUrl } from '../utils/api-url';
 
 const CLAVE = 'yisus_auth_token';
 const USUARIO = 'yisus_auth_user';
@@ -39,9 +40,7 @@ export class AuthService {
     }
   }
 
-  get baseUrl(): string {
-    return localStorage.getItem('yisus_api_url') || `${window.location.protocol}//${window.location.hostname}:4000`;
-  }
+  get baseUrl(): string { return apiBaseUrl(); }
 
   logueado(): boolean { return !!this.token(); }
 
