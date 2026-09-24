@@ -342,6 +342,7 @@ export class AgentsComponent {
     if (!this.form) return;
     // Parámetros editados como texto → objeto
     for (const [i, txt] of Object.entries(this.paramsTxt)) {
+      if (txt === undefined) continue;
       try { this.form.tools[Number(i)].parameters = JSON.parse(txt); }
       catch { this.toast.error(`Parámetros de la herramienta #${Number(i) + 1}: JSON inválido`); return; }
     }
