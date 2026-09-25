@@ -72,3 +72,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Capturas y archivos que entrega Claude (Cowork)
+Claude outputs/
