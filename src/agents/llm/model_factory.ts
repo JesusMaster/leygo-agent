@@ -193,10 +193,18 @@ export async function generarTexto(agentName: string, fallbackModel: string, pro
   const req: any = { contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { ...(opts.maxOutputTokens ? { maxOutputTokens: opts.maxOutputTokens } : {}) } };
   let texto = '';
   let error: string | undefined;
+  let fin: string | undefined;
   for await (const r of llm.generateContentAsync(req, false)) {
     if (r?.errorMessage) error = r.errorMessage;
-    for (const p of r?.content?.parts || []) if (p.text) texto += p.text;
+    if ((r as any)?.finishReason) fin = String((r as any).finishReason);
+    for (const p of r?.content?.parts || []) if (p.text && !(p as any).thought) texto += p.text;
   }
   if (error) throw new Error(error);
+  // Los modelos con razonamiento gastan parte del límite en "pensar": un maxOutputTokens bajo
+  // corta la respuesta a medias sin error. Se avisa en vez de devolver un texto mocho en silencio.
+  if (fin === 'MAX_TOKENS') {
+    if (!texto.trim()) throw new Error('El modelo agotó el límite de tokens sin responder');
+    console.warn(`⚠️ [LLM] ${agentName}: respuesta cortada por límite de tokens (${opts.maxOutputTokens ?? 'sin límite explícito'}).`);
+  }
   return texto.trim();
 }

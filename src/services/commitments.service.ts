@@ -516,7 +516,7 @@ ${reglasComunes}`;
     const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
     beginUsageScope('system', `commitment-${id}`, `Redactar ${formato === 'ejecutivo' ? 'resumen ejecutivo' : `mensaje (${tipo})`} ${enfoque} — ${c.title.slice(0, 60)}`);
     try {
-      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: formato === 'ejecutivo' ? 900 : 600 })).replace(/^["“]|["”]$/g, '').trim();
+      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt)).replace(/^["“]|["”]$/g, '').trim();
       return t || plantilla();
     } catch (err: any) {
       console.warn(`⚠️ [Compromisos] No se pudo redactar con IA (${err?.message}); uso plantilla.`);
@@ -540,8 +540,9 @@ ${original}`;
     const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
     beginUsageScope('system', 'corrector', 'Corregir texto de mensaje');
     try {
-      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: 800 })).trim();
-      if (!t || t.length > original.length * 1.6 + 40) return { texto: original, cambiado: false }; // respuesta rara: no se toca
+      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt)).trim();
+      // Respuesta rara (mucho más larga, o recortada): no se toca el texto de Jesús.
+      if (!t || t.length > original.length * 1.6 + 40 || t.length < original.length * 0.7) return { texto: original, cambiado: false };
       return { texto: t, cambiado: t !== original };
     } finally {
       flushUsageScope().catch(() => {});
