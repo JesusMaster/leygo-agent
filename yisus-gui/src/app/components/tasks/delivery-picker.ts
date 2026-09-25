@@ -1,6 +1,6 @@
 import { ChangeDetectorRef, Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService, TaskChannel, TaskDelivery, TaskDestinos } from '../../services/api.service';
+import { ApiService, ChatDestino, TaskChannel, TaskDelivery, TaskDestinos } from '../../services/api.service';
 
 /**
  * Selector de canales de entrega: cada canal es un checkbox y, si lo requiere,
@@ -22,11 +22,38 @@ import { ApiService, TaskChannel, TaskDelivery, TaskDestinos } from '../../servi
 
           @if (activo(c.id) && c.id !== 'telegram') {
             <div class="dp-target">
-              @if (c.id === 'chat' && destinos()?.chat?.length) {
-                <select [ngModel]="target(c.id)" (ngModelChange)="setTarget(c.id, $event)">
-                  <option value="">Elige un espacio…</option>
-                  @for (e of destinos()!.chat; track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
-                </select>
+              @if (c.id === 'chat' && (destinos()?.chat?.length || buscandoCorreo())) {
+                @if (!buscandoCorreo()) {
+                  <select [ngModel]="target(c.id)" (ngModelChange)="elegirChat($event)">
+                    <option value="">Elige una persona o espacio…</option>
+                    @if (target('chat') && !chatConocido(target('chat'))) { <option [value]="target('chat')">Guardado: {{ target('chat') }}</option> }
+                    @if (chatPor('dm').length) {
+                      <optgroup label="Personas">
+                        @for (e of chatPor('dm'); track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
+                      </optgroup>
+                    }
+                    @if (chatPor('grupo').length) {
+                      <optgroup label="Grupos">
+                        @for (e of chatPor('grupo'); track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
+                      </optgroup>
+                    }
+                    @if (chatPor('espacio').length) {
+                      <optgroup label="Espacios de equipo">
+                        @for (e of chatPor('espacio'); track e.name) { <option [value]="e.name">{{ e.displayName }}</option> }
+                      </optgroup>
+                    }
+                    <option value="__correo">＋ Otra persona (buscar por correo)…</option>
+                  </select>
+                } @else {
+                  <div class="dp-correo">
+                    <input type="email" [(ngModel)]="correo" placeholder="nombre@dcanje.com" (keydown.enter)="buscarCorreo()" autofocus />
+                    <button type="button" class="btn-primary sm" [disabled]="!correoValido() || buscando()" (click)="buscarCorreo()">
+                      <i class="ph" [class.ph-magnifying-glass]="!buscando()" [class.ph-spinner]="buscando()"></i> Buscar
+                    </button>
+                    <button type="button" class="btn-secondary sm" (click)="buscandoCorreo.set(false)">Cancelar</button>
+                  </div>
+                  @if (errorCorreo()) { <small class="dp-err">{{ errorCorreo() }}</small> }
+                }
               } @else if (c.id === 'a2a' && destinos()?.peers?.length) {
                 <select [ngModel]="target(c.id)" (ngModelChange)="setTarget(c.id, $event)">
                   <option value="">Elige un agente…</option>
@@ -59,6 +86,10 @@ import { ApiService, TaskChannel, TaskDelivery, TaskDestinos } from '../../servi
     .dp-check i { color: var(--accent-primary); font-size: 17px; }
     .dp-target select, .dp-target input { width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px; }
     .dp-hint { font-size: 12px; color: var(--text-dim); }
+    .dp-correo { display: flex; gap: 6px; } .dp-correo input { flex: 1; }
+    .dp-correo .sm { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+    .dp-err { display: block; margin-top: 4px; font-size: 12px; color: var(--danger); }
+    .ph-spinner { animation: dpspin 1s linear infinite; } @keyframes dpspin { to { transform: rotate(360deg); } }
     .dp-warn { display: block; padding: 8px 12px; font-size: 12px; color: var(--warn); border-top: 1px solid var(--border-light); }
     @media (max-width: 560px) { .dp-row { grid-template-columns: 1fr; } }
   `],
@@ -80,6 +111,38 @@ export class DeliveryPickerComponent {
     { id: 'email',    nombre: 'Email',       icono: 'ph-envelope-simple', placeholder: 'alguien@dcanje.com' },
     { id: 'a2a',      nombre: 'Agente A2A',  icono: 'ph-robot',           placeholder: 'nombre del agente remoto' },
   ];
+
+  buscandoCorreo = signal(false);
+  buscando = signal(false);
+  errorCorreo = signal<string | null>(null);
+  correo = '';
+
+  chatPor(tipo: 'dm' | 'grupo' | 'espacio'): ChatDestino[] {
+    return (this.destinos()?.chat || []).filter((e) => (e.tipo || 'espacio') === tipo)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }));
+  }
+  chatConocido(name: string) { return (this.destinos()?.chat || []).some((e) => e.name === name); }
+  correoValido() { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.correo.trim()); }
+
+  elegirChat(v: string) {
+    if (v === '__correo') { this.correo = ''; this.errorCorreo.set(null); this.buscandoCorreo.set(true); return; }
+    this.setTarget('chat', v);
+  }
+
+  /** Busca (o crea vacío) el DM con esa persona y lo deja elegido. */
+  buscarCorreo() {
+    if (!this.correoValido() || this.buscando()) return;
+    this.buscando.set(true); this.errorCorreo.set(null);
+    this.api.findChatDm(this.correo.trim()).subscribe({
+      next: (dm) => {
+        const d = this.destinos();
+        if (d && !d.chat.some((e) => e.name === dm.name)) this.destinos.set({ ...d, chat: [{ ...dm, tipo: 'dm' }, ...d.chat] });
+        this.setTarget('chat', dm.name);
+        this.buscando.set(false); this.buscandoCorreo.set(false); this.cdr.markForCheck();
+      },
+      error: (e) => { this.buscando.set(false); this.errorCorreo.set(e?.error?.error || 'No se encontró en Google Chat'); },
+    });
+  }
 
   activo(c: TaskChannel) { return this.value().some((d) => d.channel === c); }
   target(c: TaskChannel) { return this.value().find((d) => d.channel === c)?.target || ''; }

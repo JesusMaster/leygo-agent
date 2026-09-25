@@ -749,6 +749,73 @@ export class GoogleWorkspaceService {
   }
 
   /**
+   * Nombre visible de Jesús en Chat: GOOGLE_USER_NAME o, si no está, el participante que
+   * aparece en la mayoría de los DMs (siempre es él). Sirve para no repetir "y Jesus Leiva".
+   */
+  private yoChat: string | null = null;
+
+  nombrePropioChat(espacios: Array<{ spaceType?: string | null; participantes: string[] }>): string | null {
+    if (process.env.GOOGLE_USER_NAME) return process.env.GOOGLE_USER_NAME;
+    const dms = espacios.filter((e) => e.spaceType === 'DIRECT_MESSAGE' && e.participantes.length >= 2);
+    const cuenta = new Map<string, number>();
+    for (const d of dms) for (const n of new Set(d.participantes)) cuenta.set(n, (cuenta.get(n) || 0) + 1);
+    const [top] = [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
+    return top && top[1] >= Math.max(2, dms.length * 0.6) ? top[0] : null;
+  }
+
+  /** Espacios para un selector: tipo (persona / grupo / espacio) y nombre sin "DM con … y Jesús". */
+  async listChatDestinos(pageSize = 100): Promise<Array<{ name: string; displayName: string; tipo: 'dm' | 'grupo' | 'espacio' }>> {
+    const espacios = await this.listChatSpaces(pageSize);
+    const yo = this.nombrePropioChat(espacios);
+    if (yo) this.yoChat = yo;
+    const sinMi = (ps: string[]) => ps.filter((n) => n !== yo);
+    return espacios.filter((e) => e.name && !e.singleUserBotDm).map((e) => {
+      if (e.spaceType === 'DIRECT_MESSAGE') {
+        const otros = sinMi(e.participantes);
+        return { name: e.name!, tipo: 'dm' as const, displayName: otros.length ? otros.join(', ') : e.participantes.length ? 'Tú (notas personales)' : '(mensaje directo)' };
+      }
+      if (e.spaceType === 'GROUP_CHAT' && !e.displayName?.trim()) {
+        return { name: e.name!, tipo: 'grupo' as const, displayName: sinMi(e.participantes).join(', ') || 'Grupo sin nombre' };
+      }
+      return { name: e.name!, tipo: e.spaceType === 'GROUP_CHAT' ? 'grupo' as const : 'espacio' as const, displayName: e.displayName || '(espacio sin nombre)' };
+    });
+  }
+
+  /**
+   * DM con una persona por su correo, aunque nunca hayan conversado: primero lo busca
+   * (spaces.findDirectMessage) y, si no existe, lo crea vacío (spaces.setup). No envía nada.
+   */
+  async dmPorCorreo(email: string): Promise<{ name: string; displayName: string; tipo: 'dm'; creado: boolean }> {
+    const correo = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) throw new Error('Correo inválido');
+    const auth = this.getAuthClient();
+    const chat = chatApi({ version: 'v1', auth });
+    let name: string | null = null;
+    let creado = false;
+    try {
+      const r = await chat.spaces.findDirectMessage({ name: `users/${correo}` });
+      name = r.data?.name || null;
+    } catch { /* 404: no hay DM todavía */ }
+    if (!name) {
+      try {
+        const r = await chat.spaces.setup({ requestBody: { space: { spaceType: 'DIRECT_MESSAGE' }, memberships: [{ member: { name: `users/${correo}`, type: 'HUMAN' } }] } });
+        name = r.data?.name || null;
+        creado = true;
+      } catch (err: any) {
+        const msg = err?.response?.data?.error?.message || err?.message || String(err);
+        throw new Error(`No encontré a ${correo} en Google Chat (${msg})`);
+      }
+    }
+    if (!name) throw new Error(`No encontré a ${correo} en Google Chat`);
+    const miembros = await this.listChatHumanMembers(chat, name);
+    const yo = process.env.GOOGLE_USER_NAME || this.yoChat;
+    const otros = miembros.filter((n) => n !== yo);
+    // Sin saber el nombre propio, en un DM de 2 el otro es el que no coincide con el correo del dueño.
+    const nombre = otros.length === 1 ? otros[0] : otros.find((n) => !/jes[uú]s leiva/i.test(n)) || correo;
+    return { name, displayName: nombre, tipo: 'dm', creado };
+  }
+
+  /**
    * Hasta cuándo leyó Jesús un espacio (lastReadTime). Es lo que permite decir
    * "tienes 3 mensajes sin leer" en vez de adivinarlo.
    *

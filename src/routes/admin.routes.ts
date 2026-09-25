@@ -361,12 +361,11 @@ export default function createAdminRoutes() {
    * herramientas: acá el que consulta es el administrador de la GUI).
    */
   app.get('/api/tasks/destinos', async (_req, res) => {
-    const out: { chat: Array<{ name: string; displayName: string }>; buzz: string[]; email: string | null; peers: string[]; errores: string[] } =
+    const out: { chat: Array<{ name: string; displayName: string; tipo: 'dm' | 'grupo' | 'espacio' }>; buzz: string[]; email: string | null; peers: string[]; errores: string[] } =
       { chat: [], buzz: [], email: process.env.GOOGLE_USER_EMAIL || process.env.USER_EMAIL || null, peers: a2aPeersService.list().filter((p) => p.enabled).map((p) => p.name), errores: [] };
     try {
       const { googleService } = await import('../services/google.service.js');
-      const espacios = await googleService.listChatSpaces(50);
-      out.chat = espacios.filter((e) => e.name).map((e) => ({ name: e.name!, displayName: e.displayName }));
+      out.chat = await googleService.listChatDestinos(100);
       if (googleService.ultimoErrorMiembrosChat) out.errores.push(`Participantes de Chat: ${googleService.ultimoErrorMiembrosChat}`);
       if (!out.email) out.email = await googleService.getUserEmail();
     } catch (err: any) {
@@ -379,6 +378,14 @@ export default function createAdminRoutes() {
       out.errores.push(`Buzz: ${err.message}`);
     }
     res.json(out);
+  });
+
+  /** DM de Google Chat con una persona por correo (lo crea vacío si nunca han conversado). */
+  app.post('/api/tasks/destinos/chat-dm', async (req, res) => {
+    try {
+      const { googleService } = await import('../services/google.service.js');
+      res.json(await googleService.dmPorCorreo(String(req.body?.email || '')));
+    } catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 
   app.get('/api/tasks/:id/runs', (req, res) => {

@@ -77,7 +77,8 @@ export interface ScheduledTask {
   integrada?: { key: string; titulo: string; descripcion: string };
 }
 export interface TareaIntegrada { key: string; titulo: string; descripcion: string; }
-export interface TaskDestinos { chat: { name: string; displayName: string }[]; buzz: string[]; email: string | null; peers: string[]; errores: string[]; }
+export interface ChatDestino { name: string; displayName: string; tipo?: 'dm' | 'grupo' | 'espacio'; creado?: boolean; }
+export interface TaskDestinos { chat: ChatDestino[]; buzz: string[]; email: string | null; peers: string[]; errores: string[]; }
 export interface TaskRun {
   id: number; task_id: string; started_at: number; duration_ms: number;
   status: 'success' | 'error'; trigger: 'scheduled' | 'manual'; result: string;
@@ -264,6 +265,7 @@ export class ApiService {
   deleteTask(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/tasks/${id}`); }
   runTask(id: string): Observable<{ run: TaskRun }> { return this.http.post<any>(`${this.baseUrl}/api/tasks/${id}/run`, {}); }
   getTaskDestinos(): Observable<TaskDestinos> { return this.http.get<any>(`${this.baseUrl}/api/tasks/destinos`); }
+  findChatDm(email: string): Observable<ChatDestino> { return this.http.post<any>(`${this.baseUrl}/api/tasks/destinos/chat-dm`, { email }); }
   getTaskRuns(id: string, limit = 20): Observable<{ runs: TaskRun[] }> { return this.http.get<any>(`${this.baseUrl}/api/tasks/${id}/runs?limit=${limit}`); }
 
   // ─── Webhooks con IA ──────────────────────────────────────────────────
