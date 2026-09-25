@@ -22,6 +22,8 @@ export class App {
   menuOpen = signal(false);
   online = signal<boolean | null>(null);
   protegido = signal(false);
+  /** Dependencias del backend que no están conectadas (p. ej. ["Redis"]). */
+  caidos = signal<string[]>([]);
   claveOk = signal<boolean | null>(null);
 
   constructor() {
@@ -65,6 +67,10 @@ export class App {
       next: (r) => {
         this.online.set(true);
         this.protegido.set(r.protegido);
+        const nombres: Record<string, string> = { redis: 'Redis', mongo: 'MongoDB' };
+        this.caidos.set(Object.entries(r.servicios || {})
+          .filter(([, v]) => v !== 'conectado' && v !== 'no-configurado')
+          .map(([k]) => nombres[k] || k));
         if (!r.protegido) { this.claveOk.set(true); return; }
         if (!this.auth.logueado() && !localStorage.getItem('yisus_admin_key')) { this.claveOk.set(false); return; }
         // El backend exige credencial: se valida la sesión (o la clave) de este navegador
@@ -73,7 +79,7 @@ export class App {
           error: () => this.claveOk.set(false),
         });
       },
-      error: () => { this.online.set(false); this.claveOk.set(null); },
+      error: () => { this.online.set(false); this.claveOk.set(null); this.caidos.set([]); },
     });
   }
 

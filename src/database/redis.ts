@@ -5,6 +5,18 @@ const logger = {
     error: (msg: string) => console.error(msg),
 };
 
+/**
+ * Redis caído no debe tumbar el proceso: reintenta para siempre con backoff (máx. 10 s) y los
+ * comandos emitidos sin conexión fallan en ~2 reintentos en vez de colgar la petición.
+ */
+const OPCIONES_RESILIENTES: RedisOptions = {
+    retryStrategy: (times: number) => Math.min(times * 200, 10_000),
+    maxRetriesPerRequest: 2,
+    connectTimeout: 5_000,
+};
+
+export type RedisEstado = 'conectado' | 'reconectando' | 'desconectado';
+
 export class RedisConnector {
     private defaultClient: Redis | null = null;
     private clients: Map<number, Redis> = new Map();
@@ -14,16 +26,11 @@ export class RedisConnector {
 
     constructor(optionsOrUrl: RedisOptions | string) {
         if (typeof optionsOrUrl === 'string') {
-            this.options = {
-                retryStrategy: (times: number) => Math.min(times * 50, 2000)
-            };
+            this.options = { ...OPCIONES_RESILIENTES };
             this.host = undefined; 
             (this as any).url = optionsOrUrl; 
         } else {
-            this.options = {
-                retryStrategy: (times: number) => Math.min(times * 50, 2000),
-                ...optionsOrUrl
-            };
+            this.options = { ...OPCIONES_RESILIENTES, ...optionsOrUrl };
             this.defaultDb = optionsOrUrl.db || 0;
             this.host = optionsOrUrl.host;
         }
@@ -34,14 +41,30 @@ export class RedisConnector {
             logger.info('Redis default client already connected');
             return;
         }
+        this.defaultClient = this.createClient(this.defaultDb);
+        this.clients.set(this.defaultDb, this.defaultClient);
+        await this.conectarSinLanzar(this.defaultClient, this.defaultDb);
+    }
+
+    /**
+     * Primer intento de conexión. Si falla NO lanza: ioredis sigue reintentando en segundo plano
+     * (retryStrategy) y el servidor arranca igual (GUI, Telegram y Buzz vivos, /api/status avisa).
+     */
+    private async conectarSinLanzar(client: Redis, db: number): Promise<void> {
+        if (client.status !== 'wait') return;
         try {
-            this.defaultClient = this.createClient(this.defaultDb);
-            this.clients.set(this.defaultDb, this.defaultClient);
-            await this.defaultClient.connect();
-        } catch (error) {
-            logger.error(`Failed to connect to Redis: ${error}`);
-            throw error;
+            await client.connect();
+        } catch (error: any) {
+            logger.error(`⚠️  Redis no disponible (db ${db}): ${error?.message || error}. Sigo arrancando; reintento en segundo plano.`);
         }
+    }
+
+    /** Estado de la conexión principal (para /api/status y la GUI). */
+    estado(): RedisEstado {
+        const st = this.defaultClient?.status;
+        if (st === 'ready') return 'conectado';
+        if (st === 'connecting' || st === 'reconnecting' || st === 'connect') return 'reconectando';
+        return 'desconectado';
     }
 
     private createClient(db: number): Redis {
@@ -54,8 +77,21 @@ export class RedisConnector {
             client = new Redis({ ...this.options, db, lazyConnect: true });
         }
 
-        client.on('connect', () => logger.info(`🔴 Redis connected to db ${db}`));
-        client.on('error', (err) => logger.error(`Redis error on db ${db}: ${err}`));
+        // Sin conexión, ioredis emite 'error' en cada reintento: se loguea el primero y luego 1 por minuto.
+        let caido = false;
+        let ultimoLog = 0;
+        client.on('ready', () => {
+            logger.info(caido ? `🟢 Redis reconectado (db ${db})` : `🔴 Redis connected to db ${db}`);
+            caido = false;
+        });
+        client.on('error', (err) => {
+            const ahora = Date.now();
+            if (!caido || ahora - ultimoLog > 60_000) {
+                logger.error(`Redis error on db ${db}: ${err?.message || err}${caido ? ' (sigo reintentando)' : ''}`);
+                ultimoLog = ahora;
+            }
+            caido = true;
+        });
         return client;
     }
 
@@ -81,12 +117,12 @@ export class RedisConnector {
         }
         if (this.clients.has(db)) {
             const client = this.clients.get(db)!;
-            if (client.status === 'wait') await client.connect();
+            await this.conectarSinLanzar(client, db);
             return client;
         }
         const newClient = this.createClient(db);
         this.clients.set(db, newClient);
-        await newClient.connect();
+        await this.conectarSinLanzar(newClient, db);
         return newClient;
     }
 }
@@ -96,6 +132,9 @@ export let redisConnectorInstance: RedisConnector | null = null;
 export const setRedisConnectorInstance = (connector: RedisConnector) => {
     redisConnectorInstance = connector;
 };
+
+/** Estado de Redis para diagnósticos; 'desconectado' si aún no se inicializó. */
+export const redisEstado = (): RedisEstado => redisConnectorInstance?.estado() ?? 'desconectado';
 
 export const getRedisConnector = (): RedisConnector => {
     if (!redisConnectorInstance) {

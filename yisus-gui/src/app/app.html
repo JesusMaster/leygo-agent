@@ -72,8 +72,12 @@
       <div class="project-info">
         <h2 class="project-name">Yisus Agent</h2>
         <div class="status">
-          @if (online() === true) {
+          @if (online() === true && caidos().length) {
+            <span class="dot orange"></span> En línea · sin {{ caidos().join(' ni ') }}
+          } @else if (online() === true) {
             <span class="dot green"></span> Agente en línea
+          }
+          @if (online() === true) {
             @if (!protegido()) {
               <span class="badge warn" style="margin-left:10px">Admin sin clave: define ADMIN_API_KEY</span>
             } @else if (claveOk() === false) {

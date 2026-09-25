@@ -150,7 +150,7 @@ export class ApiService {
   // ─── Estado ───────────────────────────────────────────────────────────
 
   /** Público: responde aunque falte la clave. Sirve para saber si el backend está vivo. */
-  getStatus(): Observable<{ status: string; protegido: boolean; agente: string }> {
+  getStatus(): Observable<{ status: 'ok' | 'degradado'; protegido: boolean; agente: string; servicios?: Record<string, string> }> {
     return this.http.get<any>(`${this.baseUrl}/api/status`);
   }
 

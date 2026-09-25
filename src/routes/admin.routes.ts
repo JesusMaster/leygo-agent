@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { redisEstado } from '../database/redis.js';
+import mongoose from 'mongoose';
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
@@ -45,10 +47,18 @@ export default function createAdminRoutes() {
    * caído" de "me falta la clave", que es justo lo que necesita explicar.
    */
   app.get('/api/status', (_req, res) => {
+    // Siempre 200 mientras el proceso viva (el healthcheck de Docker no debe reiniciar en bucle
+    // por una dependencia caída); el detalle va en `servicios`.
+    const redis = redisEstado();
+    const mongo = !process.env.MONGO_URI ? 'no-configurado'
+      : mongoose.connection.readyState === 1 ? 'conectado'
+      : mongoose.connection.readyState === 2 ? 'reconectando' : 'desconectado';
+    const degradado = redis !== 'conectado' || mongo === 'desconectado' || mongo === 'reconectando';
     res.json({
-      status: 'ok',
+      status: degradado ? 'degradado' : 'ok',
       protegido: !!process.env.ADMIN_API_KEY,
       agente: process.env.ADK_APP_NAME || 'yisus',
+      servicios: { redis, mongo },
     });
   });
 

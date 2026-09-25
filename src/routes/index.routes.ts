@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { redisEstado } from '../database/redis.js';
 import express from 'express';
 import { Runner } from '@google/adk';
 import { customAgentsService } from '../agents/custom/custom_agents.service.js';
@@ -11,6 +12,15 @@ import { customWebhookService } from '../services/custom_webhook.service.js';
 import { tokenTrackerService } from '../services/token_tracker.service.js';
 import { guardRutasInternas } from './admin_guard.js';
 import { attachmentsService } from '../services/attachments.service.js';
+
+
+/** Mensaje para el usuario cuando no se puede leer/crear la sesión (vive en Redis). */
+function errorDeSesion(e: any): string {
+    if (redisEstado() !== 'conectado') {
+        return 'Redis no está disponible, así que no puedo leer ni guardar la conversación. Estoy reintentando la conexión; prueba de nuevo en un momento.';
+    }
+    return e?.message || String(e);
+}
 
 export default function createIndexRoutes(runner: Runner, sessionService: RedisSessionService) {
     const app = Router();
@@ -355,10 +365,13 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     app.post('/run', express.json(), async (req, res) => {
         const { appName, userId, sessionId, newMessage } = req.body;
 
-        // Crear sesión si no existe
-        let session = await sessionService.getSession({ appName, userId, sessionId });
-        if (!session) {
-            session = await sessionService.createSession({ appName, userId, sessionId });
+        // Crear sesión si no existe (las sesiones viven en Redis: si está caído, error claro y no un cuelgue)
+        let session;
+        try {
+            session = await sessionService.getSession({ appName, userId, sessionId })
+                ?? await sessionService.createSession({ appName, userId, sessionId });
+        } catch (e: any) {
+            return res.status(503).json({ error: errorDeSesion(e) });
         }
 
         const events: any[] = [];
@@ -395,9 +408,13 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection',    'keep-alive');
 
-        let session = await sessionService.getSession({ appName, userId, sessionId });
-        if (!session) {
-            session = await sessionService.createSession({ appName, userId, sessionId });
+        let session;
+        try {
+            session = await sessionService.getSession({ appName, userId, sessionId })
+                ?? await sessionService.createSession({ appName, userId, sessionId });
+        } catch (e: any) {
+            res.write(`data: ${JSON.stringify({ error: errorDeSesion(e) })}\n\n`);
+            return res.end();
         }
 
         // el scope de uso se abre justo antes de correr el Runner

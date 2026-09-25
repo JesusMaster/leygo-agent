@@ -1,5 +1,6 @@
 import { setMongoDBConnector } from './database/mongo/client.js';
-import { MicroserviceServer } from 'micro-generate';
+import { MicroserviceServer, createMongoDBConnector } from 'micro-generate';
+import mongoose from 'mongoose';
 import { typeDefs, resolvers } from './features/index.js';
 import * as dotenv from 'dotenv';
 import { createRedisConnector } from './database/redis.js';
@@ -48,7 +49,9 @@ const buzzRunner     = makeRunner(buildChannelCoordinator('buzz'));
 
 
 const server = new MicroserviceServer({
-  mongoUri: process.env.MONGO_URI || '',
+  // Mongo se conecta aparte (conectarMongo): el server de micro-generate conecta las bases ANTES
+  // de escuchar y, si una falla, el proceso muere y Docker lo reinicia en bucle.
+  mongoUri: '',
   port: parseInt(process.env.PORT || '4000'),
   redisConnector: redisConnector,
   playground: process.env.GRAPHQL_PLAYGROUND === 'true',
@@ -91,10 +94,37 @@ const publicRunner = makeRunner(buildPublicCoordinator());
 mountA2A(app, { resolveRunner: () => publicRunner, sessionService });
 
 
-server.start().then(async () => {
-    if (server.getMongoDBConnector()) {
-        setMongoDBConnector(server.getMongoDBConnector()! as any);
+/** Conecta Mongo en segundo plano y reintenta cada 30 s: una base caída no debe tumbar el agente. */
+const mongoConnector = process.env.MONGO_URI ? createMongoDBConnector(process.env.MONGO_URI) : null;
+if (mongoConnector) setMongoDBConnector(mongoConnector as any);
+let mongoAvisado = false;
+const conectarMongo = async (): Promise<void> => {
+    if (!mongoConnector) return;
+    try {
+        if (!mongoAvisado) {
+            await mongoConnector.connect();
+        } else {
+            // Reintentos directos con mongoose: el conector de micro-generate vuelca el error completo
+            // (varios KB) en cada intento.
+            await mongoose.connect(process.env.MONGO_URI!, { serverSelectionTimeoutMS: 5000, maxPoolSize: 10 });
+            (mongoConnector as any).isConnected = true;
+            console.log('🟢 MongoDB reconectado');
+        }
+    } catch (e: any) {
+        if (!mongoAvisado) console.error(`⚠️  MongoDB no disponible: ${e?.message || e}. Sigo arrancando; reintento cada 30 s.`);
+        mongoAvisado = true;
+        setTimeout(() => { void conectarMongo(); }, 30_000).unref();
     }
+};
+
+// Una promesa rechazada en segundo plano (Telegram, Buzz, un proveedor caído…) se registra,
+// pero no mata el proceso: con Node 22 el default es terminar y Docker entra en bucle.
+process.on('unhandledRejection', (reason: any) => {
+    console.error('⚠️  [unhandledRejection]', reason?.stack || reason);
+});
+
+server.start().then(async () => {
+    void conectarMongo();
     console.log('Server initialized');
 
     // Iniciar servicios en segundo plano: Bot de Telegram interactivo, Scheduler de tareas y Bridge Nostr (Buzz)
@@ -138,6 +168,10 @@ server.start().then(async () => {
     if (process.env.NOSTR_ENABLED !== 'false') {
         await nostrGatewayService.start(buzzRunner, sessionService);
     }
+}).catch((e) => {
+    // Solo llega aquí algo que impide escuchar HTTP (puerto ocupado, config inválida): ahí sí se sale.
+    console.error('❌ No se pudo iniciar el servidor:', e?.stack || e);
+    process.exit(1);
 });
 
 const gracefulShutdown = async () => {
@@ -146,6 +180,7 @@ const gracefulShutdown = async () => {
     schedulerService.stop();
     nostrGatewayService.stop();
     await server.stop();
+    await mongoConnector?.disconnect().catch(() => {});
     console.log('Graceful shutdown complete.');
     process.exit(0);
 };
