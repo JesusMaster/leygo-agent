@@ -39,6 +39,15 @@ interface Envio {
   opciones: boolean;             // panel "¿qué generar?" abierto
 }
 
+interface EventoTl { key: string; kind: string; at: number; titulo: string; icono: string; sistema: boolean; cuerpo: Array<{ t: string; url?: string }> | null; }
+const ICONO: Record<string, string> = {
+  nota: 'ph-note-pencil', respuesta: 'ph-chat-circle-text', notificado: 'ph-paper-plane-tilt', creado: 'ph-plus-circle', aceptado: 'ph-check',
+  estado: 'ph-arrows-left-right', fecha: 'ph-calendar', edicion: 'ph-pencil-simple', recordatorio: 'ph-bell', involucrado: 'ph-user-plus', mencion: 'ph-link',
+};
+const SISTEMA = new Set(['creado', 'aceptado', 'estado', 'fecha', 'edicion', 'recordatorio', 'involucrado', 'mencion']);
+const SEP_RESP = /\s*(?:,|;|\/|&|\s+y\s+|\s+e\s+(?=[ií]))\s*/i;
+const YO = /^(jes[uú]s|yisus|jleiva|yo|t[uú]|jes[uú]s leiva)$/i;
+
 const ESTADO_LABEL: Record<CommitmentStatus, string> = { propuesto: 'Propuesto', pendiente: 'Pendiente', en_curso: 'En curso', hecho: 'Hecho', cancelado: 'Cancelado', descartado: 'Descartado' };
 const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail: 'Gmail', meet: 'Meet', manual: 'Manual', backfill: 'Backfill' };
 
@@ -48,6 +57,7 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
  */
 @Component({
   selector: 'app-commitments',
+  host: { '(document:click)': 'menu.set(null)' },
   imports: [FormsModule, RouterLink, FriendlyDatePipe, DeliveryPickerComponent],
   template: `
     <div class="page">
@@ -103,14 +113,14 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
         </div></div>
       } @else {
         @for (c of filtrados(); track c.id) {
-          <div class="cm" [class.vencido]="vencido(c)" [class.propuesto]="c.status === 'propuesto'" [class.cerrado]="c.status === 'hecho' || c.status === 'cancelado' || c.status === 'descartado'">
+          <div class="cm" [class.vencido]="vencido(c)" [class.propuesto]="c.status === 'propuesto'" [class.cerrado]="cerrado(c)" [class.open]="abierto() === c.id">
             <div class="cm-head">
               <div class="cm-badges">
                 <span class="tb estado" [attr.data-estado]="c.status">{{ estadoLabel(c.status) }}</span>
-                <span class="tb quien" [class.mio]="c.mine"><i class="ph" [class.ph-user]="c.mine" [class.ph-users]="!c.mine"></i> {{ c.mine ? 'Lo debo' : 'Me debe ' + c.owner }}</span>
+                <span class="tb quien" [class.mio]="c.mine"><i class="ph" [class.ph-user]="c.mine" [class.ph-users]="!c.mine"></i> {{ c.mine ? 'Lo debo' : 'Me debe ' + unir(responsables(c)) }}</span>
                 @if (c.priority === 'alta') { <span class="tb prio">alta</span> }
                 @if (c.reminder_auto) { <span class="tb rem" title="Friendly reminder automático: 1 día antes y cada día vencido"><i class="ph ph-bell-ringing"></i> reminder</span> }
-                @if (c.source_type) {
+                @if (c.source_type && c.source_type !== 'manual') {
                   <span class="tb origen" [title]="c.source_title || ''">
                     @if (c.source_link) { <a [href]="c.source_link" target="_blank" rel="noopener">{{ origenLabel(c.source_type) }} <i class="ph ph-arrow-square-out"></i></a> }
                     @else { {{ origenLabel(c.source_type) }} }
@@ -121,93 +131,165 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 @if (c.status === 'propuesto') {
                   <button class="btn-primary sm" (click)="aceptar(c)" title="Aceptar con la fecha sugerida o la que elijas"><i class="ph ph-check"></i> Aceptar</button>
                   <button class="btn-secondary sm" (click)="cambiarEstado(c, 'descartado')"><i class="ph ph-x"></i> Descartar</button>
-                } @else if (c.status === 'pendiente' || c.status === 'en_curso') {
-                  @if (c.status === 'pendiente') { <button class="ta" title="Marcar en curso" (click)="cambiarEstado(c, 'en_curso')"><i class="ph ph-play"></i></button> }
-                  <button class="ta ok" title="Marcar hecho (y avisar)" (click)="abrirCierre(c, 'hecho')"><i class="ph ph-check-circle"></i></button>
-                  @if (!c.mine) {
-                    <button class="ta rem" [class.on]="!!c.reminder_auto" [title]="c.reminder_auto ? 'Friendly reminder (automático activo)' : 'Friendly reminder a ' + c.owner" (click)="abrirRecordatorio(c)"><i class="ph" [class.ph-bell-ringing]="!!c.reminder_auto" [class.ph-bell]="!c.reminder_auto"></i></button>
-                  }
-                  <button class="ta" title="Escribir a alguien sobre este compromiso (con todo el contexto)" (click)="abrirMensaje(c)"><i class="ph ph-paper-plane-tilt"></i></button>
-                  <button class="ta" title="Cancelar (y avisar)" (click)="abrirCierre(c, 'cancelado')"><i class="ph ph-prohibit"></i></button>
+                } @else if (abiertoEstado(c)) {
+                  <button class="btn-secondary sm" (click)="abrirMensaje(c)" title="Escribir a alguien sobre este compromiso"><i class="ph ph-paper-plane-tilt"></i> Escribir</button>
+                  <button class="btn-secondary sm ok" (click)="abrirCierre(c, 'hecho')" title="Marcar hecho (y avisar si quieres)"><i class="ph ph-check-circle"></i> Hecho</button>
                 } @else {
-                  <button class="ta" title="Reabrir" (click)="cambiarEstado(c, 'pendiente')"><i class="ph ph-arrow-counter-clockwise"></i></button>
+                  <button class="btn-secondary sm" (click)="cambiarEstado(c, 'pendiente')"><i class="ph ph-arrow-counter-clockwise"></i> Reabrir</button>
                 }
-                <button class="ta" [class.on]="abierto() === c.id" title="Detalle e historial" (click)="toggleDetalle(c)"><i class="ph ph-list-dashes"></i></button>
-                <button class="ta del" title="Eliminar" (click)="eliminar(c)"><i class="ph ph-trash"></i></button>
+                <button class="ta" [class.on]="abierto() === c.id" [title]="abierto() === c.id ? 'Cerrar detalle' : 'Detalle, personas e historial'" (click)="toggleDetalle(c)"><i class="ph" [class.ph-caret-down]="abierto() !== c.id" [class.ph-caret-up]="abierto() === c.id"></i></button>
+                <div class="menu-wrap">
+                  <button class="ta" [class.on]="menu() === c.id" title="Más acciones" (click)="toggleMenu(c.id, $event)"><i class="ph ph-dots-three"></i></button>
+                  @if (menu() === c.id) {
+                    <div class="menu" (click)="$event.stopPropagation()">
+                      @if (c.status === 'pendiente') { <button (click)="menuAccion(() => cambiarEstado(c, 'en_curso'))"><i class="ph ph-play"></i> Marcar en curso</button> }
+                      @if (c.status === 'en_curso') { <button (click)="menuAccion(() => cambiarEstado(c, 'pendiente'))"><i class="ph ph-pause"></i> Volver a pendiente</button> }
+                      @if (!c.mine && abiertoEstado(c)) { <button (click)="menuAccion(() => abrirRecordatorio(c))"><i class="ph ph-bell"></i> Friendly reminder…</button> }
+                      @if (abiertoEstado(c)) { <button (click)="menuAccion(() => abrirCierre(c, 'cancelado'))"><i class="ph ph-prohibit"></i> Cancelar…</button> }
+                      <button (click)="menuAccion(() => copiarId(c))"><i class="ph ph-copy"></i> Copiar id ({{ c.id }})</button>
+                      <button class="danger" (click)="menuAccion(() => eliminar(c))"><i class="ph ph-trash"></i> Eliminar</button>
+                    </div>
+                  }
+                </div>
               </div>
             </div>
 
             <div class="cm-main">
               <div class="cm-title">
-                <input type="text" class="titulo" [ngModel]="c.title" (ngModelChange)="pendTitle[c.id] = $event" (blur)="guardarTitulo(c)" />
+                <input type="text" class="titulo" [ngModel]="c.title" (ngModelChange)="pendTitle[c.id] = $event" (blur)="guardarTitulo(c)" (keydown.enter)="$any($event.target).blur()" />
               </div>
               <div class="cm-meta">
                 <label class="fecha" [class.sugerida]="!c.due_date && c.proposed_due">
                   <i class="ph ph-calendar"></i>
                   <input type="date" [ngModel]="c.due_date || c.proposed_due || ''" (ngModelChange)="cambiarFecha(c, $event)" />
-                  @if (!c.due_date && c.proposed_due) { <small>sugerida</small> }
+                  @if (!c.due_date && c.proposed_due) {
+                    <small>sugerida</small>
+                    @if (c.status !== 'propuesto') { <button class="lnk" (click)="aceptarFecha(c)" title="Dejar la fecha sugerida como comprometida">Aceptar</button> }
+                  }
                   @if (vencido(c)) { <small class="venc">vencido</small> }
                 </label>
-                @if (c.counterpart) { <span class="con"><i class="ph ph-handshake"></i> {{ c.counterpart }}</span> }
+                @if (!esYo(c.counterpart)) { <span class="con"><i class="ph ph-handshake"></i> {{ c.counterpart }}</span> }
                 @if (c.source_title) { <span class="src" [title]="c.source_title">{{ c.source_title }}</span> }
-                <span class="spacer"></span>
-                <code class="id">{{ c.id }}</code>
               </div>
-              @if (c.detail) { <div class="cm-detail"><i class="ph ph-info"></i><span>{{ c.detail }}</span></div> }
-              @else if (c.source_type && c.source_type !== 'manual') { <div class="cm-detail vacio"><i class="ph ph-info"></i><span>Sin contexto todavía — usa "Completar contexto" arriba.</span></div> }
 
-              @if (abierto() === c.id) {
-                <div class="detalle">
-                  <div class="campos">
-                    <label class="field"><span>Responsable</span><input type="text" [ngModel]="c.owner" (ngModelChange)="pend[c.id] = { ...(pend[c.id] || {}), owner: $event }" /></label>
-                    <label class="field"><span>Con quién / para quién</span><input type="text" [ngModel]="c.counterpart || ''" (ngModelChange)="pend[c.id] = { ...(pend[c.id] || {}), counterpart: $event }" /></label>
-                    <label class="field"><span>Prioridad</span>
-                      <select [ngModel]="c.priority" (ngModelChange)="pend[c.id] = { ...(pend[c.id] || {}), priority: $event }">
-                        <option value="alta">alta</option><option value="media">media</option><option value="baja">baja</option>
-                      </select>
-                    </label>
-                    <label class="field detalle-txt"><span>Detalle</span><textarea rows="2" [ngModel]="c.detail || ''" (ngModelChange)="pend[c.id] = { ...(pend[c.id] || {}), detail: $event }"></textarea></label>
-                  </div>
-                  <div class="row" style="margin-bottom:14px">
-                    <span class="spacer"></span>
-                    <button class="btn-primary sm" [disabled]="!pend[c.id]" (click)="guardarCampos(c)">Guardar cambios</button>
-                  </div>
-
-                  <div class="personas">
-                    <span class="lbl"><i class="ph ph-users-three"></i> Personas</span>
-                    @for (p of personas(); track p.nombre) {
-                      <span class="persona" [attr.data-rel]="p.relacion">
-                        <button class="p-nombre" (click)="abrirMensaje(c, p.nombre)" [title]="'Escribir a ' + p.nombre + (p.delivery.length ? ' (' + canales(p.delivery) + ')' : '')">
-                          <i class="ph ph-paper-plane-tilt"></i> {{ p.nombre }}
-                        </button>
-                        <small>{{ p.rol || relLabel(p.relacion) }}</small>
-                        @if (p.relacion === 'involucrado') { <button class="p-x" title="Quitar" (click)="quitarPersona(c, p.nombre)"><i class="ph ph-x"></i></button> }
-                      </span>
-                    }
-                    <span class="p-add">
-                      <input type="text" [(ngModel)]="personaNueva" placeholder="Sumar persona (p. ej. Fabricio)" (keydown.enter)="agregarPersona(c)" />
-                      <input type="text" [(ngModel)]="rolNuevo" placeholder="Rol (opcional)" class="rol" (keydown.enter)="agregarPersona(c)" />
-                      <button class="btn-secondary sm" [disabled]="!personaNueva.trim()" (click)="agregarPersona(c)"><i class="ph ph-user-plus"></i></button>
-                    </span>
-                  </div>
-
-                  <div class="nota-row">
-                    <input type="text" [(ngModel)]="notaNueva" placeholder="Feedback o avance: 'hablé con X, queda para el lunes'…" (keydown.enter)="agregarNota(c)" />
-                    <button class="btn-secondary sm" (click)="agregarNota(c)" [disabled]="!notaNueva.trim()"><i class="ph ph-chat-text"></i> Nota</button>
-                  </div>
-                  <div class="hist">
-                    @for (u of historial(); track u.id) {
-                      <div class="hist-item">
-                        <span class="hist-when">{{ u.at | friendlyDate }}</span>
-                        <span class="tb kind">{{ u.kind }}</span>
-                        <span class="hist-text">{{ u.text }}</span>
-                        <span class="hist-by">{{ u.by }}</span>
-                      </div>
-                    } @empty { <div class="empty" style="padding:8px 0">Sin movimientos.</div> }
-                  </div>
-                </div>
+              @if (editandoDetalle() === c.id) {
+                <textarea class="det-edit" rows="3" [ngModel]="c.detail || ''" #det (blur)="guardarDetalle(c, det.value)" (keydown.escape)="editandoDetalle.set(null)" placeholder="Contexto del compromiso…"></textarea>
+                <small class="hint">Se guarda al salir del campo · Esc cancela</small>
+              } @else if (c.detail) {
+                <div class="cm-detail editable" (click)="editarDetalle(c)" title="Clic para editar"><i class="ph ph-info"></i><span>{{ c.detail }}</span><i class="ph ph-pencil-simple lapiz"></i></div>
+              } @else {
+                <div class="cm-detail vacio editable" (click)="editarDetalle(c)"><i class="ph ph-info"></i><span>{{ c.source_type && c.source_type !== 'manual' ? 'Sin contexto todavía — usa "Completar contexto" arriba o haz clic para escribirlo.' : 'Agregar contexto…' }}</span></div>
               }
             </div>
+
+            @if (abierto() === c.id) {
+              <div class="detalle">
+                <div class="tl-col">
+                  <div class="nota-box">
+                    <select [(ngModel)]="notaDe" title="¿Quién lo dijo?">
+                      <option value="">Nota mía</option>
+                      @for (p of personas(); track p.nombre) { <option [value]="p.nombre">Respuesta de {{ p.nombre }}</option> }
+                    </select>
+                    <input type="text" [(ngModel)]="notaNueva" [placeholder]="notaDe ? 'Qué respondió ' + notaDe.split(' ')[0] + '…' : 'Avance o feedback: hablé con X, queda para el lunes…'" (keydown.enter)="agregarNota(c)" />
+                    <button class="btn-primary sm" (click)="agregarNota(c)" [disabled]="!notaNueva.trim()"><i class="ph ph-plus"></i> Agregar</button>
+                  </div>
+                  <div class="tl-filtros">
+                    <div class="seg sm">
+                      <button [class.on]="filtroTl() === 'todo'" (click)="filtroTl.set('todo')">Todo</button>
+                      <button [class.on]="filtroTl() === 'notas'" (click)="filtroTl.set('notas')">Notas y respuestas</button>
+                      <button [class.on]="filtroTl() === 'mensajes'" (click)="filtroTl.set('mensajes')">Mensajes</button>
+                    </div>
+                  </div>
+                  <div class="tl">
+                    @for (e of timeline(); track e.key) {
+                      <div class="tl-item" [attr.data-k]="e.kind" [class.sis]="e.sistema">
+                        <span class="tl-ico"><i class="ph" [class]="'ph ' + e.icono"></i></span>
+                        <div class="tl-body">
+                          <div class="tl-top"><b>{{ e.titulo }}</b><span class="tl-when">{{ e.at | friendlyDate }}</span></div>
+                          @if (e.cuerpo) {
+                            <div class="tl-text">@for (p of e.cuerpo; track $index) {@if (p.url) {<a [href]="p.url" target="_blank" rel="noopener" class="tl-link">{{ p.t }} <i class="ph ph-arrow-square-out"></i></a>} @else {<span>{{ p.t }}</span>}}</div>
+                          }
+                        </div>
+                      </div>
+                    } @empty { <div class="empty" style="padding:10px 0">Sin movimientos en este filtro.</div> }
+                  </div>
+                </div>
+
+                <aside class="ficha">
+                  <div class="f-row">
+                    <span class="f-lbl">Responsables</span>
+                    <div class="f-val chips">
+                      @for (r of responsables(c); track r) {
+                        <span class="chip">{{ esYo(r) ? 'Tú' : r }}@if (responsables(c).length > 1 || !esYo(r)) { <button title="Quitar" (click)="quitarResponsable(c, r)"><i class="ph ph-x"></i></button> }</span>
+                      }
+                      <input type="text" class="chip-in" placeholder="＋ responsable" #nr (keydown.enter)="agregarResponsable(c, nr.value); nr.value = ''" (blur)="agregarResponsable(c, nr.value); nr.value = ''" />
+                    </div>
+                  </div>
+                  <div class="f-row">
+                    <span class="f-lbl">Con / para</span>
+                    <input type="text" class="f-in" [ngModel]="esYo(c.counterpart) ? '' : c.counterpart" placeholder="Tú" #cp (blur)="guardarCampo(c, 'counterpart', cp.value.trim() || null)" (keydown.enter)="cp.blur()" />
+                  </div>
+                  <div class="f-row">
+                    <span class="f-lbl">Prioridad</span>
+                    <select class="f-in" [ngModel]="c.priority" (ngModelChange)="guardarCampo(c, 'priority', $event)">
+                      <option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option>
+                    </select>
+                  </div>
+                  @if (!c.mine) {
+                    <div class="f-row">
+                      <span class="f-lbl">Reminder</span>
+                      <span class="f-val">{{ c.reminder_auto ? 'Automático' : 'Apagado' }} · <button class="lnk" (click)="abrirRecordatorio(c)">configurar</button></span>
+                    </div>
+                  }
+                  @if (c.source_type) {
+                    <div class="f-row">
+                      <span class="f-lbl">Origen</span>
+                      <span class="f-val">@if (c.source_link) { <a [href]="c.source_link" target="_blank" rel="noopener">{{ origenLabel(c.source_type) }} ↗</a> } @else { {{ origenLabel(c.source_type) }} }</span>
+                    </div>
+                  }
+                  <div class="f-row"><span class="f-lbl">Id</span><code class="f-val">{{ c.id }}</code></div>
+
+                  <div class="f-sec">
+                    <div class="f-sec-head"><span class="f-lbl">Personas</span><button class="lnk" (click)="abrirAgregar()"><i class="ph ph-user-plus"></i> Persona</button></div>
+                    @if (agregando(); as a) {
+                      <div class="pop">
+                        <input type="text" [(ngModel)]="a.nombre" placeholder="Nombre (p. ej. Fabricio Figueroa)" />
+                        <input type="text" [(ngModel)]="a.rol" placeholder="Rol (opcional: Legal, COO…)" />
+                        <input type="email" [(ngModel)]="a.email" placeholder="Correo (opcional: busca su chat)" (keydown.enter)="guardarNuevaPersona(c)" />
+                        <div class="row">
+                          <small class="hint">{{ a.email.trim() ? 'Se busca su DM en Google Chat; si no, queda el correo.' : 'Sin correo, el canal se elige al escribirle.' }}</small>
+                          <span class="spacer"></span>
+                          <button class="btn-secondary sm" (click)="agregando.set(null)">Cancelar</button>
+                          <button class="btn-primary sm" [disabled]="(!a.nombre.trim() && !a.email.trim()) || a.guardando" (click)="guardarNuevaPersona(c)"><i class="ph" [class.ph-spinner]="a.guardando" [class.ph-check]="!a.guardando"></i> Agregar</button>
+                        </div>
+                      </div>
+                    }
+                    @for (p of personas(); track p.nombre) {
+                      <div class="pchip" [attr.data-rel]="p.relacion">
+                        <span class="av">{{ iniciales(p.nombre) }}</span>
+                        @if (edPersona && edPersona.orig === p.nombre) {
+                          <div class="pc-edit">
+                            <input type="text" [(ngModel)]="edPersona.nombre" placeholder="Nombre" />
+                            <input type="text" [(ngModel)]="edPersona.rol" placeholder="Rol" (keydown.enter)="guardarPersona(c)" />
+                            <button class="ta sm" title="Guardar" (click)="guardarPersona(c)"><i class="ph ph-check"></i></button>
+                            <button class="ta sm" title="Cancelar" (click)="edPersona = null"><i class="ph ph-x"></i></button>
+                          </div>
+                        } @else {
+                          <button class="pc-main" (click)="abrirMensaje(c, p.nombre)" [title]="'Escribir a ' + p.nombre">
+                            <b>{{ p.nombre }}</b><small>{{ p.rol ? p.rol + ' · ' : '' }}{{ relLabel(p.relacion) }}</small>
+                          </button>
+                          <i class="ph canal" [class]="'ph canal ' + iconoCanal(p)" [class.sin]="!p.delivery.length" [title]="p.delivery.length ? 'Canal: ' + canales(p.delivery) : 'Sin canal guardado: se elige al escribirle'"></i>
+                          <span class="pc-acc">
+                            <button title="Editar nombre o rol" (click)="editarPersona(p)"><i class="ph ph-pencil-simple"></i></button>
+                            @if (p.relacion === 'involucrado') { <button title="Quitar" (click)="quitarPersona(c, p.nombre)"><i class="ph ph-x"></i></button> }
+                          </span>
+                        }
+                      </div>
+                    } @empty { <div class="hint">Nadie más todavía.</div> }
+                  </div>
+                </aside>
+              </div>
+            }
           </div>
         }
       }
@@ -438,6 +520,73 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .corregido { border: 1px solid rgba(16,185,129,.45); background: rgba(16,185,129,.07); border-radius: 10px; padding: 10px 12px; margin: -4px 0 14px; }
     .c-head { font-size: 12px; font-weight: 700; color: var(--ok); display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
     .c-text { white-space: pre-wrap; font-size: 13.5px; margin-bottom: 10px; }
+    .cm.open { border-color: var(--accent-primary); }
+    .btn-secondary.sm.ok:hover { border-color: var(--ok); color: var(--ok); }
+    .menu-wrap { position: relative; }
+    .menu { position: absolute; right: 0; top: 38px; z-index: 30; min-width: 210px; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.35); padding: 6px; display: flex; flex-direction: column; }
+    .menu button { display: flex; gap: 9px; align-items: center; text-align: left; border: none; background: none; color: var(--text-main); padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+    .menu button:hover { background: var(--bg-main); }
+    .menu button.danger { color: var(--danger); }
+    .cm-detail.editable { cursor: text; position: relative; }
+    .cm-detail.editable:hover { outline: 1px dashed var(--border-light); }
+    .cm-detail .lapiz { margin-left: auto; opacity: 0; color: var(--text-dim); }
+    .cm-detail.editable:hover .lapiz { opacity: 1; }
+    .det-edit { margin-top: 8px; width: 100%; box-sizing: border-box; font-size: 13.5px; }
+    .fecha .lnk { font-size: 12px; }
+    .detalle { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; align-items: start; }
+    .nota-box { display: flex; gap: 8px; margin-bottom: 10px; }
+    .nota-box select { width: auto; max-width: 210px; padding: 7px 9px; font-size: 13px; }
+    .nota-box input { flex: 1; min-width: 0; }
+    .tl-filtros { margin-bottom: 8px; }
+    .tl { position: relative; }
+    .tl-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 8px 0; position: relative; }
+    .tl-item::before { content: ''; position: absolute; left: 13px; top: 34px; bottom: -8px; width: 1px; background: var(--border-light); }
+    .tl-item:last-child::before { display: none; }
+    .tl-ico { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--bg-main); border: 1px solid var(--border-light); color: var(--text-dim); font-size: 14px; }
+    .tl-item[data-k=nota] .tl-ico { background: rgba(129,140,248,.18); color: #a5b4fc; border-color: transparent; }
+    .tl-item[data-k=respuesta] .tl-ico { background: rgba(16,185,129,.18); color: var(--ok); border-color: transparent; }
+    .tl-item[data-k=notificado] .tl-ico { background: rgba(56,189,248,.16); color: #7dd3fc; border-color: transparent; }
+    .tl-top { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+    .tl-when { color: var(--text-dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+    .tl-text { font-size: 13.5px; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+    .tl-item[data-k=nota] .tl-text, .tl-item[data-k=respuesta] .tl-text { background: var(--bg-main); border-radius: 8px; padding: 8px 10px; }
+    .tl-item[data-k=notificado] .tl-text { color: var(--text-dim); font-style: italic; }
+    .tl-item.sis .tl-top b { font-weight: 500; color: var(--text-dim); }
+    .tl-item.sis .tl-text { color: var(--text-dim); font-size: 12.5px; }
+    .tl-link { color: var(--accent-primary); text-decoration: none; }
+    .ficha { background: var(--bg-main); border: 1px solid var(--border-light); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+    .f-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+    .f-lbl { color: var(--text-dim); font-size: 12px; }
+    .f-in { padding: 6px 9px; font-size: 13px; width: 100%; box-sizing: border-box; }
+    .f-val { min-width: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border-radius: 999px; background: var(--bg-card); border: 1px solid rgba(245,158,11,.45); font-size: 12.5px; }
+    .chip button { border: none; background: none; color: var(--text-dim); cursor: pointer; padding: 0 3px; display: inline-flex; }
+    .chip button:hover { color: var(--danger); }
+    .chip-in { width: 110px; padding: 4px 8px; font-size: 12.5px; border-style: dashed; }
+    .f-sec { border-top: 1px dashed var(--border-light); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .f-sec-head { display: flex; justify-content: space-between; align-items: center; }
+    .pop { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--accent-primary); border-radius: 10px; background: var(--bg-card); }
+    .pop input { padding: 6px 9px; font-size: 13px; }
+    .pop .row { gap: 6px; align-items: center; flex-wrap: wrap; }
+    .pchip { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 10px; border: 1px solid transparent; }
+    .pchip:hover { background: var(--bg-card); border-color: var(--border-light); }
+    .av { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700; background: rgba(148,163,184,.18); color: var(--text-main); }
+    .pchip[data-rel=responsable] .av { background: rgba(245,158,11,.2); color: var(--warn); }
+    .pchip[data-rel=contraparte] .av { background: rgba(129,140,248,.2); color: #a5b4fc; }
+    .pc-main { flex: 1; min-width: 0; text-align: left; border: none; background: none; color: var(--text-main); cursor: pointer; display: flex; flex-direction: column; padding: 0; }
+    .pc-main b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pc-main small { font-size: 11.5px; color: var(--text-dim); }
+    .pc-main:hover b { color: var(--accent-primary); }
+    .canal { color: var(--accent-primary); font-size: 15px; } .canal.sin { color: var(--warn); }
+    .pc-acc { display: inline-flex; opacity: 0; } .pchip:hover .pc-acc { opacity: 1; }
+    .pc-acc button { border: none; background: none; color: var(--text-dim); cursor: pointer; padding: 2px 4px; }
+    .pc-acc button:hover { color: var(--accent-primary); }
+    .pc-edit { flex: 1; display: flex; gap: 4px; min-width: 0; } .pc-edit input { min-width: 0; flex: 1; padding: 5px 7px; font-size: 12.5px; }
+    .ta.sm { width: 28px; height: 28px; font-size: 14px; }
+    @media (max-width: 900px) { .detalle { grid-template-columns: 1fr; } .ficha { order: -1; } }
+    @media (max-width: 560px) { .nota-box { flex-wrap: wrap; } .nota-box select { max-width: none; flex: 1 1 100%; } .f-row { grid-template-columns: 84px 1fr; } }
+    @media (hover: none) { .pc-acc { opacity: 1; } .cm-detail .lapiz { opacity: .6; } }
     .spin, .ph-spinner { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 640px) { .p-add { flex-wrap: wrap; } .p-add input, .p-add input.rol { width: 100%; } .cm-head { flex-direction: column; } .dos { grid-template-columns: 1fr; } .hist-item { grid-template-columns: 1fr; gap: 2px; } }
   `],
@@ -465,8 +614,149 @@ export class CommitmentsComponent {
   private pollEnrich: any = null;
   cierre = signal<Envio | null>(null);
   personas = signal<CommitmentPerson[]>([]);
-  personaNueva = '';
-  rolNuevo = '';
+  menu = signal<string | null>(null);
+  editandoDetalle = signal<string | null>(null);
+  filtroTl = signal<'todo' | 'notas' | 'mensajes'>('todo');
+  agregando = signal<{ nombre: string; rol: string; email: string; guardando: boolean } | null>(null);
+  edPersona: { orig: string; nombre: string; rol: string } | null = null;
+  notaDe = '';
+
+  /** Historial como línea de tiempo: filtros, títulos legibles y eventos de sistema agrupados. */
+  timeline = computed<EventoTl[]>(() => {
+    const f = this.filtroTl();
+    const src = this.historial().filter((u) => f === 'todo' || (f === 'notas' ? (u.kind === 'nota' || u.kind === 'respuesta') : u.kind === 'notificado'));
+    const out: EventoTl[] = [];
+    for (const u of src) {
+      const prev = out[out.length - 1];
+      // "X se suma…" seguidos (en 30 min) → una sola línea
+      const suma = u.kind === 'involucrado' && /se suma al compromiso/.test(u.text);
+      if (suma && (prev as any)?._nombres && Math.abs(prev.at - u.at) < 30 * 60000) {
+        const nombres = [...(prev as any)._nombres, u.text.replace(/ se suma al compromiso.*$/, '')];
+        (prev as any)._nombres = nombres;
+        prev.titulo = `Se sumaron ${this.unir([...nombres].reverse())}`;
+        continue;
+      }
+      const ev = this.evento(u);
+      if (suma) (ev as any)._nombres = [u.text.replace(/ se suma al compromiso.*$/, '')];
+      out.push(ev);
+    }
+    return out;
+  });
+
+  private evento(u: CommitmentUpdate): EventoTl {
+    const base = { key: String(u.id), kind: u.kind, at: u.at, icono: ICONO[u.kind] || 'ph-dot-outline', sistema: SISTEMA.has(u.kind) };
+    const auto = u.by === 'auto' ? ' (automático)' : u.by === 'agente' ? ' (agente)' : '';
+    switch (u.kind) {
+      case 'nota': return { ...base, titulo: 'Nota', cuerpo: this.partes(u.text) };
+      case 'respuesta': return { ...base, titulo: `Respuesta de ${u.by}`, cuerpo: this.partes(u.text) };
+      case 'notificado': {
+        const m = u.text.match(/^(Avisado|No se pudo avisar)(?: a (.+?))?(?: por (.+?))?(?: · fallos: (.+?))?: "([\s\S]*)"$/);
+        if (!m) return { ...base, titulo: `Mensaje${auto}`, cuerpo: this.partes(u.text) };
+        const canal = (m[3] || '').replace(/\s*\((spaces|users)\/[^)]+\)/g, '').replace(/\s*\([^)]*@[^)]*\)/g, '');
+        const titulo = `${m[1] === 'Avisado' ? 'Mensaje' : 'No se pudo enviar'}${m[2] ? ' a ' + m[2] : ''}${canal ? ' · ' + canal : ''}${m[4] ? ' · con fallos' : ''}${auto}`;
+        return { ...base, titulo, cuerpo: [{ t: m[5] }] };
+      }
+      case 'mencion': {
+        const m = u.text.match(/^Vuelve a aparecer en (\w+): (.*?)(?: — (https?:\S+))?$/);
+        if (m) return { ...base, titulo: `Vuelve a aparecer en ${ORIGEN_LABEL[m[1]] || m[1]}`, cuerpo: m[3] ? [{ t: m[2], url: m[3] }] : [{ t: m[2] }] };
+        return { ...base, titulo: 'Mención', cuerpo: this.partes(u.text) };
+      }
+      case 'creado': return { ...base, titulo: u.text, cuerpo: null };
+      case 'involucrado': return { ...base, titulo: u.text, cuerpo: null };
+      case 'recordatorio': return { ...base, titulo: u.text, cuerpo: null };
+      default: return { ...base, titulo: u.text.length <= 80 ? u.text + auto : this.kindLabel(u.kind) + auto, cuerpo: u.text.length > 80 ? this.partes(u.text) : null };
+    }
+  }
+  private kindLabel(k: string) { return ({ aceptado: 'Aceptado', estado: 'Cambio de estado', fecha: 'Cambio de fecha', edicion: 'Edición' } as Record<string, string>)[k] || k; }
+  /** Texto con URLs → partes con enlace corto ("Gmail ↗", "enlace ↗"). */
+  private partes(t: string): Array<{ t: string; url?: string }> {
+    const out: Array<{ t: string; url?: string }> = [];
+    let last = 0;
+    for (const m of t.matchAll(/https?:\/\/[^\s)]+/g)) {
+      if (m.index! > last) out.push({ t: t.slice(last, m.index).replace(/\s*—\s*$/, ' ') });
+      const host = (() => { try { return new URL(m[0]).hostname; } catch { return ''; } })();
+      out.push({ t: host.includes('mail.google') ? 'Gmail' : host.includes('chat.google') ? 'Chat' : host.includes('meet') ? 'Meet' : 'enlace', url: m[0] });
+      last = m.index! + m[0].length;
+    }
+    if (last < t.length) out.push({ t: t.slice(last) });
+    return out;
+  }
+
+  // ─── Helpers de la tarjeta ────────────────────────────────────────────
+  cerrado(c: Commitment) { return c.status === 'hecho' || c.status === 'cancelado' || c.status === 'descartado'; }
+  abiertoEstado(c: Commitment) { return c.status === 'pendiente' || c.status === 'en_curso'; }
+  esYo(n?: string | null) { return !n || YO.test(n.trim()); }
+  responsables(c: Commitment): string[] { return String(c.owner || '').split(SEP_RESP).map((x) => x.trim()).filter(Boolean); }
+  unir(n: string[]) { const l = n.filter(Boolean); return l.length <= 1 ? (l[0] || '') : `${l.slice(0, -1).join(', ')} y ${l[l.length - 1]}`; }
+  iniciales(n: string) { const p = n.trim().split(/\s+/); return ((p[0]?.[0] || '') + (p.length > 1 ? p[p.length - 1][0] : (p[0]?.[1] || ''))).toUpperCase(); }
+  iconoCanal(p: CommitmentPerson) {
+    const ch = p.delivery[0]?.channel;
+    return ch === 'chat' ? 'ph-chats-circle' : ch === 'email' ? 'ph-envelope-simple' : ch === 'telegram' ? 'ph-telegram-logo' : ch === 'buzz' ? 'ph-broadcast' : ch === 'a2a' ? 'ph-robot' : 'ph-warning-circle';
+  }
+  toggleMenu(id: string, ev: Event) { ev.stopPropagation(); this.menu.set(this.menu() === id ? null : id); }
+  menuAccion(f: () => void) { this.menu.set(null); f(); }
+  copiarId(c: Commitment) { navigator.clipboard?.writeText(c.id).then(() => this.toast.ok(`Id ${c.id} copiado`)).catch(() => {}); }
+
+  private refrescar(c: Commitment) { this.load(); if (this.abierto() === c.id) this.cargarDetalle(c.id); }
+  guardarCampo(c: Commitment, campo: 'counterpart' | 'priority' | 'owner' | 'detail', valor: any) {
+    const actual = (c as any)[campo] ?? null;
+    if ((valor ?? null) === actual || (campo === 'counterpart' && this.esYo(valor) && this.esYo(actual))) return;
+    this.api.updateCommitment(c.id, { [campo]: valor } as any).subscribe({ next: () => this.refrescar(c), error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar') });
+  }
+  aceptarFecha(c: Commitment) {
+    if (!c.proposed_due) return;
+    this.api.updateCommitment(c.id, { due_date: c.proposed_due }).subscribe({ next: () => { this.toast.ok(`Fecha: ${c.proposed_due}`); this.refrescar(c); }, error: (e) => this.toast.error(e?.error?.error || 'No se pudo') });
+  }
+  editarDetalle(c: Commitment) { this.editandoDetalle.set(c.id); setTimeout(() => (document.querySelector('.det-edit') as HTMLTextAreaElement | null)?.focus(), 0); }
+  guardarDetalle(c: Commitment, v: string) {
+    if (this.editandoDetalle() !== c.id) return;
+    this.editandoDetalle.set(null);
+    this.guardarCampo(c, 'detail', v.trim() || null);
+  }
+  agregarResponsable(c: Commitment, nombre: string) {
+    const n = nombre.trim(); if (!n) return;
+    const actuales = this.responsables(c);
+    if (actuales.some((r) => r.toLowerCase() === n.toLowerCase())) return;
+    this.guardarCampo(c, 'owner', this.unir([...actuales, n]));
+  }
+  quitarResponsable(c: Commitment, nombre: string) {
+    const quedan = this.responsables(c).filter((r) => r !== nombre);
+    this.guardarCampo(c, 'owner', quedan.length ? this.unir(quedan) : 'Jesús');
+  }
+
+  // ─── Personas ─────────────────────────────────────────────────────────
+  abrirAgregar() { this.agregando.set({ nombre: '', rol: '', email: '', guardando: false }); }
+  async guardarNuevaPersona(c: Commitment) {
+    const a = this.agregando(); if (!a) return;
+    const email = a.email.trim();
+    if (!a.nombre.trim() && !email) return;
+    this.agregando.set({ ...a, guardando: true });
+    let delivery: TaskDelivery[] = [];
+    let nombre = a.nombre.trim();
+    if (email) {
+      try {
+        const dm = await firstValueFrom(this.api.findChatDm(email));
+        delivery = [{ channel: 'chat', target: dm.name }];
+        if (!nombre) nombre = dm.displayName;
+      } catch {
+        delivery = [{ channel: 'email', target: email }];
+        this.toast.ok('No lo encontré en Google Chat; queda con su correo');
+      }
+      if (!nombre) nombre = email.split('@')[0];
+    }
+    this.api.addCommitmentPerson(c.id, { nombre, rol: a.rol.trim() || null, delivery }).subscribe({
+      next: (r) => { this.personas.set(r.people); this.historial.set(r.updates); this.agregando.set(null); this.cdr.markForCheck(); },
+      error: (e) => { this.agregando.set({ ...a, guardando: false }); this.toast.error(e?.error?.error || 'No se pudo agregar'); },
+    });
+  }
+  editarPersona(p: CommitmentPerson) { this.edPersona = { orig: p.nombre, nombre: p.nombre, rol: p.rol || '' }; }
+  guardarPersona(c: Commitment) {
+    const e = this.edPersona; if (!e || !e.nombre.trim()) return;
+    this.api.editCommitmentPerson(c.id, e.orig, { nombre: e.nombre.trim(), rol: e.rol.trim() || null }).subscribe({
+      next: (r) => { this.edPersona = null; this.personas.set(r.people); this.historial.set(r.updates); this.load(); this.cdr.markForCheck(); },
+      error: (err) => this.toast.error(err?.error?.error || 'No se pudo guardar'),
+    });
+  }
   ordenes = ORDENES;
   orden = signal<Orden>(this.leerOrden());
   notaNueva = '';
@@ -683,13 +973,6 @@ export class CommitmentsComponent {
   }
 
   // ─── Personas del compromiso ──────────────────────────────────────────
-  agregarPersona(c: Commitment) {
-    const nombre = this.personaNueva.trim(); if (!nombre) return;
-    this.api.addCommitmentPerson(c.id, { nombre, rol: this.rolNuevo.trim() || null }).subscribe({
-      next: (r) => { this.personas.set(r.people); this.historial.set(r.updates); this.personaNueva = ''; this.rolNuevo = ''; this.cdr.markForCheck(); },
-      error: (e) => this.toast.error(e?.error?.error || 'No se pudo agregar'),
-    });
-  }
   quitarPersona(c: Commitment, nombre: string) {
     this.api.removeCommitmentPerson(c.id, nombre).subscribe({
       next: (r) => { this.personas.set(r.people); this.historial.set(r.updates); this.cdr.markForCheck(); },
@@ -707,18 +990,14 @@ export class CommitmentsComponent {
     if (!t || t === c.title) return;
     this.api.updateCommitment(c.id, { title: t }).subscribe({ next: () => { delete this.pendTitle[c.id]; this.load(); }, error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar') });
   }
-  guardarCampos(c: Commitment) {
-    const p = this.pend[c.id];
-    if (!p) return;
-    this.api.updateCommitment(c.id, p).subscribe({ next: () => { delete this.pend[c.id]; this.toast.ok('Guardado'); this.load(); this.cargarDetalle(c.id); }, error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar') });
-  }
+
   eliminar(c: Commitment) {
     if (!confirm(`¿Eliminar "${c.title}"? Se pierde su historial.`)) return;
     this.api.deleteCommitment(c.id).subscribe({ next: () => { this.toast.ok('Eliminado'); this.load(); }, error: () => this.toast.error('No se pudo eliminar') });
   }
   toggleDetalle(c: Commitment) {
     if (this.abierto() === c.id) { this.abierto.set(null); return; }
-    this.abierto.set(c.id); this.notaNueva = ''; this.personas.set([]); this.cargarDetalle(c.id);
+    this.abierto.set(c.id); this.notaNueva = ''; this.notaDe = ''; this.edPersona = null; this.agregando.set(null); this.filtroTl.set('todo'); this.personas.set([]); this.cargarDetalle(c.id);
   }
   private cargarHistorial(id: string) {
     this.api.getCommitment(id).subscribe({ next: (r) => { this.historial.set(r.updates); this.cdr.markForCheck(); }, error: () => {} });
@@ -730,7 +1009,7 @@ export class CommitmentsComponent {
   agregarNota(c: Commitment) {
     const t = this.notaNueva.trim();
     if (!t) return;
-    this.api.addCommitmentNote(c.id, t).subscribe({ next: (r) => { this.historial.set(r.updates); this.notaNueva = ''; this.cdr.markForCheck(); }, error: () => this.toast.error('No se pudo guardar la nota') });
+    this.api.addCommitmentNote(c.id, t, this.notaDe || null).subscribe({ next: (r) => { this.historial.set(r.updates); this.notaNueva = ''; this.cdr.markForCheck(); this.load(); }, error: () => this.toast.error('No se pudo guardar la nota') });
   }
 
   // ─── Nuevo ────────────────────────────────────────────────────────────

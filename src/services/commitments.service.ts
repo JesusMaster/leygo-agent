@@ -79,6 +79,23 @@ function uuidDe(id: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+/** "Katia Li y Cristian Valdivia" / "Katia, Cristian" → ['Katia Li', 'Cristian Valdivia']. */
+export function responsablesDe(owner?: string | null): string[] {
+  return String(owner || '').split(/\s*(?:,|;|\/|&|\s+y\s+|\s+e\s+(?=[ií]))\s*/i).map((x) => x.trim()).filter(Boolean);
+}
+
+/** Lista → "Katia Li y Cristian Valdivia" / "A, B y C". */
+export function unirNombres(nombres: string[]): string {
+  const n = nombres.map((x) => x.trim()).filter(Boolean);
+  return n.length <= 1 ? (n[0] || '') : `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}`;
+}
+
+/** Lo debe Jesús si él figura entre los responsables (o no hay ninguno). */
+export function esDeJesus(owner?: string | null): boolean {
+  const r = responsablesDe(owner);
+  return !r.length || r.some((x) => esJesus(x));
+}
+
 export function esJesus(nombre?: string | null): boolean {
   return !nombre || NOMBRES_JESUS.test(nombre.trim());
 }
@@ -255,7 +272,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
       title: d.title.trim(),
       detail: d.detail?.trim() || null,
       owner,
-      mine: esJesus(owner) ? 1 : 0,
+      mine: esDeJesus(owner) ? 1 : 0,
       counterpart: d.counterpart?.trim() || null,
       due_date: d.due || null,
       proposed_due: d.due ? null : proponerFecha(priority),
@@ -311,7 +328,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     const c = sqliteReminderService.getCommitment(id);
     if (!c) return null;
     const patch: Partial<Commitment> = { ...cambios };
-    if (cambios.owner !== undefined) patch.mine = esJesus(cambios.owner) ? 1 : 0;
+    if (cambios.owner !== undefined) patch.mine = esDeJesus(cambios.owner) ? 1 : 0;
     if (cambios.status === 'hecho') patch.completed_at = Date.now();
     if (cambios.status && cambios.status !== 'hecho') patch.completed_at = null;
     if (cambios.due_date) patch.proposed_due = null;
@@ -329,9 +346,11 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     return n;
   }
 
-  nota(id: string, texto: string, by = 'jesus'): boolean {
+  /** Nota de Jesús, o respuesta de otra persona (`de`): queda registrado quién dijo qué. */
+  nota(id: string, texto: string, by = 'jesus', de?: string | null): boolean {
     if (!sqliteReminderService.getCommitment(id)) return false;
-    sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: 'nota', text: texto.trim(), by });
+    const autor = de?.trim();
+    sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: autor ? 'respuesta' : 'nota', text: texto.trim(), by: autor || by });
     sqliteReminderService.updateCommitment(id, {});
     return true;
   }
@@ -373,10 +392,12 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
       if (!nombre || esJesus(nombre) || out.some((p) => clave(p.nombre) === clave(nombre))) return;
       const guardado = inv.find((p) => clave(p.nombre) === clave(nombre));
       let delivery = guardado?.delivery || [];
-      if (!delivery.length && relacion === 'responsable' && c.reminder_delivery) { try { delivery = JSON.parse(c.reminder_delivery); } catch {} }
+      // El canal del reminder vale para el responsable solo si es uno (con varios, cada uno tiene el suyo).
+      if (!delivery.length && relacion === 'responsable' && c.reminder_delivery && responsablesDe(c.owner).filter((n) => !esJesus(n)).length === 1) { try { delivery = JSON.parse(c.reminder_delivery); } catch {} }
       out.push({ nombre, rol: guardado?.rol || null, delivery, relacion });
     };
-    add(c.mine ? null : c.owner, 'responsable');
+    const resp = responsablesDe(c.owner).filter((n) => !esJesus(n));
+    for (const r of resp) add(r, 'responsable');
     add(c.counterpart, 'contraparte');
     for (const p of inv) if (!out.some((x) => clave(x.nombre) === clave(p.nombre))) out.push({ ...p, relacion: 'involucrado' });
     return out;
@@ -395,6 +416,26 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     return n;
   }
 
+  /** Corrige el nombre o el rol de una persona (también si es responsable o contraparte). */
+  editarPersona(id: string, nombre: string, cambios: { nombre?: string; rol?: string | null }, by = 'jesus'): Commitment | null {
+    const c = sqliteReminderService.getCommitment(id);
+    if (!c) return null;
+    const nuevo = cambios.nombre?.trim() || nombre;
+    const igual = (x?: string | null) => !!x && normalizar(x) === normalizar(nombre);
+    const lista = this.participantes(c);
+    const i = lista.findIndex((x) => igual(x.nombre));
+    if (i >= 0) lista[i] = { ...lista[i], nombre: nuevo, ...(cambios.rol !== undefined ? { rol: cambios.rol?.trim() || null } : {}) };
+    else lista.push({ nombre: nuevo, rol: cambios.rol?.trim() || null, delivery: [] });
+    const patch: Partial<Commitment> = { participants: JSON.stringify(lista) };
+    const resp = responsablesDe(c.owner);
+    if (resp.some(igual)) patch.owner = unirNombres(resp.map((r) => (igual(r) ? nuevo : r)));
+    if (igual(c.counterpart)) patch.counterpart = nuevo;
+    const n = sqliteReminderService.updateCommitment(id, patch);
+    if (nuevo !== nombre) sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: 'edicion', text: `${nombre} → ${nuevo}`, by });
+    if (n) this.indexar(n).catch(() => {});
+    return n;
+  }
+
   quitarParticipante(id: string, nombre: string, by = 'jesus'): Commitment | null {
     const c = sqliteReminderService.getCommitment(id);
     if (!c) return null;
@@ -408,7 +449,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
   private recordarCanal(c: Commitment, nombre: string, destinos: Destino[]): void {
     const lista = this.participantes(c);
     const i = lista.findIndex((x) => normalizar(x.nombre) === normalizar(nombre));
-    const principal = [c.mine ? null : c.owner, c.counterpart].some((x) => x && normalizar(x) === normalizar(nombre));
+    const principal = [...responsablesDe(c.owner), c.counterpart].some((x) => x && normalizar(x) === normalizar(nombre));
     if (i >= 0) lista[i] = { ...lista[i], delivery: destinos };
     else lista.push({ nombre, rol: null, delivery: destinos });
     sqliteReminderService.updateCommitment(c.id, { participants: JSON.stringify(lista) });
@@ -419,8 +460,8 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
   /** Contexto del compromiso para el modelo: datos + historial cronológico (sin ruido de sistema). */
   private contexto(c: Commitment, enfoque: EnfoqueMensaje = 'reciente'): string {
     const tz = process.env.SCHEDULER_TZ || 'America/Santiago';
-    const linea = (u: { at: number; kind: string; text: string }) =>
-      `- ${new Date(u.at).toLocaleDateString('es-CL', { timeZone: tz, day: '2-digit', month: '2-digit', ...(enfoque === 'general' ? { year: '2-digit' } : {}) })} [${u.kind}] ${u.text.slice(0, 500)}`;
+    const linea = (u: { at: number; kind: string; text: string; by: string }) =>
+      `- ${new Date(u.at).toLocaleDateString('es-CL', { timeZone: tz, day: '2-digit', month: '2-digit', ...(enfoque === 'general' ? { year: '2-digit' } : {}) })} [${u.kind === 'respuesta' ? `respuesta de ${u.by}` : u.kind === 'nota' ? 'nota interna de Jesús' : u.kind}] ${u.text.slice(0, 500)}`;
     const hist = sqliteReminderService.listCommitmentUpdates(c.id, enfoque === 'general' ? 120 : 40).reverse()
       .filter((u) => !['recordatorio', 'mencion'].includes(u.kind));
     const inv = this.participantes(c).map((p) => `${p.nombre}${p.rol ? ` (${p.rol})` : ''}`);
@@ -443,7 +484,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     return [
       `Compromiso: "${c.title}"`,
       c.detail ? `Contexto: ${c.detail}` : '',
-      `Responsable: ${c.mine ? 'Jesús' : c.owner}${c.counterpart && !esJesus(c.counterpart) ? ` · Con/para: ${c.counterpart}` : ''}`,
+      `Responsable(s): ${c.mine ? 'Jesús' : unirNombres(responsablesDe(c.owner))}${c.counterpart && !esJesus(c.counterpart) ? ` · Con/para: ${c.counterpart}` : ''}`,
       inv.length ? `Otros involucrados: ${inv.join(', ')}` : '',
       `Estado: ${c.status} · Fecha comprometida: ${c.due_date || c.proposed_due || 'sin fecha'} · Creado: ${new Date(c.created_at).toLocaleDateString('en-CA', { timeZone: tz })} · Hoy: ${hoyIso()}`,
       bloqueHist,
@@ -481,7 +522,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
       hecho: 'avisar que el compromiso quedó listo y cerrar el tema',
       cancelado: 'avisar que el compromiso queda sin efecto por ahora',
     };
-    const reglasComunes = `- Las notas son apuntes internos de Jesús: úsalas para entender la situación, pero no copies frases textuales, no reveles opiniones internas ni lo que otra persona dijo en privado; resume solo lo que el destinatario necesita saber.
+    const reglasComunes = `- Las notas internas son apuntes de Jesús: úsalas para entender la situación, pero no copies frases textuales ni reveles opiniones internas. Las "respuesta de X" son lo que dijo esa persona: puedes retomarlas con el propio X, pero no le cuentes a un tercero lo que X dijo en privado; resume solo lo que el destinatario necesita saber.
 - No inventes fechas, cifras ni acuerdos que no estén en el contexto.
 - Responde SOLO con el texto, sin comillas ni explicaciones.`;
     const alcance = enfoque === 'general'
@@ -580,18 +621,24 @@ ${original}`;
     const mananaIso = manana.toLocaleDateString('en-CA', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago' });
     const inicioHoy = new Date(`${hoy}T00:00:00`).getTime();
     const candidatos = sqliteReminderService.listCommitments({ status: ['pendiente', 'en_curso'], limit: 500 })
-      .filter((c) => c.reminder_auto && c.reminder_delivery && c.due_date && (c.due_date <= hoy || c.due_date === mananaIso) && (!c.last_reminded_at || c.last_reminded_at < inicioHoy));
+      .filter((c) => c.reminder_auto && c.due_date && (c.due_date <= hoy || c.due_date === mananaIso) && (!c.last_reminded_at || c.last_reminded_at < inicioHoy));
     const lineas: string[] = [];
     for (const c of candidatos) {
-      try {
-        const destinos = JSON.parse(c.reminder_delivery!);
-        const mensaje = await this.redactar(c.id, { para: c.owner, tipo: 'recordatorio' });
-        const r = await this.notificar(c.id, destinos, mensaje, 'auto', c.owner);
-        sqliteReminderService.updateCommitment(c.id, { last_reminded_at: Date.now() });
-        lineas.push(`• ${c.owner}: "${c.title}" (${c.due_date}) → ${r.enviados.join(' + ')}${r.fallos.length ? ` · fallos: ${r.fallos.join(' · ')}` : ''}`);
-      } catch (err: any) {
-        lineas.push(`• ${c.owner}: "${c.title}" → no se pudo: ${err?.message}`);
+      // Un reminder por responsable, por su propio canal; si ninguno tiene canal, uno solo al canal del reminder.
+      const responsables = this.personas(c).filter((p) => p.relacion === 'responsable');
+      let envios = responsables.filter((p) => p.delivery.length).map((p) => ({ para: p.nombre, destinos: p.delivery }));
+      if (!envios.length && c.reminder_delivery) { try { envios = [{ para: c.owner, destinos: JSON.parse(c.reminder_delivery) }]; } catch { envios = []; } }
+      if (!envios.length) { lineas.push(`• ${c.owner}: "${c.title}" → sin canal configurado`); continue; }
+      for (const e of envios) {
+        try {
+          const mensaje = await this.redactar(c.id, { para: e.para, tipo: 'recordatorio' });
+          const r = await this.notificar(c.id, e.destinos, mensaje, 'auto', e.para);
+          lineas.push(`• ${e.para}: "${c.title}" (${c.due_date}) → ${r.enviados.join(' + ')}${r.fallos.length ? ` · fallos: ${r.fallos.join(' · ')}` : ''}`);
+        } catch (err: any) {
+          lineas.push(`• ${e.para}: "${c.title}" → no se pudo: ${err?.message}`);
+        }
       }
+      sqliteReminderService.updateCommitment(c.id, { last_reminded_at: Date.now() });
     }
     return lineas.length ? `🔔 Friendly reminders enviados:\n${lineas.join('\n')}` : '';
   }

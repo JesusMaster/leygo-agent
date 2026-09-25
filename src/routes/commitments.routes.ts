@@ -117,6 +117,13 @@ export default function createCommitmentsRoutes() {
     res.json({ item: c, people: commitmentsService.personas(c), updates: commitmentsService.historial(req.params.id, 100) });
   });
 
+  app.put('/api/commitments/:id/people/:nombre', (req, res) => {
+    const b = req.body || {};
+    const c = commitmentsService.editarPersona(req.params.id, req.params.nombre, { nombre: b.nombre, rol: b.rol }, 'jesus');
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    res.json({ item: c, people: commitmentsService.personas(c), updates: commitmentsService.historial(req.params.id, 100) });
+  });
+
   app.delete('/api/commitments/:id/people/:nombre', (req, res) => {
     const c = commitmentsService.quitarParticipante(req.params.id, req.params.nombre, 'jesus');
     if (!c) return res.status(404).json({ error: 'No existe' });
@@ -150,7 +157,7 @@ export default function createCommitmentsRoutes() {
   app.post('/api/commitments/:id/notes', (req, res) => {
     const text = String(req.body?.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Falta el texto' });
-    if (!commitmentsService.nota(req.params.id, text, 'jesus')) return res.status(404).json({ error: 'No existe' });
+    if (!commitmentsService.nota(req.params.id, text, 'jesus', req.body?.de || null)) return res.status(404).json({ error: 'No existe' });
     res.json({ updates: commitmentsService.historial(req.params.id, 100) });
   });
 
