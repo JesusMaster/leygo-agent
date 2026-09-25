@@ -263,15 +263,15 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
               <span class="msg-head">
                 Mensaje
                 <span class="spacer"></span>
-                <button class="lnk" [disabled]="z.redactando || !z.para.trim()" (click)="redactar()" title="Redacta de nuevo con todo el historial del compromiso">
-                  <i class="ph" [class.ph-sparkle]="!z.redactando" [class.ph-spinner]="z.redactando"></i> {{ z.redactando ? 'Redactando con el contexto…' : 'Redactar con IA' }}
+                <button class="lnk" [disabled]="z.redactando || !z.para.trim()" (click)="redactar()" title="Redacta el mensaje con IA usando todo el historial del compromiso (reemplaza lo escrito)">
+                  <i class="ph" [class.ph-sparkle]="!z.redactando" [class.ph-spinner]="z.redactando"></i> {{ z.redactando ? 'Generando con el contexto…' : (z.message.trim() ? 'Generar de nuevo' : 'Generar texto') }}
                 </button>
                 <button class="lnk" [disabled]="z.corrigiendo || !z.message.trim()" (click)="corregir()" title="Ortografía, tildes y puntuación">
                   <i class="ph" [class.ph-spell-check]="!z.corrigiendo" [class.ph-spinner]="z.corrigiendo"></i> Corregir
                 </button>
               </span>
               <textarea rows="5" [ngModel]="z.message" (ngModelChange)="patch({ message: $event, corregido: null })" [disabled]="z.redactando"></textarea>
-              <small class="hint">Se redacta con el historial (notas, avisos y respuestas). Si lo editas, se corrige la ortografía antes de enviar.</small>
+              <small class="hint">Escríbelo tú o usa "Generar texto" (usa el historial: notas, avisos y respuestas). Lo que escribas o edites se revisa con el corrector antes de enviar.</small>
             </label>
 
             @if (z.corregido) {
@@ -548,17 +548,17 @@ export class CommitmentsComponent {
   abrirCierre(c: Commitment, status: CommitmentStatus | null) { this.abrirEnvio(c, status ? 'aviso' : 'mensaje', status); }
 
   private abrirEnvio(c: Commitment, kind: Envio['kind'], status: CommitmentStatus | null, para?: string) {
-    this.cierre.set({ c, kind, status, personas: [], para: para || '', nuevo: false, rol: '', message: '', generado: '', redactando: true, delivery: [], auto: !!c.reminder_auto, corregido: null, corrigiendo: false });
+    this.cierre.set({ c, kind, status, personas: [], para: para || '', nuevo: false, rol: '', message: '', generado: '', redactando: false, delivery: [], auto: !!c.reminder_auto, corregido: null, corrigiendo: false });
     this.api.getCommitmentPeople(c.id).subscribe({
       next: (r) => {
         const z = this.cierre(); if (!z || z.c.id !== c.id) return;
         const destino = para || (kind === 'recordatorio' ? c.owner : status ? (c.counterpart || r.people[0]?.nombre) : r.people[0]?.nombre) || '';
         const p = r.people.find((x) => x.nombre.toLowerCase() === destino.toLowerCase());
-        if (!p && !r.people.length) { this.cierre.set({ ...z, personas: r.people, nuevo: true, para: '', redactando: false }); return; }
+        if (!p && !r.people.length) { this.cierre.set({ ...z, personas: r.people, nuevo: true, para: '' }); return; }
+        // El texto NO se genera solo: se escribe a mano o con "Generar texto".
         this.cierre.set({ ...z, personas: r.people, para: p?.nombre || destino, delivery: p?.delivery || [] });
-        this.redactar();
       },
-      error: () => this.patch({ redactando: false }),
+      error: () => {},
     });
   }
 
@@ -567,7 +567,6 @@ export class CommitmentsComponent {
     if (nombre === '__otra') { this.cierre.set({ ...z, nuevo: true, para: '', rol: '', message: '', generado: '', delivery: [], corregido: null }); return; }
     const p = z.personas.find((x) => x.nombre === nombre);
     this.cierre.set({ ...z, nuevo: false, para: nombre, delivery: p?.delivery || [], corregido: null });
-    this.redactar();
   }
 
   private tipoPara(z: Envio): CommitmentMsgTipo | undefined {
@@ -579,6 +578,7 @@ export class CommitmentsComponent {
 
   redactar() {
     const z = this.cierre(); if (!z || !z.para.trim()) return;
+    if (z.message.trim() && z.message.trim() !== z.generado.trim() && !confirm('¿Reemplazar lo que escribiste por un texto generado?')) return;
     this.patch({ redactando: true, corregido: null });
     this.api.draftCommitmentMessage(z.c.id, { para: z.para.trim(), tipo: this.tipoPara(z), status: z.status }).subscribe({
       next: (r) => { const a = this.cierre(); if (a && a.c.id === z.c.id) this.cierre.set({ ...a, message: r.message, generado: r.message, redactando: false }); },
