@@ -99,9 +99,11 @@ export class ScheduledTasksService {
   // ─── CRUD ────────────────────────────────────────────────────────────────
 
   public list(): Array<ScheduledTask & { descripcion: string; horario: string; ultima: { status: string; started_at: number; duration_ms: number; trigger: string } | null; integrada?: { key: string; titulo: string; descripcion: string } }> {
-    return sqliteReminderService.listScheduledTasks().map((t) => {
+    return sqliteReminderService.listScheduledTasks().map((t0) => {
+      let t = t0;
       const def = this.integradaDe(t);
       const [u] = sqliteReminderService.listScheduledTaskRuns(t.id, 1);
+      if (t.status === 'active' && t.kind !== 'once' && t.next_run_at && t.next_run_at < Date.now() - 60_000) t = { ...t, next_run_at: this.proximaEjecucion(t) };
       return {
         ...t, descripcion: this.describir(t), horario: this.describirHorario(t),
         ultima: u ? { status: u.status, started_at: u.started_at, duration_ms: u.duration_ms, trigger: u.trigger } : null,
@@ -391,6 +393,9 @@ export class ScheduledTasksService {
       p.cronTask = cron.schedule(expr, () => void this.ejecutar(t, 'scheduled'), { timezone: this.timezone });
     }
     this.programadas.set(t.id, p);
+    // Al (re)programar, la próxima ejecución guardada puede haber quedado en el pasado
+    // (servicio apagado, base copiada de otra máquina): se recalcula.
+    if (t.kind !== 'once') sqliteReminderService.updateScheduledTask(t.id, { next_run_at: this.proximaEjecucion(t) });
   }
 
   private desprogramar(id: string): void {

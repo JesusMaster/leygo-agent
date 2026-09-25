@@ -4,7 +4,6 @@ import { ApiService, TareaIntegrada, ScheduledTask, TaskRun, TaskInput, TaskChan
 import { ModelPickerComponent } from '../model-picker/model-picker';
 import { DeliveryPickerComponent } from './delivery-picker';
 import { ToastService } from '../../services/toast.service';
-import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
 
 type Pestana = 'mias' | 'sistema' | 'finalizadas';
@@ -41,7 +40,7 @@ const EJEMPLOS = [
  */
 @Component({
   selector: 'app-tasks',
-  imports: [FormsModule, FriendlyDatePipe, MarkdownPipe, DeliveryPickerComponent, ModelPickerComponent],
+  imports: [FormsModule, MarkdownPipe, DeliveryPickerComponent, ModelPickerComponent],
   host: { '(document:click)': 'menu.set(null)' },
   template: `
     <div class="page">
@@ -128,19 +127,19 @@ const EJEMPLOS = [
                 <div class="t-next">
                   @if (t.status === 'active' && t.next_run_at) { <small>Próxima</small><b [title]="fecha(t.next_run_at)">{{ relativo(t.next_run_at) }}</b> }
                   @else if (t.status === 'paused') { <span class="badge warn">Pausada</span> }
-                  @else if (t.status === 'done') { <small>Ejecutada</small><b>{{ t.last_run_at ? (t.last_run_at | friendlyDate) : '—' }}</b> }
+                  @else if (t.status === 'done') { <small>Ejecutada</small><b>{{ t.last_run_at ? hace(t.last_run_at) : '—' }}</b> }
                 </div>
 
                 <div class="t-last">
                   @if (t.ultima; as u) {
                     <span class="ult" [class.err]="u.status === 'error'" [title]="(u.status === 'success' ? 'Última ejecución OK' : 'Última ejecución con error') + ' · ' + (u.trigger === 'manual' ? 'manual' : 'programada') + ' · ' + duracion(u.duration_ms)">
-                      <i class="ph" [class.ph-check-circle]="u.status === 'success'" [class.ph-warning-circle]="u.status === 'error'"></i> {{ u.started_at | friendlyDate }}
+                      <i class="ph" [class.ph-check-circle]="u.status === 'success'" [class.ph-warning-circle]="u.status === 'error'"></i> {{ hace(u.started_at) }}
                     </span>
                   } @else { <span class="ult nunca">sin ejecutar</span> }
                 </div>
 
                 <div class="t-acts" (click)="$event.stopPropagation()">
-                  <button class="ta run" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
+                  <button class="ta exec" title="Ejecutar ahora" [disabled]="ejecutando() === t.id" (click)="ejecutar(t)">
                     @if (ejecutando() === t.id) { <span class="spinner"></span> } @else { <i class="ph ph-play"></i> }
                   </button>
                   <div class="menu-wrap">
@@ -179,7 +178,7 @@ const EJEMPLOS = [
                         <div class="run" [class.err]="r.status === 'error'" [class.open]="abierto(r)">
                           <button class="run-head" (click)="toggleVer(r)">
                             <i class="ph" [class.ph-check-circle]="r.status === 'success'" [class.ph-warning-circle]="r.status === 'error'"></i>
-                            <span>{{ r.started_at | friendlyDate }}</span>
+                            <span [title]="fecha(r.started_at)">{{ hace(r.started_at) }}</span>
                             <small>{{ r.trigger === 'manual' ? 'manual' : 'programada' }} · {{ duracion(r.duration_ms) }}</small>
                             <span class="spacer"></span>
                             <span class="prev">{{ abierto(r) ? '' : preview(r.result) }}</span>
@@ -315,7 +314,8 @@ const EJEMPLOS = [
     .ag-item span { overflow: hidden; text-overflow: ellipsis; }
     .ag-item:hover { border-color: var(--accent-primary); }
     .barra-top { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-light); }
-    .tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; }
+    .tabs { display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; flex: 1; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
     .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); font-size: 14px; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
     .tab:hover { color: var(--text-main); }
     .tab.on { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
@@ -330,7 +330,7 @@ const EJEMPLOS = [
     .t.flash { background: rgba(129,140,248,.14); }
     .t.paused .t-tit, .t.paused .t-ico { opacity: .55; }
     .t.done { opacity: .75; }
-    .t-row { display: grid; grid-template-columns: 40px 34px minmax(0, 1fr) 118px 130px auto; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
+    .t-row { display: grid; grid-template-columns: 40px 34px minmax(0, 1fr) 120px 120px auto; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
     .t-row:hover { background: rgba(129,140,248,.05); }
     .sw { position: relative; width: 36px; height: 20px; display: inline-block; }
     .sw input { opacity: 0; width: 0; height: 0; }
@@ -350,14 +350,15 @@ const EJEMPLOS = [
     .chip-m { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(56,189,248,.14); color: #7dd3fc; }
     .t-next { display: flex; flex-direction: column; font-size: 13px; }
     .t-next small, .lbl { font-size: 11px; color: var(--text-dim); }
-    .t-last { font-size: 12.5px; }
+    .t-last { font-size: 12.5px; white-space: nowrap; }
+    .t-next b { white-space: nowrap; }
     .ult { display: inline-flex; gap: 5px; align-items: center; color: var(--ok); }
     .ult.err { color: var(--danger); }
     .ult.nunca { color: var(--text-dim); }
     .t-acts { display: flex; gap: 4px; align-items: center; }
     .ta { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-main); color: var(--text-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
     .ta:hover, .ta.on { border-color: var(--accent-primary); color: var(--accent-primary); }
-    .ta.run { color: var(--ok); } .ta.run:hover { border-color: var(--ok); }
+    .ta.exec { color: var(--ok); } .ta.exec:hover { border-color: var(--ok); }
     .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(16,185,129,.25); border-top-color: var(--ok); animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .menu-wrap { position: relative; }
@@ -481,7 +482,8 @@ export class TasksComponent {
   /** Próximas ejecuciones de todas las tareas activas (24 h). */
   agenda = computed(() => {
     const limite = Date.now() + 24 * 3600_000;
-    return this.items().filter((t) => t.status === 'active' && t.next_run_at && t.next_run_at <= limite)
+    const ahora = Date.now() - 60_000;
+    return this.items().filter((t) => t.status === 'active' && t.next_run_at && t.next_run_at >= ahora && t.next_run_at <= limite)
       .map((t) => ({ t, at: t.next_run_at! })).sort((a, b) => a.at - b.at).slice(0, 8);
   });
   integradasDisponibles = computed(() => this.integradas().filter((i) => !this.items().some((t) => t.autonomous === 2 && t.message === i.key)));
@@ -509,7 +511,20 @@ export class TasksComponent {
   descripcionIntegrada(key: string) { return this.integradas().find((i) => i.key === key)?.descripcion || ''; }
   etiquetaCanal(c: TaskChannel) { return ({ telegram: 'Telegram', chat: 'Google Chat', buzz: 'Buzz', email: 'Email', a2a: 'Agente A2A' } as Record<string, string>)[c || 'telegram']; }
   iconoCanal(c: TaskChannel) { return ({ telegram: 'ph-telegram-logo', chat: 'ph-chats-circle', buzz: 'ph-broadcast', email: 'ph-envelope-simple', a2a: 'ph-robot' } as Record<string, string>)[c || 'telegram']; }
-  fecha(ms: number) { return new Date(ms).toLocaleString('es-CL', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  fecha(ms: number) { return new Date(ms).toLocaleString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); }
+  private hora(d: Date) { return d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); }
+  private diasDesdeHoy(d: Date) { return Math.round((new Date(d.toDateString()).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000); }
+  /** Pasado amigable: "recién", "hace 12 min", "hoy 09:45", "ayer 21:00", "mar 09:45", "23 sept". */
+  hace(ms: number) {
+    const diff = Date.now() - ms, d = new Date(ms);
+    if (diff < 60_000) return 'recién';
+    if (diff < 60 * 60_000) return `hace ${Math.round(diff / 60_000)} min`;
+    const dias = this.diasDesdeHoy(d);
+    if (dias === 0) return `hoy ${this.hora(d)}`;
+    if (dias === -1) return `ayer ${this.hora(d)}`;
+    if (dias > -7) return `${d.toLocaleDateString('es-CL', { weekday: 'short' })} ${this.hora(d)}`;
+    return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+  }
   duracion(ms: number) { return ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1).replace('.', ',')} s` : `${Math.round(ms / 60_000)} min`; }
   preview(r: string) { return (r || '').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').slice(0, 80); }
   /** "en 25 min", "hoy 18:00", "mañana 09:00", "lun 09:00", "12 oct 09:00". */
@@ -520,9 +535,9 @@ export class TasksComponent {
     return this.cuandoCorto(ms);
   }
   cuandoCorto(ms: number) {
-    const d = new Date(ms), hoy = new Date();
-    const hora = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-    const dias = Math.round((new Date(d.toDateString()).getTime() - new Date(hoy.toDateString()).getTime()) / 86400000);
+    const d = new Date(ms);
+    const hora = this.hora(d);
+    const dias = this.diasDesdeHoy(d);
     if (dias === 0) return `hoy ${hora}`;
     if (dias === 1) return `mañana ${hora}`;
     if (dias < 7) return `${d.toLocaleDateString('es-CL', { weekday: 'short' })} ${hora}`;
