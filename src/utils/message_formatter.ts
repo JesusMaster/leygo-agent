@@ -94,7 +94,8 @@ export class MessageFormatter {
     text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
 
     // 8. Negrita: **texto** o __texto__
-    text = text.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    // (admite *cursiva* adentro: "**¿Qué pasa con la (*stall speed*)?**"; no cruza párrafos)
+    text = text.replace(/\*\*(?=\S)((?:(?!\n\n)[\s\S])+?)(?<=\S)\*\*/g, '<b>$1</b>');
     // Para __ requerimos delimitación de palabra para no tocar variables snake_case
     text = text.replace(/(?<=^|[\s(])__([^_]+)__(?=$|[\s).,;:!?])/g, '<b>$1</b>');
 

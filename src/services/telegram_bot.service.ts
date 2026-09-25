@@ -2,7 +2,7 @@ import axios from 'axios';
 import { customAgentsService } from '../agents/custom/custom_agents.service.js';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { Runner } from '@google/adk';
+import { Runner, createEvent } from '@google/adk';
 import { RedisSessionService } from './redis_session.service.js';
 import { telegramAuthService } from './telegram_auth.service.js';
 import { beginUsageScope, flushUsageScope, anotarPasosDeEvento } from '../utils/usage_collector.js';
@@ -164,6 +164,33 @@ export class TelegramBotService {
     } else estado.last = ahora;
     sqliteReminderService.setConfig(clave, JSON.stringify(estado));
     return estado.id;
+  }
+
+  /**
+   * Deja en la conversación de Telegram un mensaje que Yisus mandó por su cuenta (tarea
+   * programada, recordatorio). Sin esto, si Jesús responde ("b", "listo"), el agente no
+   * sabe a qué: el mensaje se generó en otra sesión.
+   */
+  public async registrarEnConversacion(texto: string, origen: string, chatId: string | number = this.chatId): Promise<void> {
+    if (!this.sessionService || !chatId || !texto.trim()) return;
+    try {
+      const appName = process.env.ADK_APP_NAME || 'yisus';
+      const userId = 'jesus';
+      const sessionId = this.sessionIdPara(chatId);
+      let session = await this.sessionService.getSession({ appName, userId, sessionId });
+      if (!session) session = await this.sessionService.createSession({ appName, userId, sessionId });
+      const invocationId = `proactivo-${Date.now().toString(36)}`;
+      await this.sessionService.appendEvent({ session, event: createEvent({
+        invocationId, author: 'user',
+        content: { role: 'user', parts: [{ text: `[${origen}: mensaje que Yisus envió por su cuenta, no lo escribió Jesús. Si Jesús responde a continuación, está respondiendo a esto.]` }] },
+      }) });
+      await this.sessionService.appendEvent({ session, event: createEvent({
+        invocationId, author: 'Coordinator',
+        content: { role: 'model', parts: [{ text: texto }] },
+      }) });
+    } catch (err: any) {
+      console.warn(`⚠️ [TelegramBot] No se pudo registrar el mensaje proactivo en la conversación: ${err?.message}`);
+    }
   }
 
   private nuevaSesion(chatId: string | number): void {

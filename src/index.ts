@@ -143,7 +143,7 @@ server.start().then(async () => {
         const session = await sessionService.createSession({ appName, userId, sessionId });
 
         const hoy = new Date().toLocaleString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago', dateStyle: 'full', timeStyle: 'short' });
-        const prompt = `[Tarea programada — ${hoy}] ${instruccion}\n\nEjecuta la tarea ahora y responde con el resultado, sin pedir confirmación ni hacer preguntas.`;
+        const prompt = `[Tarea programada — ${hoy}] ${instruccion}\n\nEjecuta la tarea ahora y responde con el resultado, sin pedir confirmación. No puedes esperar respuestas dentro de esta ejecución: si la tarea consiste en hacerle una pregunta a Jesús (quiz, práctica, encuesta), déjala planteada en tu respuesta; lo que conteste llegará después por la conversación normal de Telegram, donde este mensaje queda como contexto.`;
 
         beginUsageScope('system', sessionId, `[Tarea] ${instruccion.slice(0, 80)}`);
         let texto = '';

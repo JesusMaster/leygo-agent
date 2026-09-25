@@ -322,6 +322,8 @@ export class ScheduledTasksService {
       case 'telegram':
       default:
         await telegramBotService.sendDirectMessage(autonoma ? formatear(texto) : `⏰ ${escapar(texto)}`, { parseMode: 'HTML' });
+        // Para que una respuesta de Jesús en Telegram tenga el contexto de este mensaje.
+        await telegramBotService.registrarEnConversacion(autonoma ? texto : `⏰ ${texto}`, autonoma ? 'Resultado de una tarea programada' : 'Recordatorio programado');
     }
   }
 
