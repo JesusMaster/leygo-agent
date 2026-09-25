@@ -45,6 +45,10 @@ export interface Persona extends Participante {
 }
 
 export type TipoMensaje = 'recordatorio' | 'seguimiento' | 'aviso' | 'hecho' | 'cancelado';
+/** reciente = lo último que pasó; general = la historia completa. */
+export type EnfoqueMensaje = 'reciente' | 'general';
+/** mensaje = chat cercano; ejecutivo = resumen para un C-level (estado, avance, riesgos, próximos pasos). */
+export type FormatoMensaje = 'mensaje' | 'ejecutivo';
 
 const COLECCION = 'commitments';
 const NOMBRES_JESUS = /^(jes[uú]s|yisus|jleiva|yo|jes[uú]s leiva|jesus)$/i;
@@ -413,18 +417,36 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
 
   // ─── Redacción con IA ─────────────────────────────────────────────────
   /** Contexto del compromiso para el modelo: datos + historial cronológico (sin ruido de sistema). */
-  private contexto(c: Commitment): string {
-    const hist = sqliteReminderService.listCommitmentUpdates(c.id, 40).reverse()
-      .filter((u) => !['recordatorio', 'mencion'].includes(u.kind))
-      .map((u) => `- ${new Date(u.at).toLocaleDateString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago', day: '2-digit', month: '2-digit' })} [${u.kind}] ${u.text.slice(0, 500)}`);
+  private contexto(c: Commitment, enfoque: EnfoqueMensaje = 'reciente'): string {
+    const tz = process.env.SCHEDULER_TZ || 'America/Santiago';
+    const linea = (u: { at: number; kind: string; text: string }) =>
+      `- ${new Date(u.at).toLocaleDateString('es-CL', { timeZone: tz, day: '2-digit', month: '2-digit', ...(enfoque === 'general' ? { year: '2-digit' } : {}) })} [${u.kind}] ${u.text.slice(0, 500)}`;
+    const hist = sqliteReminderService.listCommitmentUpdates(c.id, enfoque === 'general' ? 120 : 40).reverse()
+      .filter((u) => !['recordatorio', 'mencion'].includes(u.kind));
     const inv = this.participantes(c).map((p) => `${p.nombre}${p.rol ? ` (${p.rol})` : ''}`);
+    let bloqueHist: string;
+    if (!hist.length) bloqueHist = 'Historial: (vacío)';
+    else if (enfoque === 'general') bloqueHist = `Historial completo (más antiguo primero):\n${hist.map(linea).join('\n')}`;
+    else {
+      // Reciente: lo de los últimos 7 días (mínimo los 6 últimos movimientos, máximo 12), con lo anterior como antecedente.
+      const hace7 = Date.now() - 7 * 86400000;
+      let corte = hist.findIndex((u) => u.at >= hace7);
+      if (corte < 0) corte = hist.length;
+      corte = Math.min(corte, Math.max(0, hist.length - 6));
+      corte = Math.max(corte, hist.length - 12);
+      const antes = hist.slice(0, corte), recientes = hist.slice(corte);
+      bloqueHist = [
+        antes.length ? `Antecedentes (solo para entender, no los repitas):\n${antes.slice(-15).map(linea).join('\n')}` : '',
+        `LO RECIENTE (el mensaje debe centrarse en esto):\n${recientes.map(linea).join('\n')}`,
+      ].filter(Boolean).join('\n\n');
+    }
     return [
       `Compromiso: "${c.title}"`,
       c.detail ? `Contexto: ${c.detail}` : '',
       `Responsable: ${c.mine ? 'Jesús' : c.owner}${c.counterpart && !esJesus(c.counterpart) ? ` · Con/para: ${c.counterpart}` : ''}`,
       inv.length ? `Otros involucrados: ${inv.join(', ')}` : '',
-      `Estado: ${c.status} · Fecha comprometida: ${c.due_date || c.proposed_due || 'sin fecha'} · Hoy: ${hoyIso()}`,
-      hist.length ? `Historial (más antiguo primero):\n${hist.join('\n')}` : 'Historial: (vacío)',
+      `Estado: ${c.status} · Fecha comprometida: ${c.due_date || c.proposed_due || 'sin fecha'} · Creado: ${new Date(c.created_at).toLocaleDateString('en-CA', { timeZone: tz })} · Hoy: ${hoyIso()}`,
+      bloqueHist,
     ].filter(Boolean).join('\n');
   }
 
@@ -432,7 +454,9 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
    * Redacta el mensaje para una persona con el contexto completo (historial, notas, avisos
    * previos). Si la IA falla, cae a las plantillas de siempre.
    */
-  async redactar(id: string, opts: { para?: string | null; tipo?: TipoMensaje; status?: CommitmentStatus | null } = {}): Promise<string> {
+  async redactar(id: string, opts: { para?: string | null; tipo?: TipoMensaje; status?: CommitmentStatus | null; enfoque?: EnfoqueMensaje; formato?: FormatoMensaje } = {}): Promise<string> {
+    const enfoque: EnfoqueMensaje = opts.enfoque === 'general' ? 'general' : 'reciente';
+    const formato: FormatoMensaje = opts.formato === 'ejecutivo' ? 'ejecutivo' : 'mensaje';
     const c0 = sqliteReminderService.getCommitment(id);
     if (!c0) throw new Error(`No existe el compromiso ${id}`);
     const c = opts.status ? { ...c0, status: opts.status } : c0;
@@ -457,24 +481,42 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
       hecho: 'avisar que el compromiso quedó listo y cerrar el tema',
       cancelado: 'avisar que el compromiso queda sin efecto por ahora',
     };
-    const prompt = `Eres Jesús Leiva (CTO de Apprecio) escribiendo un mensaje breve de trabajo por chat.
+    const reglasComunes = `- Las notas son apuntes internos de Jesús: úsalas para entender la situación, pero no copies frases textuales, no reveles opiniones internas ni lo que otra persona dijo en privado; resume solo lo que el destinatario necesita saber.
+- No inventes fechas, cifras ni acuerdos que no estén en el contexto.
+- Responde SOLO con el texto, sin comillas ni explicaciones.`;
+    const alcance = enfoque === 'general'
+      ? 'Cubre la historia completa del compromiso: de dónde viene, qué se ha hecho, dónde está hoy y qué falta.'
+      : 'Céntrate en LO RECIENTE (novedades de los últimos días y lo que falta ahora); los antecedentes solo para dar sentido.';
+    const prompt = formato === 'ejecutivo'
+      ? `Eres Jesús Leiva, CTO de Apprecio, preparando un RESUMEN EJECUTIVO para ${para || 'la contraparte'}${persona?.rol ? ` (${persona.rol})` : ''}, un ejecutivo C-level.
+${alcance}
+
+${this.contexto(c, enfoque)}
+
+Formato (texto plano, apto para chat o correo):
+- Una línea de saludo breve por el nombre de pila (trato formal-cercano, sin tutear en exceso).
+- Una frase con el estado general (en qué está y si va en plazo o con riesgo).
+- Luego estas líneas, cada una con su etiqueta y 1-2 frases: "Avance:", "Pendiente:", "Riesgos/bloqueos:" (omítela si no hay), "Próximo paso:" (con responsable y fecha si existen), "Necesitamos de ustedes:" (solo si hay algo concreto que pedir).
+- Máximo ~120 palabras. Sin firma, sin markdown ni asteriscos.
+- Tono institucional: sin culpar a personas, sin detalles operativos menores ni tensiones internas.
+${reglasComunes}`
+      : `Eres Jesús Leiva (CTO de Apprecio) escribiendo un mensaje breve de trabajo por chat.
 Destinatario: ${para || 'la contraparte'}${persona?.rol ? ` (${persona.rol})` : ''} — ${relacion}.
 Objetivo: ${objetivo[tipo]}.
+${alcance}
 
-${this.contexto(c)}
+${this.contexto(c, enfoque)}
 
 Reglas:
-- Español de Chile, cercano y profesional; tutea. Saluda por el nombre de pila. 2 a 4 frases, sin firma.
-- Refleja el estado ACTUAL según el historial (lo último que pasó y lo que falta), no repitas el título literal si suena robótico.
-- Las notas son apuntes internos de Jesús: úsalas para entender la situación, pero no copies frases textuales, no reveles opiniones internas ni lo que otra persona dijo en privado; resume solo lo que el destinatario necesita saber.
-- No inventes fechas ni acuerdos que no estén en el contexto.
-- Responde SOLO con el texto del mensaje.`;
+- Español de Chile, cercano y profesional; tutea. Saluda por el nombre de pila. ${enfoque === 'general' ? '3 a 6 frases' : '2 a 4 frases'}, sin firma.
+- Refleja el estado ACTUAL (lo último que pasó y lo que falta); no repitas el título literal si suena robótico.
+${reglasComunes}`;
 
     const { generarTexto } = await import('../agents/llm/model_factory.js');
     const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
-    beginUsageScope('system', `commitment-${id}`, `Redactar mensaje (${tipo}) — ${c.title.slice(0, 60)}`);
+    beginUsageScope('system', `commitment-${id}`, `Redactar ${formato === 'ejecutivo' ? 'resumen ejecutivo' : `mensaje (${tipo})`} ${enfoque} — ${c.title.slice(0, 60)}`);
     try {
-      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: 600 })).replace(/^["“]|["”]$/g, '').trim();
+      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: formato === 'ejecutivo' ? 900 : 600 })).replace(/^["“]|["”]$/g, '').trim();
       return t || plantilla();
     } catch (err: any) {
       console.warn(`⚠️ [Compromisos] No se pudo redactar con IA (${err?.message}); uso plantilla.`);

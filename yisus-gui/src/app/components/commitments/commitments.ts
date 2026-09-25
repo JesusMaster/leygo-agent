@@ -36,6 +36,7 @@ interface Envio {
   auto?: boolean;
   corregido: string | null;     // propuesta del corrector pendiente de confirmar
   corrigiendo: boolean;
+  opciones: boolean;             // panel "¿qué generar?" abierto
 }
 
 const ESTADO_LABEL: Record<CommitmentStatus, string> = { propuesto: 'Propuesto', pendiente: 'Pendiente', en_curso: 'En curso', hecho: 'Hecho', cancelado: 'Cancelado', descartado: 'Descartado' };
@@ -263,14 +264,36 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
               <span class="msg-head">
                 Mensaje
                 <span class="spacer"></span>
-                <button class="lnk" [disabled]="z.redactando || !z.para.trim()" (click)="redactar()" title="Redacta el mensaje con IA usando todo el historial del compromiso (reemplaza lo escrito)">
-                  <i class="ph" [class.ph-sparkle]="!z.redactando" [class.ph-spinner]="z.redactando"></i> {{ z.redactando ? 'Generando con el contexto…' : (z.message.trim() ? 'Generar de nuevo' : 'Generar texto') }}
+                <button class="lnk" [class.on]="z.opciones" [disabled]="z.redactando || !z.para.trim()" (click)="patch({ opciones: !z.opciones })" title="Redacta el texto con IA a partir del historial del compromiso">
+                  <i class="ph" [class.ph-sparkle]="!z.redactando" [class.ph-spinner]="z.redactando"></i> {{ z.redactando ? 'Generando con el contexto…' : (z.message.trim() ? 'Generar de nuevo…' : 'Generar texto…') }}
                 </button>
                 <button class="lnk" [disabled]="z.corrigiendo || !z.message.trim()" (click)="corregir()" title="Ortografía, tildes y puntuación">
                   <i class="ph" [class.ph-spell-check]="!z.corrigiendo" [class.ph-spinner]="z.corrigiendo"></i> Corregir
                 </button>
               </span>
-              <textarea rows="5" [ngModel]="z.message" (ngModelChange)="patch({ message: $event, corregido: null })" [disabled]="z.redactando"></textarea>
+              @if (z.opciones) {
+                <div class="gen">
+                  <div class="gen-row">
+                    <span>Contenido</span>
+                    <div class="seg sm">
+                      <button type="button" [class.on]="gen.enfoque === 'reciente'" (click)="setGen('enfoque', 'reciente')" title="Novedades de los últimos días y lo que falta ahora">Contexto reciente</button>
+                      <button type="button" [class.on]="gen.enfoque === 'general'" (click)="setGen('enfoque', 'general')" title="Toda la historia: de dónde viene, qué se hizo, dónde está y qué falta">Resumen general</button>
+                    </div>
+                  </div>
+                  <div class="gen-row">
+                    <span>Formato</span>
+                    <div class="seg sm">
+                      <button type="button" [class.on]="gen.formato === 'mensaje'" (click)="setGen('formato', 'mensaje')">Mensaje de chat</button>
+                      <button type="button" [class.on]="gen.formato === 'ejecutivo'" (click)="setGen('formato', 'ejecutivo')" title="Para un C-level: estado, avance, pendiente, riesgos y próximo paso">Resumen ejecutivo</button>
+                    </div>
+                  </div>
+                  <div class="gen-row fin">
+                    <small class="hint">{{ gen.formato === 'ejecutivo' ? 'Estado, avance, pendiente, riesgos y próximo paso; tono institucional.' : gen.enfoque === 'general' ? 'Cuenta la historia completa en pocas frases.' : 'Se centra en lo último que pasó y lo que falta.' }}</small>
+                    <button type="button" class="btn-primary sm" (click)="redactar()"><i class="ph ph-sparkle"></i> Generar</button>
+                  </div>
+                </div>
+              }
+              <textarea [rows]="gen.formato === 'ejecutivo' && z.message.length > 300 ? 9 : 5" [ngModel]="z.message" (ngModelChange)="patch({ message: $event, corregido: null })" [disabled]="z.redactando"></textarea>
               <small class="hint">Escríbelo tú o usa "Generar texto" (usa el historial: notas, avisos y respuestas). Lo que escribas o edites se revisa con el corrector antes de enviar.</small>
             </label>
 
@@ -407,6 +430,12 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .msg-head { display: flex; align-items: center; gap: 12px; }
     .lnk { border: none; background: none; color: var(--accent-primary); cursor: pointer; font-size: 12.5px; display: inline-flex; gap: 5px; align-items: center; padding: 0; }
     .lnk:disabled { color: var(--text-dim); cursor: default; }
+    .lnk.on { text-decoration: underline; }
+    .gen { border: 1px solid var(--border-light); background: var(--bg-main); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+    .gen-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+    .gen-row > span { width: 72px; color: var(--text-dim); }
+    .gen-row.fin { justify-content: space-between; } .gen-row.fin .hint { flex: 1; min-width: 180px; }
+    .seg.sm button { padding: 6px 10px; font-size: 12.5px; }
     .corregido { border: 1px solid rgba(16,185,129,.45); background: rgba(16,185,129,.07); border-radius: 10px; padding: 10px 12px; margin: -4px 0 14px; }
     .c-head { font-size: 12px; font-weight: 700; color: var(--ok); display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
     .c-text { white-space: pre-wrap; font-size: 13.5px; margin-bottom: 10px; }
@@ -548,7 +577,7 @@ export class CommitmentsComponent {
   abrirCierre(c: Commitment, status: CommitmentStatus | null) { this.abrirEnvio(c, status ? 'aviso' : 'mensaje', status); }
 
   private abrirEnvio(c: Commitment, kind: Envio['kind'], status: CommitmentStatus | null, para?: string) {
-    this.cierre.set({ c, kind, status, personas: [], para: para || '', nuevo: false, rol: '', message: '', generado: '', redactando: false, delivery: [], auto: !!c.reminder_auto, corregido: null, corrigiendo: false });
+    this.cierre.set({ c, kind, status, personas: [], para: para || '', nuevo: false, rol: '', message: '', generado: '', redactando: false, delivery: [], auto: !!c.reminder_auto, corregido: null, corrigiendo: false, opciones: false });
     this.api.getCommitmentPeople(c.id).subscribe({
       next: (r) => {
         const z = this.cierre(); if (!z || z.c.id !== c.id) return;
@@ -576,11 +605,22 @@ export class CommitmentsComponent {
     return undefined; // el backend lo deduce de la relación con el compromiso
   }
 
+  /** Última elección de "qué generar" (se recuerda por navegador). */
+  gen: { enfoque: 'reciente' | 'general'; formato: 'mensaje' | 'ejecutivo' } = this.leerGen();
+  private leerGen(): { enfoque: 'reciente' | 'general'; formato: 'mensaje' | 'ejecutivo' } {
+    try { const v = JSON.parse(localStorage.getItem('yisus_commitments_gen') || '{}'); return { enfoque: v.enfoque === 'general' ? 'general' : 'reciente', formato: v.formato === 'ejecutivo' ? 'ejecutivo' : 'mensaje' }; }
+    catch { return { enfoque: 'reciente', formato: 'mensaje' }; }
+  }
+  setGen<K extends 'enfoque' | 'formato'>(k: K, v: (typeof this.gen)[K]) {
+    this.gen = { ...this.gen, [k]: v };
+    try { localStorage.setItem('yisus_commitments_gen', JSON.stringify(this.gen)); } catch {}
+  }
+
   redactar() {
     const z = this.cierre(); if (!z || !z.para.trim()) return;
     if (z.message.trim() && z.message.trim() !== z.generado.trim() && !confirm('¿Reemplazar lo que escribiste por un texto generado?')) return;
-    this.patch({ redactando: true, corregido: null });
-    this.api.draftCommitmentMessage(z.c.id, { para: z.para.trim(), tipo: this.tipoPara(z), status: z.status }).subscribe({
+    this.patch({ redactando: true, corregido: null, opciones: false });
+    this.api.draftCommitmentMessage(z.c.id, { para: z.para.trim(), tipo: this.tipoPara(z), status: z.status, enfoque: this.gen.enfoque, formato: this.gen.formato }).subscribe({
       next: (r) => { const a = this.cierre(); if (a && a.c.id === z.c.id) this.cierre.set({ ...a, message: r.message, generado: r.message, redactando: false }); },
       error: (e) => { this.patch({ redactando: false }); this.toast.error(e?.error?.error || 'No se pudo redactar'); },
     });

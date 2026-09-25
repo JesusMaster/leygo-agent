@@ -128,7 +128,7 @@ export default function createCommitmentsRoutes() {
     try {
       const b = req.body || {};
       const status = b.status && ESTADOS.includes(b.status) ? b.status : null;
-      res.json({ message: await commitmentsService.redactar(req.params.id, { para: b.para || null, tipo: b.tipo || undefined, status }) });
+      res.json({ message: await commitmentsService.redactar(req.params.id, { para: b.para || null, tipo: b.tipo || undefined, status, enfoque: b.enfoque, formato: b.formato }) });
     } catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 
