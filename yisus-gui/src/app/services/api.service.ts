@@ -34,6 +34,8 @@ export interface UsageSummary {
 }
 
 export interface ChannelsConfig {
+  detalle?: Array<ToolDetalle & { sensible: string | null; manifiesto: string[] | null }>;
+  a2a?: string[];
   catalogo: string[];
   grupos: Record<string, string[]>;
   canales: {

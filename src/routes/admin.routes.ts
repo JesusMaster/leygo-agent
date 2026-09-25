@@ -23,6 +23,20 @@ import { adminGuard } from './admin_guard.js';
  * index.routes.ts, para que no se separen con el tiempo.
  */
 
+/** Herramientas que leen datos privados o actúan en nombre de Jesús: la GUI avisa si se abren a canales externos. */
+const TOOLS_SENSIBLES: Record<string, string> = {
+  account_agent: 'Lee y envía correos, calendario, Drive y Chat de tu cuenta de Google',
+  knowledge_agent: 'Incluye tu memoria episódica (correos y chats indexados)',
+  commitments_agent: 'Tus compromisos y los de tu equipo',
+  agent_builder: 'Crea y modifica agentes con código',
+  schedule_task: 'Programa tareas autónomas que corren con tus herramientas',
+  create_custom_webhook: 'Crea webhooks que disparan acciones',
+  toggle_custom_webhook: 'Activa o apaga webhooks',
+  set_monthly_budget: 'Cambia el presupuesto de consumo',
+  buzz_send_message: 'Publica en Buzz a tu nombre',
+  a2a_send_message: 'Habla con otros agentes a tu nombre',
+};
+
 export default function createAdminRoutes() {
   const app = Router();
 
@@ -98,8 +112,22 @@ export default function createAdminRoutes() {
   });
 
   // ─── Catálogo y configuración por canal ──────────────────────────────────
-  app.get('/api/channels', (_req, res) => {
-    res.json({ catalogo: allToolNames(), grupos: TOOL_GROUPS, canales: describeChannels() });
+  app.get('/api/channels', async (_req, res) => {
+    const { customAgentsService } = await import('../agents/custom/custom_agents.service.js');
+    const custom = new Map(customAgentsService.list().map((m) => [m.name, m]));
+    const catalogo = allToolNames();
+    // Detalle legible para la GUI: título, descripción, grupo, si es sensible y, para los
+    // agentes personalizados, en qué canales ya está activo por su propio manifiesto.
+    const detalle = catalogo.map((name) => {
+      const m = custom.get(name);
+      const d = m ? { titulo: m.displayName, descripcion: m.description } : describirTool(name);
+      return {
+        name, ...d, ...grupoDeTool(name),
+        sensible: TOOLS_SENSIBLES[name] || null,
+        manifiesto: m ? (m.enabled ? m.channels : []) : null,
+      };
+    });
+    res.json({ catalogo, grupos: TOOL_GROUPS, canales: describeChannels(), detalle, a2a: getToolsDisponiblesA2A() });
   });
 
   app.put('/api/channels/:channel', (req, res) => {
