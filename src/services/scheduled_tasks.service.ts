@@ -3,6 +3,7 @@ import { sqliteReminderService, ScheduledTask, ScheduledTaskKind, ScheduledTaskR
 import { telegramBotService } from './telegram_bot.service.js';
 import { messageFormatter } from '../utils/message_formatter.js';
 import { llmSettingsService } from './llm_settings.service.js';
+import { describirCron, proximasCron } from '../utils/cron_humano.js';
 
 /**
  * Tareas programadas, al estilo de las "Tareas Programadas" de Leygo.
@@ -97,14 +98,30 @@ export class ScheduledTasksService {
 
   // ─── CRUD ────────────────────────────────────────────────────────────────
 
-  public list(): Array<ScheduledTask & { descripcion: string; integrada?: { key: string; titulo: string; descripcion: string } }> {
+  public list(): Array<ScheduledTask & { descripcion: string; horario: string; ultima: { status: string; started_at: number; duration_ms: number; trigger: string } | null; integrada?: { key: string; titulo: string; descripcion: string } }> {
     return sqliteReminderService.listScheduledTasks().map((t) => {
       const def = this.integradaDe(t);
-      return { ...t, descripcion: this.describir(t), ...(def ? { integrada: { key: def.key, titulo: def.titulo, descripcion: def.descripcion } } : {}) };
+      const [u] = sqliteReminderService.listScheduledTaskRuns(t.id, 1);
+      return {
+        ...t, descripcion: this.describir(t), horario: this.describirHorario(t),
+        ultima: u ? { status: u.status, started_at: u.started_at, duration_ms: u.duration_ms, trigger: u.trigger } : null,
+        ...(def ? { integrada: { key: def.key, titulo: def.titulo, descripcion: def.descripcion } } : {}),
+      };
     });
   }
 
   public get(id: string) { return sqliteReminderService.getScheduledTask(id); }
+
+  /** Vista previa para el formulario: horario en palabras y próximas ejecuciones (sin guardar nada). */
+  public preview(input: { kind: ScheduledTaskKind; run_at?: number | string | null; interval_minutes?: number | null; time_of_day?: string | null; cron_expr?: string | null }): { descripcion: string; proximas: number[] } {
+    const h = this.normalizar(input);
+    const t = { ...h, kind: input.kind } as ScheduledTask;
+    let proximas: number[] = [];
+    if (t.kind === 'once') proximas = [t.run_at!];
+    else if (t.kind === 'interval') proximas = [1, 2, 3].map((k) => Date.now() + k * t.interval_minutes! * 60_000);
+    else proximas = proximasCron(t.kind === 'daily' ? this.cronDeHora(t.time_of_day!) : t.cron_expr!, 3, this.timezone);
+    return { descripcion: this.describirHorario(t), proximas };
+  }
 
   public create(input: {
     message: string; autonomous: boolean | number; kind: ScheduledTaskKind;
@@ -462,12 +479,12 @@ export class ScheduledTasksService {
     return `por ${partes.join(' + ')}`;
   }
 
-  private describirHorario(t: ScheduledTask): string {
+  public describirHorario(t: ScheduledTask): string {
     switch (t.kind) {
       case 'once': return `Una vez, el ${new Date(t.run_at || 0).toLocaleString('es-CL', { timeZone: this.timezone, dateStyle: 'medium', timeStyle: 'short' })}`;
-      case 'interval': return `Cada ${t.interval_minutes} min`;
+      case 'interval': { const m = t.interval_minutes || 0; return m % 60 === 0 && m >= 60 ? `Cada ${m / 60 === 1 ? 'hora' : `${m / 60} horas`}` : `Cada ${m} min`; }
       case 'daily': return `Todos los días a las ${t.time_of_day}`;
-      case 'cron': return `Cron: ${t.cron_expr}`;
+      case 'cron': return describirCron(t.cron_expr || '');
     }
   }
 }

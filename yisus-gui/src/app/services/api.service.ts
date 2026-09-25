@@ -76,6 +76,7 @@ export interface ScheduledTask {
   status: 'active' | 'paused' | 'done'; channel: TaskChannel; target: string | null; delivery: TaskDelivery[]; model: string | null;
   created_at: number; updated_at: number;
   last_run_at: number | null; next_run_at: number | null; descripcion: string;
+  horario?: string; ultima?: { status: 'success' | 'error'; started_at: number; duration_ms: number; trigger: 'scheduled' | 'manual' } | null;
   integrada?: { key: string; titulo: string; descripcion: string };
 }
 export interface TareaIntegrada { key: string; titulo: string; descripcion: string; }
@@ -264,6 +265,7 @@ export class ApiService {
   updateTask(id: string, data: Partial<TaskInput & { status: 'active' | 'paused' }>): Observable<{ task: ScheduledTask }> {
     return this.http.put<any>(`${this.baseUrl}/api/tasks/${id}`, data);
   }
+  previewTask(data: Partial<TaskInput>): Observable<{ descripcion: string; proximas: number[] }> { return this.http.post<any>(`${this.baseUrl}/api/tasks/preview`, data); }
   deleteTask(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/tasks/${id}`); }
   runTask(id: string): Observable<{ run: TaskRun }> { return this.http.post<any>(`${this.baseUrl}/api/tasks/${id}/run`, {}); }
   getTaskDestinos(): Observable<TaskDestinos> { return this.http.get<any>(`${this.baseUrl}/api/tasks/destinos`); }

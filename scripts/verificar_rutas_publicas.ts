@@ -34,6 +34,7 @@ const CASOS: Caso[] = [
   { metodo: 'GET',    ruta: '/api/settings/llm',         debeExigirClave: true,  nota: 'proveedores LLM (keys)' },
   { metodo: 'POST',   ruta: '/api/settings/restart',     debeExigirClave: true,  nota: 'reiniciar backend' },
   { metodo: 'GET',    ruta: '/api/commitments',          debeExigirClave: true,  nota: 'compromisos' },
+  { metodo: 'POST',   ruta: '/api/tasks/preview', debeExigirClave: true, nota: 'vista previa de horario' },
   { metodo: 'POST',   ruta: '/api/commitments/correct-text', debeExigirClave: true, nota: 'corrector de mensajes (usa LLM)' },
   { metodo: 'POST',   ruta: '/api/commitments/x/draft',  debeExigirClave: true,  nota: 'borrador con IA' },
   { metodo: 'GET',    ruta: '/api/commitments/x/people', debeExigirClave: true,  nota: 'personas del compromiso' },

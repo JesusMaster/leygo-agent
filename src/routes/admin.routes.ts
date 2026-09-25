@@ -357,6 +357,12 @@ export default function createAdminRoutes() {
     }
   });
 
+  /** Horario en palabras y próximas 3 ejecuciones, para el formulario (no guarda nada). */
+  app.post('/api/tasks/preview', (req, res) => {
+    try { res.json(scheduledTasksService.preview(req.body || {})); }
+    catch (err: any) { res.status(400).json({ error: err.message }); }
+  });
+
   app.put('/api/tasks/:id', (req, res) => {
     try {
       const tarea = scheduledTasksService.update(req.params.id, req.body || {});
