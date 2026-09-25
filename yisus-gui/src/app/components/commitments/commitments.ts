@@ -294,7 +294,7 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 </div>
               }
               <textarea [rows]="gen.formato === 'ejecutivo' && z.message.length > 300 ? 9 : 5" [ngModel]="z.message" (ngModelChange)="patch({ message: $event, corregido: null })" [disabled]="z.redactando"></textarea>
-              <small class="hint">Escríbelo tú o usa "Generar texto" (usa el historial: notas, avisos y respuestas). Lo que escribas o edites se revisa con el corrector antes de enviar.</small>
+              <small class="hint">Escríbelo tú o usa "Generar texto" (usa el historial: notas, avisos y respuestas). Usa "Corregir" si quieres revisar ortografía y puntuación; se envía tal cual está en la caja.</small>
             </label>
 
             @if (z.corregido) {
@@ -302,10 +302,9 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                 <div class="c-head"><i class="ph ph-spell-check"></i> Versión corregida</div>
                 <div class="c-text">{{ z.corregido }}</div>
                 <div class="row">
-                  <button class="btn-secondary sm" (click)="patch({ corregido: null })">Seguir editando</button>
                   <span class="spacer"></span>
-                  <button class="btn-secondary sm" [disabled]="enviando()" (click)="enviar(true)">Enviar mi versión</button>
-                  <button class="btn-primary sm" [disabled]="enviando()" (click)="usarCorreccion(true)"><i class="ph ph-paper-plane-tilt"></i> Enviar corregido</button>
+                  <button class="btn-secondary sm" (click)="patch({ corregido: null })">Descartar</button>
+                  <button class="btn-primary sm" (click)="usarCorreccion(false)"><i class="ph ph-check"></i> Aplicar corrección</button>
                 </div>
               </div>
             }
@@ -323,8 +322,8 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
             <button class="btn-secondary" (click)="cierre.set(null)">Cancelar</button>
             @if (z.status) { <button class="btn-secondary" (click)="soloEstado()">Solo {{ z.status === 'hecho' ? 'marcar hecho' : 'cancelar' }}</button> }
             @if (z.kind === 'recordatorio' && esResponsable(z)) { <button class="btn-secondary" [disabled]="enviando()" (click)="guardarRecordatorio()">Solo guardar ajuste</button> }
-            <button class="btn-primary" [disabled]="!z.delivery.length || !z.para.trim() || !z.message.trim() || z.redactando || enviando() || !!z.corregido" (click)="enviar(false)">
-              <i class="ph" [class.ph-spinner]="z.corrigiendo" [class.ph-paper-plane-tilt]="!z.corrigiendo"></i> {{ z.corrigiendo ? 'Revisando…' : textoEnviar(z) }}
+            <button class="btn-primary" [disabled]="!z.delivery.length || !z.para.trim() || !z.message.trim() || z.redactando || enviando()" (click)="enviar()">
+              <i class="ph ph-paper-plane-tilt"></i> {{ textoEnviar(z) }}
             </button>
           </div>
         </div>
@@ -646,10 +645,9 @@ export class CommitmentsComponent {
     if (enviar) this.enviar(true);
   }
 
-  /** Si el texto lo editó Jesús (difiere de lo redactado), pasa por el corrector antes de enviar. */
-  enviar(saltarCorreccion: boolean) {
+  /** Envía el texto tal cual. El corrector solo corre cuando Jesús pulsa "Corregir". */
+  enviar(_desdeCorreccion = false) {
     const z = this.cierre(); if (!z) return;
-    if (!saltarCorreccion && z.message.trim() !== z.generado.trim()) { this.corregir(() => this.enviar(true)); return; }
     this.patch({ corregido: null });
     this.enviando.set(true);
     const para = z.para.trim();
