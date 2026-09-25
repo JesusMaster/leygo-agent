@@ -1,12 +1,42 @@
 import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService, BackfillEstado, Commitment, CommitmentStatus, CommitmentUpdate, TaskDelivery } from '../../services/api.service';
+import { ApiService, BackfillEstado, Commitment, CommitmentMsgTipo, CommitmentPerson, CommitmentStatus, CommitmentUpdate, TaskDelivery } from '../../services/api.service';
 import { DeliveryPickerComponent } from '../tasks/delivery-picker';
 import { ToastService } from '../../services/toast.service';
 import { FriendlyDatePipe } from '../../pipes/friendly-date.pipe';
 
 type Vista = 'propuestos' | 'abiertos' | 'vencidos' | 'hechos' | 'todos';
+type Orden = 'auto' | 'fecha_asc' | 'fecha_desc' | 'actividad_desc' | 'creado_desc' | 'creado_asc' | 'prioridad';
+const ORDENES: Array<{ id: Orden; label: string }> = [
+  { id: 'auto', label: 'Estado y fecha' },
+  { id: 'fecha_asc', label: 'Fecha ↑ (más próxima)' },
+  { id: 'fecha_desc', label: 'Fecha ↓ (más lejana)' },
+  { id: 'actividad_desc', label: 'Última actividad' },
+  { id: 'creado_desc', label: 'Creados: recientes' },
+  { id: 'creado_asc', label: 'Creados: antiguos' },
+  { id: 'prioridad', label: 'Prioridad' },
+];
+const PRIO: Record<string, number> = { alta: 0, media: 1, baja: 2 };
+
+/** Estado del modal de mensajes (avisos, reminders y mensajes a involucrados). */
+interface Envio {
+  c: Commitment;
+  kind: 'aviso' | 'recordatorio' | 'mensaje';
+  status: CommitmentStatus | null;
+  personas: CommitmentPerson[];
+  para: string;                 // nombre del destinatario ('' mientras se escribe uno nuevo)
+  nuevo: boolean;               // destinatario que aún no está en el compromiso
+  rol: string;
+  message: string;
+  generado: string;             // último texto que salió de la IA (o ya corregido)
+  redactando: boolean;
+  delivery: TaskDelivery[];
+  auto?: boolean;
+  corregido: string | null;     // propuesta del corrector pendiente de confirmar
+  corrigiendo: boolean;
+}
 
 const ESTADO_LABEL: Record<CommitmentStatus, string> = { propuesto: 'Propuesto', pendiente: 'Pendiente', en_curso: 'En curso', hecho: 'Hecho', cancelado: 'Cancelado', descartado: 'Descartado' };
 const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail: 'Gmail', meet: 'Meet', manual: 'Manual', backfill: 'Backfill' };
@@ -47,6 +77,12 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
           <button [class.on]="quien() === '0'" (click)="quien.set('0')">Me deben</button>
         </div>
         <input type="text" class="buscar" [ngModel]="q()" (ngModelChange)="q.set($event)" placeholder="Filtrar por texto, persona…" />
+        <label class="orden" title="Orden de la lista">
+          <i class="ph ph-sort-ascending"></i>
+          <select [ngModel]="orden()" (ngModelChange)="setOrden($event)">
+            @for (o of ordenes; track o.id) { <option [value]="o.id">{{ o.label }}</option> }
+          </select>
+        </label>
         <button class="btn-secondary" (click)="load()"><i class="ph ph-arrows-clockwise"></i></button>
         @if (vista() === 'propuestos' && propuestosAntiguos().length) {
           <span class="spacer"></span>
@@ -89,9 +125,8 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                   <button class="ta ok" title="Marcar hecho (y avisar)" (click)="abrirCierre(c, 'hecho')"><i class="ph ph-check-circle"></i></button>
                   @if (!c.mine) {
                     <button class="ta rem" [class.on]="!!c.reminder_auto" [title]="c.reminder_auto ? 'Friendly reminder (automático activo)' : 'Friendly reminder a ' + c.owner" (click)="abrirRecordatorio(c)"><i class="ph" [class.ph-bell-ringing]="!!c.reminder_auto" [class.ph-bell]="!c.reminder_auto"></i></button>
-                  } @else {
-                    <button class="ta" title="Avisar a la contraparte" (click)="abrirCierre(c, null)"><i class="ph ph-paper-plane-tilt"></i></button>
                   }
+                  <button class="ta" title="Escribir a alguien sobre este compromiso (con todo el contexto)" (click)="abrirMensaje(c)"><i class="ph ph-paper-plane-tilt"></i></button>
                   <button class="ta" title="Cancelar (y avisar)" (click)="abrirCierre(c, 'cancelado')"><i class="ph ph-prohibit"></i></button>
                 } @else {
                   <button class="ta" title="Reabrir" (click)="cambiarEstado(c, 'pendiente')"><i class="ph ph-arrow-counter-clockwise"></i></button>
@@ -135,6 +170,24 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
                   <div class="row" style="margin-bottom:14px">
                     <span class="spacer"></span>
                     <button class="btn-primary sm" [disabled]="!pend[c.id]" (click)="guardarCampos(c)">Guardar cambios</button>
+                  </div>
+
+                  <div class="personas">
+                    <span class="lbl"><i class="ph ph-users-three"></i> Personas</span>
+                    @for (p of personas(); track p.nombre) {
+                      <span class="persona" [attr.data-rel]="p.relacion">
+                        <button class="p-nombre" (click)="abrirMensaje(c, p.nombre)" [title]="'Escribir a ' + p.nombre + (p.delivery.length ? ' (' + canales(p.delivery) + ')' : '')">
+                          <i class="ph ph-paper-plane-tilt"></i> {{ p.nombre }}
+                        </button>
+                        <small>{{ p.rol || relLabel(p.relacion) }}</small>
+                        @if (p.relacion === 'involucrado') { <button class="p-x" title="Quitar" (click)="quitarPersona(c, p.nombre)"><i class="ph ph-x"></i></button> }
+                      </span>
+                    }
+                    <span class="p-add">
+                      <input type="text" [(ngModel)]="personaNueva" placeholder="Sumar persona (p. ej. Fabricio)" (keydown.enter)="agregarPersona(c)" />
+                      <input type="text" [(ngModel)]="rolNuevo" placeholder="Rol (opcional)" class="rol" (keydown.enter)="agregarPersona(c)" />
+                      <button class="btn-secondary sm" [disabled]="!personaNueva.trim()" (click)="agregarPersona(c)"><i class="ph ph-user-plus"></i></button>
+                    </span>
                   </div>
 
                   <div class="nota-row">
@@ -185,30 +238,71 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
       <div class="modal-backdrop" (click)="cierre.set(null)">
         <div class="modal" (click)="$event.stopPropagation()">
           <div class="modal-head">
-            <h3>{{ z.kind === 'recordatorio' ? 'Friendly reminder a ' + z.c.owner : z.status === 'hecho' ? 'Marcar como hecho' : z.status === 'cancelado' ? 'Cancelar compromiso' : 'Avisar a la contraparte' }}</h3>
+            <h3>{{ tituloEnvio(z) }}</h3>
             <button class="btn-icon" (click)="cierre.set(null)"><i class="ph ph-x"></i></button>
           </div>
           <div class="modal-body">
             <p class="card-sub"><strong>{{ z.c.title }}</strong>@if (z.c.counterpart) { · con {{ z.c.counterpart }} }</p>
+
             <label class="field">
-              <span>Mensaje para {{ z.kind === 'recordatorio' ? z.c.owner : (z.c.counterpart || 'la contraparte') }}</span>
-              <textarea rows="3" [(ngModel)]="z.message"></textarea>
-              <small class="hint">Se envía tal cual por los canales que marques. Sin canales, solo se cambia el estado.</small>
+              <span>Para</span>
+              <div class="para">
+                <select [ngModel]="z.nuevo ? '__otra' : z.para" (ngModelChange)="elegirPara($event)">
+                  @for (p of z.personas; track p.nombre) { <option [value]="p.nombre">{{ p.nombre }} · {{ p.rol || relLabel(p.relacion) }}</option> }
+                  <option value="__otra">Otra persona…</option>
+                </select>
+                @if (z.nuevo) {
+                  <input type="text" [ngModel]="z.para" (ngModelChange)="patch({ para: $event })" placeholder="Nombre (p. ej. Fabricio)" />
+                  <input type="text" [ngModel]="z.rol" (ngModelChange)="patch({ rol: $event })" placeholder="Rol (opcional)" />
+                }
+              </div>
+              @if (z.nuevo) { <small class="hint">Queda sumada al compromiso como involucrada, con el canal que elijas.</small> }
             </label>
-            <label class="field"><span>{{ z.kind === 'recordatorio' ? 'Recordar por' : 'Avisar por' }}</span></label>
-            <app-delivery-picker [value]="z.delivery" (valueChange)="setDelivery($event)" />
-            @if (z.kind === 'recordatorio') {
+
+            <label class="field">
+              <span class="msg-head">
+                Mensaje
+                <span class="spacer"></span>
+                <button class="lnk" [disabled]="z.redactando || !z.para.trim()" (click)="redactar()" title="Redacta de nuevo con todo el historial del compromiso">
+                  <i class="ph" [class.ph-sparkle]="!z.redactando" [class.ph-spinner]="z.redactando"></i> {{ z.redactando ? 'Redactando con el contexto…' : 'Redactar con IA' }}
+                </button>
+                <button class="lnk" [disabled]="z.corrigiendo || !z.message.trim()" (click)="corregir()" title="Ortografía, tildes y puntuación">
+                  <i class="ph" [class.ph-spell-check]="!z.corrigiendo" [class.ph-spinner]="z.corrigiendo"></i> Corregir
+                </button>
+              </span>
+              <textarea rows="5" [ngModel]="z.message" (ngModelChange)="patch({ message: $event, corregido: null })" [disabled]="z.redactando"></textarea>
+              <small class="hint">Se redacta con el historial (notas, avisos y respuestas). Si lo editas, se corrige la ortografía antes de enviar.</small>
+            </label>
+
+            @if (z.corregido) {
+              <div class="corregido">
+                <div class="c-head"><i class="ph ph-spell-check"></i> Versión corregida</div>
+                <div class="c-text">{{ z.corregido }}</div>
+                <div class="row">
+                  <button class="btn-secondary sm" (click)="patch({ corregido: null })">Seguir editando</button>
+                  <span class="spacer"></span>
+                  <button class="btn-secondary sm" [disabled]="enviando()" (click)="enviar(true)">Enviar mi versión</button>
+                  <button class="btn-primary sm" [disabled]="enviando()" (click)="usarCorreccion(true)"><i class="ph ph-paper-plane-tilt"></i> Enviar corregido</button>
+                </div>
+              </div>
+            }
+
+            <label class="field"><span>{{ z.kind === 'recordatorio' ? 'Recordar por' : 'Enviar por' }}</span></label>
+            <app-delivery-picker [value]="z.delivery" (valueChange)="patch({ delivery: $event })" />
+            @if (z.kind === 'recordatorio' && esResponsable(z)) {
               <label class="check" style="margin-top:12px">
-                <input type="checkbox" [checked]="z.auto" (change)="setAuto($any($event.target).checked)" />
-                <span><strong>Recordar automáticamente</strong> por estos canales: 1 día antes de la fecha y cada día que siga vencido (lo manda la rutina "Aviso de compromisos").</span>
+                <input type="checkbox" [checked]="z.auto" (change)="patch({ auto: $any($event.target).checked })" />
+                <span><strong>Recordar automáticamente</strong> a {{ z.c.owner }} por estos canales: 1 día antes de la fecha y cada día que siga vencido, con un mensaje redactado con el contexto del momento.</span>
               </label>
             }
           </div>
           <div class="modal-foot">
             <button class="btn-secondary" (click)="cierre.set(null)">Cancelar</button>
-            @if (z.status) { <button class="btn-secondary" (click)="confirmarCierre(false)">Solo {{ z.status === 'hecho' ? 'marcar hecho' : 'cancelar' }}</button> }
-            @if (z.kind === 'recordatorio') { <button class="btn-secondary" [disabled]="enviando()" (click)="guardarRecordatorio(false)">Solo guardar ajuste</button> }
-            <button class="btn-primary" [disabled]="!z.delivery.length || enviando()" (click)="z.kind === 'recordatorio' ? guardarRecordatorio(true) : confirmarCierre(true)"><i class="ph" [class.ph-bell]="z.kind === 'recordatorio'" [class.ph-paper-plane-tilt]="z.kind !== 'recordatorio'"></i> {{ z.kind === 'recordatorio' ? 'Enviar reminder ahora' : z.status ? (z.status === 'hecho' ? 'Marcar y avisar' : 'Cancelar y avisar') : 'Enviar aviso' }}</button>
+            @if (z.status) { <button class="btn-secondary" (click)="soloEstado()">Solo {{ z.status === 'hecho' ? 'marcar hecho' : 'cancelar' }}</button> }
+            @if (z.kind === 'recordatorio' && esResponsable(z)) { <button class="btn-secondary" [disabled]="enviando()" (click)="guardarRecordatorio()">Solo guardar ajuste</button> }
+            <button class="btn-primary" [disabled]="!z.delivery.length || !z.para.trim() || !z.message.trim() || z.redactando || enviando() || !!z.corregido" (click)="enviar(false)">
+              <i class="ph" [class.ph-spinner]="z.corrigiendo" [class.ph-paper-plane-tilt]="!z.corrigiendo"></i> {{ z.corrigiendo ? 'Revisando…' : textoEnviar(z) }}
+            </button>
           </div>
         </div>
       </div>
@@ -295,7 +389,29 @@ const ORIGEN_LABEL: Record<string, string> = { google_chat: 'Google Chat', gmail
     .check input { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--accent-primary); }
     .bf { margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-main); font-size: 13px; }
     .dim { color: var(--text-dim); }
-    @media (max-width: 640px) { .cm-head { flex-direction: column; } .dos { grid-template-columns: 1fr; } .hist-item { grid-template-columns: 1fr; gap: 2px; } }
+    .orden { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
+    .orden select { width: auto; padding: 7px 10px; font-size: 13px; }
+    .personas { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .personas .lbl { font-size: 12px; color: var(--text-dim); display: inline-flex; gap: 5px; align-items: center; margin-right: 2px; }
+    .persona { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 3px; border: 1px solid var(--border-light); border-radius: 999px; background: var(--bg-main); }
+    .persona[data-rel=responsable] { border-color: rgba(245,158,11,.45); }
+    .persona[data-rel=contraparte] { border-color: rgba(129,140,248,.45); }
+    .persona small { font-size: 11px; color: var(--text-dim); }
+    .p-nombre { border: none; background: var(--bg-card); color: var(--text-main); border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 13px; display: inline-flex; gap: 5px; align-items: center; }
+    .p-nombre:hover { color: var(--accent-primary); }
+    .p-x { border: none; background: none; color: var(--text-dim); cursor: pointer; padding: 2px 6px; }
+    .p-x:hover { color: var(--danger); }
+    .p-add { display: inline-flex; gap: 6px; align-items: center; }
+    .p-add input { width: 190px; padding: 6px 9px; font-size: 13px; } .p-add input.rol { width: 130px; }
+    .para { display: flex; gap: 8px; flex-wrap: wrap; } .para select { flex: 1; min-width: 200px; } .para input { flex: 1; min-width: 140px; }
+    .msg-head { display: flex; align-items: center; gap: 12px; }
+    .lnk { border: none; background: none; color: var(--accent-primary); cursor: pointer; font-size: 12.5px; display: inline-flex; gap: 5px; align-items: center; padding: 0; }
+    .lnk:disabled { color: var(--text-dim); cursor: default; }
+    .corregido { border: 1px solid rgba(16,185,129,.45); background: rgba(16,185,129,.07); border-radius: 10px; padding: 10px 12px; margin: -4px 0 14px; }
+    .c-head { font-size: 12px; font-weight: 700; color: var(--ok); display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .c-text { white-space: pre-wrap; font-size: 13.5px; margin-bottom: 10px; }
+    .spin, .ph-spinner { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 640px) { .p-add { flex-wrap: wrap; } .p-add input, .p-add input.rol { width: 100%; } .cm-head { flex-direction: column; } .dos { grid-template-columns: 1fr; } .hist-item { grid-template-columns: 1fr; gap: 2px; } }
   `],
 })
 export class CommitmentsComponent {
@@ -319,7 +435,12 @@ export class CommitmentsComponent {
   enviando = signal(false);
   enriqueciendo = signal(false);
   private pollEnrich: any = null;
-  cierre = signal<{ c: Commitment; status: CommitmentStatus | null; message: string; delivery: TaskDelivery[]; kind?: 'aviso' | 'recordatorio'; auto?: boolean } | null>(null);
+  cierre = signal<Envio | null>(null);
+  personas = signal<CommitmentPerson[]>([]);
+  personaNueva = '';
+  rolNuevo = '';
+  ordenes = ORDENES;
+  orden = signal<Orden>(this.leerOrden());
   notaNueva = '';
   backfillDesde = '';
   pend: Record<string, Partial<Commitment>> = {};
@@ -331,10 +452,35 @@ export class CommitmentsComponent {
   filtrados = computed(() => {
     const f = this.q().trim().toLowerCase();
     const quien = this.quien();
-    return this.items().filter((c) =>
+    const lista = this.items().filter((c) =>
       (quien === '' || String(c.mine) === quien) &&
-      (!f || [c.title, c.detail, c.owner, c.counterpart, c.source_title, c.id].some((x) => (x || '').toLowerCase().includes(f))));
+      (!f || [c.title, c.detail, c.owner, c.counterpart, c.source_title, c.id, c.participants].some((x) => (x || '').toLowerCase().includes(f))));
+    return this.ordenar(lista, this.orden());
   });
+
+  /** 'auto' respeta el orden del backend (estado y fecha). Sin fecha va siempre al final. */
+  private ordenar(lista: Commitment[], orden: Orden): Commitment[] {
+    if (orden === 'auto') return lista;
+    const fecha = (c: Commitment) => c.due_date || c.proposed_due || '';
+    const porFecha = (dir: 1 | -1) => (a: Commitment, b: Commitment) => {
+      const fa = fecha(a), fb = fecha(b);
+      if (!fa || !fb) return fa ? -1 : fb ? 1 : 0;
+      return fa < fb ? -dir : fa > fb ? dir : 0;
+    };
+    const cmp: Record<Exclude<Orden, 'auto'>, (a: Commitment, b: Commitment) => number> = {
+      fecha_asc: porFecha(1),
+      fecha_desc: porFecha(-1),
+      actividad_desc: (a, b) => b.updated_at - a.updated_at,
+      creado_desc: (a, b) => b.created_at - a.created_at,
+      creado_asc: (a, b) => a.created_at - b.created_at,
+      prioridad: (a, b) => (PRIO[a.priority] ?? 1) - (PRIO[b.priority] ?? 1) || porFecha(1)(a, b),
+    };
+    return [...lista].sort(cmp[orden]);
+  }
+  private leerOrden(): Orden {
+    try { const v = localStorage.getItem('yisus_commitments_orden') as Orden; return ORDENES.some((o) => o.id === v) ? v : 'auto'; } catch { return 'auto'; }
+  }
+  setOrden(o: Orden) { this.orden.set(o); try { localStorage.setItem('yisus_commitments_orden', o); } catch {} }
 
   propuestosAntiguos = computed(() => this.filtrados().filter((c) => c.status === 'propuesto' && (c.due_date || c.proposed_due || '') < this.hoy() && (c.due_date || c.proposed_due)));
 
@@ -382,50 +528,137 @@ export class CommitmentsComponent {
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo cambiar'),
     });
   }
-  abrirRecordatorio(c: Commitment) {
-    let delivery: TaskDelivery[] = [];
-    try { delivery = c.reminder_delivery ? JSON.parse(c.reminder_delivery) : []; } catch { delivery = []; }
-    this.cierre.set({ c, status: null, message: '', delivery, kind: 'recordatorio', auto: !!c.reminder_auto });
-    this.api.getCommitmentDefaultMessage(c.id, undefined, 'recordatorio').subscribe({ next: (r) => { const z = this.cierre(); if (z && !z.message) this.cierre.set({ ...z, message: r.message }); }, error: () => {} });
+  // ─── Mensajes: avisos, reminders y mensajes a involucrados ───────────
+  relLabel(r: CommitmentPerson['relacion']) { return r === 'responsable' ? 'responsable' : r === 'contraparte' ? 'contraparte' : 'involucrado'; }
+  canales(d: TaskDelivery[]) { return d.map((x) => x.channel).join(' + '); }
+  esResponsable(z: Envio) { return !z.c.mine && !z.nuevo && z.para.trim().toLowerCase() === z.c.owner.trim().toLowerCase(); }
+  tituloEnvio(z: Envio) {
+    if (z.status === 'hecho') return 'Marcar como hecho';
+    if (z.status === 'cancelado') return 'Cancelar compromiso';
+    return z.kind === 'recordatorio' ? 'Friendly reminder' : 'Escribir sobre este compromiso';
   }
-  setAuto(v: boolean) { const z = this.cierre(); if (z) this.cierre.set({ ...z, auto: v }); }
-  guardarRecordatorio(enviarAhora: boolean) {
-    const z = this.cierre();
-    if (!z) return;
-    this.enviando.set(true);
-    const fin = () => { this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarHistorial(z.c.id); };
-    this.api.setCommitmentReminder(z.c.id, !!z.auto, z.delivery.length ? z.delivery : null).subscribe({
-      next: () => {
-        if (!enviarAhora) { this.toast.ok(z.auto ? 'Reminder automático activado' : 'Ajuste guardado'); fin(); return; }
-        this.api.notifyCommitment(z.c.id, z.delivery, z.message).subscribe({
-          next: (r) => { this.toast.ok(`Reminder enviado por ${r.enviados.join(' + ')}${r.fallos.length ? ' · fallos: ' + r.fallos.join(' · ') : ''}`); fin(); },
-          error: (e) => { this.toast.error(e?.error?.error || 'No se pudo enviar'); fin(); },
-        });
+  textoEnviar(z: Envio) {
+    if (z.status) return z.status === 'hecho' ? 'Marcar y avisar' : 'Cancelar y avisar';
+    return z.kind === 'recordatorio' && this.esResponsable(z) ? 'Enviar reminder ahora' : `Enviar${z.para.trim() ? ' a ' + z.para.trim().split(' ')[0] : ''}`;
+  }
+  patch(cambios: Partial<Envio>) { const z = this.cierre(); if (z) this.cierre.set({ ...z, ...cambios }); }
+
+  abrirRecordatorio(c: Commitment) { this.abrirEnvio(c, 'recordatorio', null, c.owner); }
+  abrirMensaje(c: Commitment, para?: string) { this.abrirEnvio(c, 'mensaje', null, para); }
+  abrirCierre(c: Commitment, status: CommitmentStatus | null) { this.abrirEnvio(c, status ? 'aviso' : 'mensaje', status); }
+
+  private abrirEnvio(c: Commitment, kind: Envio['kind'], status: CommitmentStatus | null, para?: string) {
+    this.cierre.set({ c, kind, status, personas: [], para: para || '', nuevo: false, rol: '', message: '', generado: '', redactando: true, delivery: [], auto: !!c.reminder_auto, corregido: null, corrigiendo: false });
+    this.api.getCommitmentPeople(c.id).subscribe({
+      next: (r) => {
+        const z = this.cierre(); if (!z || z.c.id !== c.id) return;
+        const destino = para || (kind === 'recordatorio' ? c.owner : status ? (c.counterpart || r.people[0]?.nombre) : r.people[0]?.nombre) || '';
+        const p = r.people.find((x) => x.nombre.toLowerCase() === destino.toLowerCase());
+        if (!p && !r.people.length) { this.cierre.set({ ...z, personas: r.people, nuevo: true, para: '', redactando: false }); return; }
+        this.cierre.set({ ...z, personas: r.people, para: p?.nombre || destino, delivery: p?.delivery || [] });
+        this.redactar();
       },
+      error: () => this.patch({ redactando: false }),
+    });
+  }
+
+  elegirPara(nombre: string) {
+    const z = this.cierre(); if (!z) return;
+    if (nombre === '__otra') { this.cierre.set({ ...z, nuevo: true, para: '', rol: '', message: '', generado: '', delivery: [], corregido: null }); return; }
+    const p = z.personas.find((x) => x.nombre === nombre);
+    this.cierre.set({ ...z, nuevo: false, para: nombre, delivery: p?.delivery || [], corregido: null });
+    this.redactar();
+  }
+
+  private tipoPara(z: Envio): CommitmentMsgTipo | undefined {
+    if (z.status === 'hecho' || z.status === 'cancelado') return z.status;
+    if (z.nuevo) return 'seguimiento';
+    if (z.kind === 'recordatorio') return this.esResponsable(z) ? 'recordatorio' : 'seguimiento';
+    return undefined; // el backend lo deduce de la relación con el compromiso
+  }
+
+  redactar() {
+    const z = this.cierre(); if (!z || !z.para.trim()) return;
+    this.patch({ redactando: true, corregido: null });
+    this.api.draftCommitmentMessage(z.c.id, { para: z.para.trim(), tipo: this.tipoPara(z), status: z.status }).subscribe({
+      next: (r) => { const a = this.cierre(); if (a && a.c.id === z.c.id) this.cierre.set({ ...a, message: r.message, generado: r.message, redactando: false }); },
+      error: (e) => { this.patch({ redactando: false }); this.toast.error(e?.error?.error || 'No se pudo redactar'); },
+    });
+  }
+
+  corregir(despues?: () => void) {
+    const z = this.cierre(); if (!z?.message.trim()) return;
+    this.patch({ corrigiendo: true });
+    this.api.correctText(z.message).subscribe({
+      next: (r) => {
+        const a = this.cierre(); if (!a) return;
+        if (r.cambiado) { this.cierre.set({ ...a, corrigiendo: false, corregido: r.texto }); return; }
+        this.cierre.set({ ...a, corrigiendo: false, generado: a.message });
+        if (despues) despues(); else this.toast.ok('Sin correcciones');
+      },
+      error: () => { this.patch({ corrigiendo: false }); if (despues) despues(); else this.toast.error('No se pudo corregir'); },
+    });
+  }
+
+  usarCorreccion(enviar: boolean) {
+    const z = this.cierre(); if (!z?.corregido) return;
+    this.cierre.set({ ...z, message: z.corregido, generado: z.corregido, corregido: null });
+    if (enviar) this.enviar(true);
+  }
+
+  /** Si el texto lo editó Jesús (difiere de lo redactado), pasa por el corrector antes de enviar. */
+  enviar(saltarCorreccion: boolean) {
+    const z = this.cierre(); if (!z) return;
+    if (!saltarCorreccion && z.message.trim() !== z.generado.trim()) { this.corregir(() => this.enviar(true)); return; }
+    this.patch({ corregido: null });
+    this.enviando.set(true);
+    const para = z.para.trim();
+    const fin = () => { this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarDetalle(z.c.id); };
+    const notificar = () => this.api.notifyCommitment(z.c.id, z.delivery, z.message, para).subscribe({
+      next: (r) => { this.toast.ok(`Enviado a ${para} por ${r.enviados.join(' + ')}${r.fallos.length ? ' · fallos: ' + r.fallos.join(' · ') : ''}`); fin(); },
+      error: (e) => { this.toast.error(e?.error?.error || 'No se pudo enviar'); fin(); },
+    });
+    const pasos: Array<() => Promise<unknown>> = [];
+    if (z.nuevo) pasos.push(() => firstValueFrom(this.api.addCommitmentPerson(z.c.id, { nombre: para, rol: z.rol.trim() || null, delivery: z.delivery })));
+    if (z.kind === 'recordatorio' && this.esResponsable(z)) pasos.push(() => firstValueFrom(this.api.setCommitmentReminder(z.c.id, !!z.auto, z.delivery)));
+    if (z.status) pasos.push(() => firstValueFrom(this.api.updateCommitment(z.c.id, { status: z.status! })));
+    pasos.reduce((p, f) => p.then(f), Promise.resolve() as Promise<unknown>)
+      .then(() => notificar())
+      .catch((e) => { this.toast.error(e?.error?.error || 'No se pudo guardar'); this.enviando.set(false); });
+  }
+
+  soloEstado() {
+    const z = this.cierre(); if (!z?.status) return;
+    this.api.updateCommitment(z.c.id, { status: z.status }).subscribe({
+      next: () => { this.toast.ok(`${z.c.id}: ${ESTADO_LABEL[z.status!]}`); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarDetalle(z.c.id); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo cambiar'),
+    });
+  }
+
+  guardarRecordatorio() {
+    const z = this.cierre(); if (!z) return;
+    this.enviando.set(true);
+    this.api.setCommitmentReminder(z.c.id, !!z.auto, z.delivery.length ? z.delivery : null).subscribe({
+      next: () => { this.toast.ok(z.auto ? 'Reminder automático activado' : 'Ajuste guardado'); this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarDetalle(z.c.id); },
       error: (e) => { this.toast.error(e?.error?.error || 'No se pudo guardar'); this.enviando.set(false); },
     });
   }
-  abrirCierre(c: Commitment, status: CommitmentStatus | null) {
-    this.cierre.set({ c, status, message: '', delivery: [], kind: 'aviso' });
-    this.api.getCommitmentDefaultMessage(c.id, status || undefined).subscribe({ next: (r) => { const z = this.cierre(); if (z && !z.message) { z.message = r.message; this.cierre.set({ ...z }); } }, error: () => {} });
-  }
-  setDelivery(d: TaskDelivery[]) { const z = this.cierre(); if (z) this.cierre.set({ ...z, delivery: d }); }
-  confirmarCierre(avisar: boolean) {
-    const z = this.cierre();
-    if (!z) return;
-    this.enviando.set(true);
-    const fin = () => { this.enviando.set(false); this.cierre.set(null); this.load(); if (this.abierto() === z.c.id) this.cargarHistorial(z.c.id); };
-    const notificar = () => this.api.notifyCommitment(z.c.id, z.delivery, z.message).subscribe({
-      next: (r) => { this.toast.ok(`Avisado por ${r.enviados.join(' + ')}${r.fallos.length ? ' · fallos: ' + r.fallos.join(' · ') : ''}`); fin(); },
-      error: (e) => { this.toast.error(e?.error?.error || 'No se pudo avisar'); fin(); },
+
+  // ─── Personas del compromiso ──────────────────────────────────────────
+  agregarPersona(c: Commitment) {
+    const nombre = this.personaNueva.trim(); if (!nombre) return;
+    this.api.addCommitmentPerson(c.id, { nombre, rol: this.rolNuevo.trim() || null }).subscribe({
+      next: (r) => { this.personas.set(r.people); this.historial.set(r.updates); this.personaNueva = ''; this.rolNuevo = ''; this.cdr.markForCheck(); },
+      error: (e) => this.toast.error(e?.error?.error || 'No se pudo agregar'),
     });
-    if (z.status) {
-      this.api.updateCommitment(z.c.id, { status: z.status }).subscribe({
-        next: () => { if (avisar && z.delivery.length) notificar(); else { this.toast.ok(`${z.c.id}: ${ESTADO_LABEL[z.status!]}`); fin(); } },
-        error: (e) => { this.toast.error(e?.error?.error || 'No se pudo cambiar'); this.enviando.set(false); },
-      });
-    } else if (avisar) notificar();
   }
+  quitarPersona(c: Commitment, nombre: string) {
+    this.api.removeCommitmentPerson(c.id, nombre).subscribe({
+      next: (r) => { this.personas.set(r.people); this.historial.set(r.updates); this.cdr.markForCheck(); },
+      error: () => this.toast.error('No se pudo quitar'),
+    });
+  }
+
   cambiarFecha(c: Commitment, fecha: string) {
     if (!fecha || fecha === c.due_date) return;
     const req = c.status === 'propuesto' ? this.api.acceptCommitment(c.id, fecha) : this.api.updateCommitment(c.id, { due_date: fecha });
@@ -439,7 +672,7 @@ export class CommitmentsComponent {
   guardarCampos(c: Commitment) {
     const p = this.pend[c.id];
     if (!p) return;
-    this.api.updateCommitment(c.id, p).subscribe({ next: () => { delete this.pend[c.id]; this.toast.ok('Guardado'); this.load(); this.cargarHistorial(c.id); }, error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar') });
+    this.api.updateCommitment(c.id, p).subscribe({ next: () => { delete this.pend[c.id]; this.toast.ok('Guardado'); this.load(); this.cargarDetalle(c.id); }, error: (e) => this.toast.error(e?.error?.error || 'No se pudo guardar') });
   }
   eliminar(c: Commitment) {
     if (!confirm(`¿Eliminar "${c.title}"? Se pierde su historial.`)) return;
@@ -447,10 +680,14 @@ export class CommitmentsComponent {
   }
   toggleDetalle(c: Commitment) {
     if (this.abierto() === c.id) { this.abierto.set(null); return; }
-    this.abierto.set(c.id); this.notaNueva = ''; this.cargarHistorial(c.id);
+    this.abierto.set(c.id); this.notaNueva = ''; this.personas.set([]); this.cargarDetalle(c.id);
   }
   private cargarHistorial(id: string) {
     this.api.getCommitment(id).subscribe({ next: (r) => { this.historial.set(r.updates); this.cdr.markForCheck(); }, error: () => {} });
+  }
+  private cargarDetalle(id: string) {
+    this.cargarHistorial(id);
+    this.api.getCommitmentPeople(id).subscribe({ next: (r) => { this.personas.set(r.people); this.cdr.markForCheck(); }, error: () => {} });
   }
   agregarNota(c: Commitment) {
     const t = this.notaNueva.trim();

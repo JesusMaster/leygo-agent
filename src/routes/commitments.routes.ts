@@ -91,8 +91,44 @@ export default function createCommitmentsRoutes() {
   /** Avisa a la contraparte por los canales elegidos (chat, email, buzz, a2a, telegram). */
   app.post('/api/commitments/:id/notify', async (req, res) => {
     try {
-      const r = await commitmentsService.notificar(req.params.id, req.body?.delivery || [], req.body?.message, 'jesus');
+      const r = await commitmentsService.notificar(req.params.id, req.body?.delivery || [], req.body?.message, 'jesus', req.body?.para || null);
       res.json({ ...r, updates: commitmentsService.historial(req.params.id, 100) });
+    } catch (err: any) { res.status(400).json({ error: err.message }); }
+  });
+
+  /** Corrector de textos (ortografía/puntuación) para mensajes escritos a mano. */
+  app.post('/api/commitments/correct-text', async (req, res) => {
+    try { res.json(await commitmentsService.corregirTexto(String(req.body?.text || ''))); }
+    catch (err: any) { res.status(502).json({ error: `No se pudo corregir: ${err.message}` }); }
+  });
+
+  /** Personas a las que se les puede escribir (responsable, contraparte e involucrados) con su último canal. */
+  app.get('/api/commitments/:id/people', (req, res) => {
+    const c = commitmentsService.obtener(req.params.id);
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    res.json({ people: commitmentsService.personas(c) });
+  });
+
+  app.post('/api/commitments/:id/people', (req, res) => {
+    const b = req.body || {};
+    if (!String(b.nombre || '').trim()) return res.status(400).json({ error: 'Falta el nombre' });
+    const c = commitmentsService.guardarParticipante(req.params.id, { nombre: b.nombre, rol: b.rol, delivery: b.delivery || [] }, 'jesus');
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    res.json({ item: c, people: commitmentsService.personas(c), updates: commitmentsService.historial(req.params.id, 100) });
+  });
+
+  app.delete('/api/commitments/:id/people/:nombre', (req, res) => {
+    const c = commitmentsService.quitarParticipante(req.params.id, req.params.nombre, 'jesus');
+    if (!c) return res.status(404).json({ error: 'No existe' });
+    res.json({ item: c, people: commitmentsService.personas(c), updates: commitmentsService.historial(req.params.id, 100) });
+  });
+
+  /** Borrador con IA para una persona, usando todo el historial del compromiso. */
+  app.post('/api/commitments/:id/draft', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const status = b.status && ESTADOS.includes(b.status) ? b.status : null;
+      res.json({ message: await commitmentsService.redactar(req.params.id, { para: b.para || null, tipo: b.tipo || undefined, status }) });
     } catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 

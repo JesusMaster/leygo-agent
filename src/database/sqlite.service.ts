@@ -140,6 +140,7 @@ export interface Commitment {
   reminder_auto: number;                 // 1 = friendly reminder automático (1 día antes y cada día vencido)
   reminder_delivery: string | null;      // JSON TaskDelivery[] para el reminder
   last_reminded_at: number | null;
+  participants?: string | null;          // JSON Participante[]: otras personas involucradas y su canal
 }
 export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
 
@@ -1003,6 +1004,7 @@ export class SqliteReminderService {
       if (!cols.includes('reminder_auto'))     this.db.exec(`ALTER TABLE commitments ADD COLUMN reminder_auto INTEGER NOT NULL DEFAULT 0`);
       if (!cols.includes('reminder_delivery')) this.db.exec(`ALTER TABLE commitments ADD COLUMN reminder_delivery TEXT`);
       if (!cols.includes('last_reminded_at'))  this.db.exec(`ALTER TABLE commitments ADD COLUMN last_reminded_at INTEGER`);
+      if (!cols.includes('participants'))      this.db.exec(`ALTER TABLE commitments ADD COLUMN participants TEXT`);
     } catch (err: any) {
       console.warn('⚠️ [SQLite] No se pudo migrar commitments:', err.message);
     }
@@ -1072,11 +1074,11 @@ export class SqliteReminderService {
     this.db.prepare(`
       UPDATE commitments SET title = ?, detail = ?, owner = ?, mine = ?, counterpart = ?, due_date = ?, proposed_due = ?, status = ?, priority = ?,
         source_type = ?, source_ref = ?, source_title = ?, source_link = ?, fingerprint = ?, updated_at = ?, completed_at = ?, last_notified_at = ?,
-        reminder_auto = ?, reminder_delivery = ?, last_reminded_at = ?
+        reminder_auto = ?, reminder_delivery = ?, last_reminded_at = ?, participants = ?
       WHERE id = ?
     `).run(n.title, n.detail ?? null, n.owner, n.mine ? 1 : 0, n.counterpart ?? null, n.due_date ?? null, n.proposed_due ?? null, n.status, n.priority,
       n.source_type ?? null, n.source_ref ?? null, n.source_title ?? null, n.source_link ?? null, n.fingerprint ?? null, n.updated_at, n.completed_at ?? null, n.last_notified_at ?? null,
-      n.reminder_auto ? 1 : 0, n.reminder_delivery ?? null, n.last_reminded_at ?? null, id);
+      n.reminder_auto ? 1 : 0, n.reminder_delivery ?? null, n.last_reminded_at ?? null, n.participants ?? null, id);
     return this.getCommitment(id);
   }
 

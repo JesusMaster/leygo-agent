@@ -120,8 +120,11 @@ export interface Commitment {
   due_date: string | null; proposed_due: string | null; status: CommitmentStatus; priority: 'alta' | 'media' | 'baja';
   source_type: string | null; source_ref: string | null; source_title: string | null; source_link: string | null;
   created_at: number; updated_at: number; completed_at: number | null; last_notified_at: number | null; score?: number;
-  reminder_auto?: number; reminder_delivery?: string | null; last_reminded_at?: number | null;
+  reminder_auto?: number; reminder_delivery?: string | null; last_reminded_at?: number | null; participants?: string | null;
 }
+/** Persona a la que se le puede escribir sobre un compromiso, con el último canal usado. */
+export interface CommitmentPerson { nombre: string; rol?: string | null; delivery: TaskDelivery[]; relacion: 'responsable' | 'contraparte' | 'involucrado'; }
+export type CommitmentMsgTipo = 'recordatorio' | 'seguimiento' | 'aviso' | 'hecho' | 'cancelado';
 export interface CommitmentUpdate { id: number; commitment_id: string; at: number; kind: string; text: string; by: string; }
 export interface CommitmentsPage { hoy: string; items: Commitment[]; stats: Record<string, number>; }
 export interface BackfillEstado { corriendo: boolean; iniciado: number | null; terminado: number | null; puntos: number; procesados: number; saltados: number; nuevos: number; repetidos: number; error: string | null; ultimo: string | null; }
@@ -316,7 +319,12 @@ export class ApiService {
   updateCommitment(id: string, data: Partial<Commitment> & { note?: string }): Observable<{ item: Commitment }> { return this.http.put<any>(`${this.baseUrl}/api/commitments/${id}`, data); }
   acceptCommitment(id: string, due_date?: string | null): Observable<{ item: Commitment }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/accept`, { due_date }); }
   addCommitmentNote(id: string, text: string): Observable<{ updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notes`, { text }); }
-  notifyCommitment(id: string, delivery: TaskDelivery[], message: string): Observable<{ enviados: string[]; fallos: string[]; updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notify`, { delivery, message }); }
+  notifyCommitment(id: string, delivery: TaskDelivery[], message: string, para?: string | null): Observable<{ enviados: string[]; fallos: string[]; updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/notify`, { delivery, message, para: para || null }); }
+  getCommitmentPeople(id: string): Observable<{ people: CommitmentPerson[] }> { return this.http.get<any>(`${this.baseUrl}/api/commitments/${id}/people`); }
+  addCommitmentPerson(id: string, p: { nombre: string; rol?: string | null; delivery?: TaskDelivery[] }): Observable<{ people: CommitmentPerson[]; updates: CommitmentUpdate[] }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/people`, p); }
+  removeCommitmentPerson(id: string, nombre: string): Observable<{ people: CommitmentPerson[]; updates: CommitmentUpdate[] }> { return this.http.delete<any>(`${this.baseUrl}/api/commitments/${id}/people/${encodeURIComponent(nombre)}`); }
+  draftCommitmentMessage(id: string, body: { para?: string | null; tipo?: CommitmentMsgTipo; status?: string | null }): Observable<{ message: string }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/${id}/draft`, body); }
+  correctText(text: string): Observable<{ texto: string; cambiado: boolean }> { return this.http.post<any>(`${this.baseUrl}/api/commitments/correct-text`, { text }); }
   getCommitmentDefaultMessage(id: string, status?: string, kind?: string): Observable<{ message: string }> { const qs = new URLSearchParams({ ...(status ? { status } : {}), ...(kind ? { kind } : {}) }).toString(); return this.http.get<any>(`${this.baseUrl}/api/commitments/${id}/default-message${qs ? '?' + qs : ''}`); }
   setCommitmentReminder(id: string, auto: boolean, delivery: TaskDelivery[] | null): Observable<{ item: Commitment }> { return this.http.put<any>(`${this.baseUrl}/api/commitments/${id}/reminder`, { auto, delivery }); }
   enrichCommitments(): Observable<any> { return this.http.post<any>(`${this.baseUrl}/api/commitments/enrich`, {}); }

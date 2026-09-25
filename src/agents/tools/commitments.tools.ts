@@ -148,21 +148,23 @@ export const commitmentHistory = new FunctionTool({
 
 export const commitmentNotify = new FunctionTool({
   name: 'commitment_notify',
-  description: 'Avisa a la contraparte de un compromiso por un canal: email (correo de la persona), chat (spaceName de Google Chat, p. ej. spaces/AAAA), buzz (canal por defecto), a2a (nombre del agente remoto) o telegram (Jesús). Úsala cuando Jesús diga "avísale a X que ya está", "notifícalo por correo" o, con tipo=recordatorio, "mándale un friendly reminder a X" (para lo que le deben a Jesús). Si no hay mensaje, se redacta uno en tono de Jesús.',
+  description: 'Avisa a la contraparte de un compromiso por un canal: email (correo de la persona), chat (spaceName de Google Chat, p. ej. spaces/AAAA), buzz (canal por defecto), a2a (nombre del agente remoto) o telegram (Jesús). Úsala cuando Jesús diga "avísale a X que ya está", "notifícalo por correo", "escríbele a Fabricio para coordinar esto" (usa para=Fabricio) o, con tipo=recordatorio, "mándale un friendly reminder a X" (para lo que le deben a Jesús). Si no hay mensaje, se redacta uno en tono de Jesús con todo el historial del compromiso.',
   parameters: z.object({
     id: z.string(),
     tipo: z.enum(['aviso', 'recordatorio']).optional().describe('recordatorio = friendly reminder a quien le debe algo a Jesús. Por defecto aviso.'),
     channel: z.enum(['email', 'chat', 'buzz', 'a2a', 'telegram']),
     target: z.string().optional().describe('Correo, spaceName de Chat, canal de Buzz o nombre del agente A2A. No aplica a telegram.'),
-    message: z.string().optional().describe('Texto a enviar. Omitir para usar el mensaje por defecto.'),
+    message: z.string().optional().describe('Texto a enviar. Omitir para que se redacte con el contexto completo del compromiso.'),
+    para: z.string().optional().describe('Nombre de la persona a la que se escribe si NO es la contraparte/responsable (p. ej. alguien más que está involucrado). Queda registrada como involucrada.'),
   }) as any,
   execute: async (args: any) => {
     if (externo()) return SOLO_JESUS;
     try {
       const c = commitmentsService.obtener(args.id);
       if (!c) return { status: 'error', message: `No existe el compromiso ${args.id}` };
-      const mensaje = args.message || (args.tipo === 'recordatorio' ? commitmentsService.mensajeRecordatorio(c) : undefined);
-      const r = await commitmentsService.notificar(args.id, [{ channel: args.channel, target: args.target || null }], mensaje, 'agente');
+      const para = args.para || (args.tipo === 'recordatorio' && !c.mine ? c.owner : c.counterpart) || null;
+      const mensaje = args.message || await commitmentsService.redactar(args.id, { para, tipo: args.tipo === 'recordatorio' ? 'recordatorio' : args.para ? 'seguimiento' : undefined });
+      const r = await commitmentsService.notificar(args.id, [{ channel: args.channel, target: args.target || null }], mensaje, 'agente', para);
       return { status: 'success', result: `${args.tipo === 'recordatorio' ? 'Friendly reminder enviado' : 'Avisado'} por ${r.enviados.join(' + ')}${r.fallos.length ? ` (fallos: ${r.fallos.join(' · ')})` : ''}.` };
     } catch (err: any) { return { status: 'error', message: err.message }; }
   },

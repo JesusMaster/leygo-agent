@@ -30,6 +30,22 @@ export interface Origen {
   link?: string | null;
 }
 
+export interface Destino { channel: string; target?: string | null; }
+
+/** Persona involucrada en un compromiso (además del responsable y la contraparte). */
+export interface Participante {
+  nombre: string;
+  rol?: string | null;          // "Legal", "coordina con Roberto"…
+  delivery: Destino[];          // último canal usado para escribirle
+}
+
+/** Destinatario de un mensaje, con su relación con el compromiso. */
+export interface Persona extends Participante {
+  relacion: 'responsable' | 'contraparte' | 'involucrado';
+}
+
+export type TipoMensaje = 'recordatorio' | 'seguimiento' | 'aviso' | 'hecho' | 'cancelado';
+
 const COLECCION = 'commitments';
 const NOMBRES_JESUS = /^(jes[uú]s|yisus|jleiva|yo|jes[uú]s leiva|jesus)$/i;
 const ABIERTOS: CommitmentStatus[] = ['propuesto', 'pendiente', 'en_curso'];
@@ -320,7 +336,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
    * Notifica a la contraparte (o a quien sea) por uno o más canales y lo deja
    * en el historial. `mensaje` vacío = texto por defecto según el estado.
    */
-  async notificar(id: string, destinos: Array<{ channel: string; target?: string | null }>, mensaje?: string, by = 'jesus'): Promise<{ enviados: string[]; fallos: string[] }> {
+  async notificar(id: string, destinos: Destino[], mensaje?: string, by = 'jesus', para?: string | null): Promise<{ enviados: string[]; fallos: string[] }> {
     const c = sqliteReminderService.getCommitment(id);
     if (!c) throw new Error(`No existe el compromiso ${id}`);
     if (!destinos?.length) throw new Error('Indica al menos un canal');
@@ -328,12 +344,166 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     const texto = (mensaje || '').trim() || this.mensajePorDefecto(c);
     const fallos = await scheduledTasksService.entregarPor(destinos as any, texto);
     const enviados = destinos.map((d) => scheduledTasksService.etiquetaDestino(d as any)).filter((e) => !fallos.some((f) => f.startsWith(e.split(' (')[0])));
+    const aQuien = para?.trim() ? ` a ${para.trim()}` : '';
     sqliteReminderService.addCommitmentUpdate({
       commitment_id: id, at: Date.now(), kind: 'notificado',
-      text: `${enviados.length ? `Avisado por ${enviados.join(' + ')}` : 'No se pudo avisar'}${fallos.length ? ` · fallos: ${fallos.join(' · ')}` : ''}: "${texto.slice(0, 200)}"`, by,
+      text: `${enviados.length ? `Avisado${aQuien} por ${enviados.join(' + ')}` : `No se pudo avisar${aQuien}`}${fallos.length ? ` · fallos: ${fallos.join(' · ')}` : ''}: "${texto.slice(0, 400)}"`, by,
     });
     if (fallos.length === destinos.length) throw new Error(`No se pudo notificar — ${fallos.join(' · ')}`);
+    // Se recuerda el canal usado con esa persona para la próxima vez.
+    if (para?.trim() && enviados.length) this.recordarCanal(c, para.trim(), destinos);
     return { enviados, fallos };
+  }
+
+  // ─── Personas involucradas ───────────────────────────────────────────
+  participantes(c: Commitment): Participante[] {
+    try { const v = JSON.parse(c.participants || '[]'); return Array.isArray(v) ? v.filter((p) => p?.nombre) : []; } catch { return []; }
+  }
+
+  /** Responsable/contraparte (si no es Jesús) + involucrados, con el canal que se usó la última vez. */
+  personas(c: Commitment): Persona[] {
+    const inv = this.participantes(c);
+    const out: Persona[] = [];
+    const clave = (n: string) => normalizar(n);
+    const add = (nombre: string | null | undefined, relacion: Persona['relacion']) => {
+      if (!nombre || esJesus(nombre) || out.some((p) => clave(p.nombre) === clave(nombre))) return;
+      const guardado = inv.find((p) => clave(p.nombre) === clave(nombre));
+      let delivery = guardado?.delivery || [];
+      if (!delivery.length && relacion === 'responsable' && c.reminder_delivery) { try { delivery = JSON.parse(c.reminder_delivery); } catch {} }
+      out.push({ nombre, rol: guardado?.rol || null, delivery, relacion });
+    };
+    add(c.mine ? null : c.owner, 'responsable');
+    add(c.counterpart, 'contraparte');
+    for (const p of inv) if (!out.some((x) => clave(x.nombre) === clave(p.nombre))) out.push({ ...p, relacion: 'involucrado' });
+    return out;
+  }
+
+  guardarParticipante(id: string, p: Participante, by = 'jesus'): Commitment | null {
+    const c = sqliteReminderService.getCommitment(id);
+    if (!c || !p?.nombre?.trim()) return null;
+    const lista = this.participantes(c);
+    const i = lista.findIndex((x) => normalizar(x.nombre) === normalizar(p.nombre));
+    const nuevo: Participante = { nombre: p.nombre.trim(), rol: p.rol?.trim() || null, delivery: Array.isArray(p.delivery) ? p.delivery : [] };
+    if (i >= 0) lista[i] = { ...lista[i], ...nuevo, delivery: nuevo.delivery.length ? nuevo.delivery : lista[i].delivery };
+    else lista.push(nuevo);
+    const n = sqliteReminderService.updateCommitment(id, { participants: JSON.stringify(lista) });
+    if (i < 0) sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: 'involucrado', text: `${nuevo.nombre} se suma al compromiso${nuevo.rol ? ` (${nuevo.rol})` : ''}`, by });
+    return n;
+  }
+
+  quitarParticipante(id: string, nombre: string, by = 'jesus'): Commitment | null {
+    const c = sqliteReminderService.getCommitment(id);
+    if (!c) return null;
+    const lista = this.participantes(c).filter((x) => normalizar(x.nombre) !== normalizar(nombre));
+    const n = sqliteReminderService.updateCommitment(id, { participants: lista.length ? JSON.stringify(lista) : null });
+    sqliteReminderService.addCommitmentUpdate({ commitment_id: id, at: Date.now(), kind: 'involucrado', text: `${nombre} ya no figura como involucrado`, by });
+    return n;
+  }
+
+  /** Guarda el canal usado con una persona: involucrado nuevo si no era responsable ni contraparte. */
+  private recordarCanal(c: Commitment, nombre: string, destinos: Destino[]): void {
+    const lista = this.participantes(c);
+    const i = lista.findIndex((x) => normalizar(x.nombre) === normalizar(nombre));
+    const principal = [c.mine ? null : c.owner, c.counterpart].some((x) => x && normalizar(x) === normalizar(nombre));
+    if (i >= 0) lista[i] = { ...lista[i], delivery: destinos };
+    else lista.push({ nombre, rol: null, delivery: destinos });
+    sqliteReminderService.updateCommitment(c.id, { participants: JSON.stringify(lista) });
+    if (i < 0 && !principal) sqliteReminderService.addCommitmentUpdate({ commitment_id: c.id, at: Date.now(), kind: 'involucrado', text: `${nombre} se suma al compromiso`, by: 'auto' });
+  }
+
+  // ─── Redacción con IA ─────────────────────────────────────────────────
+  /** Contexto del compromiso para el modelo: datos + historial cronológico (sin ruido de sistema). */
+  private contexto(c: Commitment): string {
+    const hist = sqliteReminderService.listCommitmentUpdates(c.id, 40).reverse()
+      .filter((u) => !['recordatorio', 'mencion'].includes(u.kind))
+      .map((u) => `- ${new Date(u.at).toLocaleDateString('es-CL', { timeZone: process.env.SCHEDULER_TZ || 'America/Santiago', day: '2-digit', month: '2-digit' })} [${u.kind}] ${u.text.slice(0, 500)}`);
+    const inv = this.participantes(c).map((p) => `${p.nombre}${p.rol ? ` (${p.rol})` : ''}`);
+    return [
+      `Compromiso: "${c.title}"`,
+      c.detail ? `Contexto: ${c.detail}` : '',
+      `Responsable: ${c.mine ? 'Jesús' : c.owner}${c.counterpart && !esJesus(c.counterpart) ? ` · Con/para: ${c.counterpart}` : ''}`,
+      inv.length ? `Otros involucrados: ${inv.join(', ')}` : '',
+      `Estado: ${c.status} · Fecha comprometida: ${c.due_date || c.proposed_due || 'sin fecha'} · Hoy: ${hoyIso()}`,
+      hist.length ? `Historial (más antiguo primero):\n${hist.join('\n')}` : 'Historial: (vacío)',
+    ].filter(Boolean).join('\n');
+  }
+
+  /**
+   * Redacta el mensaje para una persona con el contexto completo (historial, notas, avisos
+   * previos). Si la IA falla, cae a las plantillas de siempre.
+   */
+  async redactar(id: string, opts: { para?: string | null; tipo?: TipoMensaje; status?: CommitmentStatus | null } = {}): Promise<string> {
+    const c0 = sqliteReminderService.getCommitment(id);
+    if (!c0) throw new Error(`No existe el compromiso ${id}`);
+    const c = opts.status ? { ...c0, status: opts.status } : c0;
+    const personas = this.personas(c0);
+    const para = opts.para?.trim() || personas[0]?.nombre || null;
+    const persona = personas.find((p) => para && normalizar(p.nombre) === normalizar(para));
+    const relacion = persona?.relacion || (para ? 'involucrado' : 'contraparte');
+    const tipo: TipoMensaje = opts.tipo
+      || (opts.status === 'hecho' ? 'hecho' : opts.status === 'cancelado' ? 'cancelado'
+      : relacion === 'responsable' ? 'recordatorio' : relacion === 'involucrado' ? 'seguimiento' : 'aviso');
+    const nombre = (para || '').split(' ')[0];
+    const plantilla = () => {
+      if (tipo === 'recordatorio') return this.mensajeRecordatorio(c);
+      if (tipo === 'seguimiento') return `Hola ${nombre || ''}, te escribo por "${c.title}": ¿me ayudas con lo que falta de tu lado para cerrarlo? Gracias.`.replace('Hola ,', 'Hola,');
+      return this.mensajePorDefecto({ ...c, counterpart: para || c.counterpart });
+    };
+
+    const objetivo: Record<TipoMensaje, string> = {
+      recordatorio: 'friendly reminder: preguntar cómo va lo que esta persona le debe a Jesús y si necesita algo; si hay novedades en el historial, mencionarlas para que no parezca un mensaje automático',
+      seguimiento: 'coordinar con esta persona, que está involucrada pero no es la responsable: explicar en una frase en qué está el tema y pedirle concretamente lo que falta de su parte',
+      aviso: 'contarle en qué está el compromiso y el próximo paso',
+      hecho: 'avisar que el compromiso quedó listo y cerrar el tema',
+      cancelado: 'avisar que el compromiso queda sin efecto por ahora',
+    };
+    const prompt = `Eres Jesús Leiva (CTO de Apprecio) escribiendo un mensaje breve de trabajo por chat.
+Destinatario: ${para || 'la contraparte'}${persona?.rol ? ` (${persona.rol})` : ''} — ${relacion}.
+Objetivo: ${objetivo[tipo]}.
+
+${this.contexto(c)}
+
+Reglas:
+- Español de Chile, cercano y profesional; tutea. Saluda por el nombre de pila. 2 a 4 frases, sin firma.
+- Refleja el estado ACTUAL según el historial (lo último que pasó y lo que falta), no repitas el título literal si suena robótico.
+- Las notas son apuntes internos de Jesús: úsalas para entender la situación, pero no copies frases textuales, no reveles opiniones internas ni lo que otra persona dijo en privado; resume solo lo que el destinatario necesita saber.
+- No inventes fechas ni acuerdos que no estén en el contexto.
+- Responde SOLO con el texto del mensaje.`;
+
+    const { generarTexto } = await import('../agents/llm/model_factory.js');
+    const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
+    beginUsageScope('system', `commitment-${id}`, `Redactar mensaje (${tipo}) — ${c.title.slice(0, 60)}`);
+    try {
+      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: 600 })).replace(/^["“]|["”]$/g, '').trim();
+      return t || plantilla();
+    } catch (err: any) {
+      console.warn(`⚠️ [Compromisos] No se pudo redactar con IA (${err?.message}); uso plantilla.`);
+      return plantilla();
+    } finally {
+      flushUsageScope().catch(() => {});
+    }
+  }
+
+  /** Corrige ortografía, tildes y puntuación sin cambiar el sentido ni el tono. */
+  async corregirTexto(texto: string): Promise<{ texto: string; cambiado: boolean }> {
+    const original = (texto || '').trim();
+    if (!original) return { texto: original, cambiado: false };
+    const prompt = `Corrige la ortografía, tildes, mayúsculas, puntuación y gramática de este mensaje de chat en español.
+Reglas: no cambies el sentido, el tono (cercano, chileno), los nombres propios, términos técnicos ni el largo; no agregues saludos, despedidas ni frases nuevas; si ya está correcto, devuélvelo igual.
+Responde SOLO con el texto corregido.
+
+Mensaje:
+${original}`;
+    const { generarTexto } = await import('../agents/llm/model_factory.js');
+    const { beginUsageScope, flushUsageScope } = await import('../utils/usage_collector.js');
+    beginUsageScope('system', 'corrector', 'Corregir texto de mensaje');
+    try {
+      const t = (await generarTexto('commitments_agent', 'gemini-3.5-flash', prompt, { maxOutputTokens: 800 })).trim();
+      if (!t || t.length > original.length * 1.6 + 40) return { texto: original, cambiado: false }; // respuesta rara: no se toca
+      return { texto: t, cambiado: t !== original };
+    } finally {
+      flushUsageScope().catch(() => {});
+    }
   }
 
   /** Friendly reminder para quien le debe algo a Jesús. */
@@ -348,7 +518,7 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
   }
 
   /** Configura (o apaga) el friendly reminder automático de un compromiso. */
-  configurarRecordatorio(id: string, auto: boolean, delivery: Array<{ channel: string; target?: string | null }> | null, by = 'jesus'): Commitment | null {
+  configurarRecordatorio(id: string, auto: boolean, delivery: Destino[] | null, by = 'jesus'): Commitment | null {
     const c = sqliteReminderService.getCommitment(id);
     if (!c) return null;
     const n = sqliteReminderService.updateCommitment(id, { reminder_auto: auto ? 1 : 0, reminder_delivery: delivery?.length ? JSON.stringify(delivery) : c.reminder_delivery })!;
@@ -372,7 +542,8 @@ Responde ÚNICAMENTE con JSON: {"<n>": "<id del candidato>" | "nuevo"}`;
     for (const c of candidatos) {
       try {
         const destinos = JSON.parse(c.reminder_delivery!);
-        const r = await this.notificar(c.id, destinos, this.mensajeRecordatorio(c), 'auto');
+        const mensaje = await this.redactar(c.id, { para: c.owner, tipo: 'recordatorio' });
+        const r = await this.notificar(c.id, destinos, mensaje, 'auto', c.owner);
         sqliteReminderService.updateCommitment(c.id, { last_reminded_at: Date.now() });
         lineas.push(`• ${c.owner}: "${c.title}" (${c.due_date}) → ${r.enviados.join(' + ')}${r.fallos.length ? ` · fallos: ${r.fallos.join(' · ')}` : ''}`);
       } catch (err: any) {
