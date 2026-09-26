@@ -67,7 +67,7 @@ type Filtro = 'todos' | 'propios';
             </div>
             <div class="celda" data-lbl="Principal">
               @if (a.assignment) {
-                <span class="mchip propio" [class.caido]="caido(a)" [title]="caido(a) ? 'El proveedor está apagado o ya no existe: usa ' + a.efectivo.model : ''">
+                <span class="mchip propio" [class.caido]="caido(a)" [title]="caido(a) ? a.advertencia + ': por ahora usa ' + a.efectivo.provider + ' · ' + a.efectivo.model : ''">
                   <b>{{ nombreProv(a.assignment.provider) }}</b><code>{{ a.assignment.model }}</code>
                   @if (caido(a)) { <i class="ph ph-warning"></i> }
                 </span>
@@ -232,7 +232,12 @@ export class AgentModelsComponent {
   }
 
   nombreProv(id: string) { return this.providers().find((p) => p.id === id)?.name || id; }
-  caido(a: AgenteLlm) { return !!a.assignment && (a.efectivo.provider !== a.assignment.provider || a.efectivo.model !== a.assignment.model); }
+  /**
+   * El backend manda `advertencia` solo cuando la asignación no se puede usar (proveedor
+   * apagado, eliminado o sin key). No comparar `efectivo` con `assignment`: el primero
+   * trae el NOMBRE del proveedor y el segundo su ID.
+   */
+  caido(a: AgenteLlm) { return !!a.assignment && !!a.advertencia; }
   etiquetaRespaldo() { const g = this.globalFallback(); return g ? `Usar el global (${this.partir(g)!.model})` : 'Sin respaldo'; }
 
   partir(ref: string): { provider: string; model: string } | null {
