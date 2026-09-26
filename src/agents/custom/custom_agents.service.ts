@@ -270,13 +270,21 @@ class CustomAgentsService {
     return fallos;
   }
 
-  async probarTool(name: string, toolName: string, args: any) {
+  /**
+   * Ejecuta una herramienta en el sandbox. Con `borrador` prueba el código que se está
+   * editando en la GUI sin guardarlo (mismo sandbox, mismas variables del agente).
+   */
+  async probarTool(name: string, toolName: string, args: any, borrador?: { code?: string; network?: boolean }) {
     const m = this.get(name);
     if (!m) throw new Error(`No existe el agente ${name}`);
-    const t = m.tools.find((x) => x.name === toolName);
-    if (!t) throw new Error(`El agente ${name} no tiene la herramienta ${toolName}`);
-    const r = await ejecutar(t.code, args, this.ctxPara(m, t), t.name, t.network ? 90_000 : 10_000);
-    return r;
+    const guardada = m.tools.find((x) => x.name === toolName);
+    if (!guardada && typeof borrador?.code !== 'string') throw new Error(`El agente ${name} no tiene la herramienta ${toolName}`);
+    const t: CustomToolDef = {
+      ...(guardada || { name: toolName, description: '', parameters: { type: 'object', properties: {} }, code: '' }),
+      ...(typeof borrador?.code === 'string' ? { code: borrador.code } : {}),
+      ...(typeof borrador?.network === 'boolean' ? { network: borrador.network } : {}),
+    };
+    return ejecutar(t.code, args, this.ctxPara(m, t), t.name, t.network ? 90_000 : 10_000);
   }
 
   // ─── Alta / edición / baja ───────────────────────────────────────────

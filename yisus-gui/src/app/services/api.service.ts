@@ -354,7 +354,10 @@ export class ApiService {
   updateAgent(name: string, data: Partial<CustomAgent>): Observable<{ agent: CustomAgent }> { return this.http.put<any>(`${this.baseUrl}/api/agents/${name}`, data); }
   deleteAgent(name: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/agents/${name}`); }
   generateAgent(prompt: string): Observable<{ respuesta: string; pasos: string[]; nuevos: string[]; agents: CustomAgent[] }> { return this.http.post<any>(`${this.baseUrl}/api/agents/generate`, { prompt }); }
-  testAgentTool(name: string, tool: string, args: any): Observable<{ ok: boolean; result?: any; error?: string; logs: string[]; ms: number }> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/tools/${tool}/test`, { args }); }
+  /** Con `draft` prueba el código en edición sin guardarlo. */
+  testAgentTool(name: string, tool: string, args: any, draft?: { code: string; network?: boolean }): Observable<{ ok: boolean; result?: any; error?: string; logs: string[]; ms: number }> {
+    return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/tools/${encodeURIComponent(tool)}/test`, { args, ...(draft ? { draft } : {}) });
+  }
   chatAgent(name: string, text: string): Observable<{ respuesta: string; pasos: string[] }> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/chat`, { text }); }
   getLlmCatalogo(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/catalogo`); }
   getEnv(): Observable<{ ruta: string; vars: EnvVar[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/env`); }

@@ -129,7 +129,9 @@ export default function createAgentsRoutes() {
   });
 
   app.post('/api/agents/:name/tools/:tool/test', async (req, res) => {
-    try { res.json(await customAgentsService.probarTool(req.params.name, req.params.tool, req.body?.args || {})); }
+    const draft = req.body?.draft && typeof req.body.draft.code === 'string'
+      ? { code: String(req.body.draft.code).slice(0, 50_000), network: !!req.body.draft.network } : undefined;
+    try { res.json(await customAgentsService.probarTool(req.params.name, req.params.tool, req.body?.args || {}, draft)); }
     catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 
