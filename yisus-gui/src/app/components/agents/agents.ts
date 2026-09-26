@@ -2,7 +2,7 @@ import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ApiService, CanalAgente, CustomAgent, CustomToolDef, EnvVar } from '../../services/api.service';
+import { ApiService, CanalAgente, CustomAgent, CustomToolDef, EnvVar, HerramientaGenerada, SugerenciaTool } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { ModelPickerComponent } from '../model-picker/model-picker';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
@@ -211,7 +211,33 @@ const EJEMPLOS_IA = [
                         </small>
                       </button>
                     }
-                    <button class="titem nueva" (click)="agregarTool()"><i class="ph ph-plus"></i> Nueva herramienta</button>
+                    <div class="nuevas">
+                      <button class="btn-primary sm" (click)="abrirToolIA()"><i class="ph ph-sparkle"></i> Crear con IA</button>
+                      <button class="btn-secondary sm" (click)="agregarTool()" title="Empieza desde una plantilla vacía"><i class="ph ph-plus"></i> A mano</button>
+                    </div>
+
+                    <div class="recom">
+                      <div class="recom-h">
+                        <span><i class="ph ph-lightbulb"></i> Recomendadas</span>
+                        @if (recomendadas() !== null && !cargandoSug()) { <button class="link" (click)="cargarSugerencias(a, true)" title="Pedir otras"><i class="ph ph-arrows-clockwise"></i></button> }
+                      </div>
+                      @if (cargandoSug()) {
+                        <div class="recom-vacio"><span class="spinner"></span> Pensando qué le falta a {{ a.displayName }}…</div>
+                      } @else if (recomendadas() === null) {
+                        <p class="recom-vacio">Ideas de herramientas según su personalidad y lo que ya sabe hacer.</p>
+                        <button class="btn-secondary sm ancho" (click)="cargarSugerencias(a)"><i class="ph ph-sparkle"></i> Sugerir herramientas</button>
+                      } @else {
+                        @for (sg of recomendadas()!; track sg.nombre) {
+                          <button class="sug" (click)="abrirToolIA(sg)" [title]="sg.pedido">
+                            <b>{{ sg.titulo }}</b>
+                            <small>{{ sg.descripcion }}</small>
+                            @if (sg.network || sg.requiere) { <span class="sug-tags">@if (sg.network) { <em><i class="ph ph-globe"></i> red</em> }@if (sg.requiere) { <em><i class="ph ph-key"></i> {{ sg.requiere }}</em> }</span> }
+                          </button>
+                        } @empty {
+                          <p class="recom-vacio">No se me ocurren más: ya cubre lo principal.</p>
+                        }
+                      }
+                    </div>
                   </div>
 
                   @if (f.tools[toolSel()]; as t) {
@@ -350,6 +376,85 @@ const EJEMPLOS_IA = [
           </div>
         </section>
       }
+    }
+
+    <!-- ═══ Herramienta con IA ═══ -->
+    @if (modalTool(); as mt) {
+      <div class="modal-backdrop" (click)="cerrarToolIA()">
+        <div class="modal ancho-tool" (click)="$event.stopPropagation()">
+          <div class="modal-head"><h3><i class="ph ph-sparkle"></i> Nueva herramienta con IA</h3><button class="btn-icon" (click)="cerrarToolIA()"><i class="ph ph-x"></i></button></div>
+          <div class="modal-body">
+            @if (!generandoTool() && !mt.resultado) {
+              <label class="field">
+                <span>¿Qué debe hacer? Describe entradas, resultado y unidades</span>
+                <textarea rows="5" [(ngModel)]="pedidoTool" placeholder="Ej: dado el rumbo de pista y el viento (dirección y velocidad en nudos), calcula la componente de viento cruzado y de frente."></textarea>
+              </label>
+              @if (recomendadas()?.length) {
+                <div class="ejemplos">
+                  <small class="dim">Recomendadas:</small>
+                  @for (sg of recomendadas()!; track sg.nombre) { <button class="ej" (click)="pedidoTool = sg.pedido">{{ sg.titulo }}</button> }
+                </div>
+              }
+              <small class="hint">Escribe el código, los parámetros y los tests, los corre en el sandbox y te la deja como borrador. Se integra al agente cuando guardas.</small>
+            } @else if (generandoTool()) {
+              <div class="pedido"><i class="ph ph-quotes"></i> {{ pedidoTool }}</div>
+              <div class="generando"><span class="spinner"></span> {{ faseTool() }}</div>
+            } @else if (mt.resultado; as r) {
+              @let okTests = contarOk(r);
+              <div class="gen-res">
+                <div class="gen-top">
+                  <code class="gen-nombre">{{ r.tool.name }}</code>
+                  @if (r.tool.network) { <span class="tag"><i class="ph ph-globe"></i> usa red</span> }
+                  @if (r.tests.length) {
+                    <span class="tag" [class.ok]="okTests === r.tests.length" [class.warn]="okTests < r.tests.length"><i class="ph ph-checks"></i> {{ okTests }}/{{ r.tests.length }} tests</span>
+                  } @else { <span class="tag">sin tests</span> }
+                  @if (r.intentos > 1) { <span class="tag" title="La IA corrigió su primer intento">corregida</span> }
+                </div>
+                <p class="gen-desc">{{ r.tool.description }}</p>
+                @if (r.nota) { <div class="aviso"><i class="ph ph-info"></i> {{ r.nota }}</div> }
+                <div class="gen-params">
+                  <span class="lbl">Parámetros</span>
+                  @for (p of paramsDe(r.tool); track p.nombre) {
+                    <div class="gp"><code>{{ p.nombre }}</code><em>{{ p.tipo }}{{ p.requerido ? ' · requerido' : '' }}</em><small>{{ p.descripcion }}</small></div>
+                  } @empty { <small class="dim">sin parámetros</small> }
+                </div>
+                @if (r.tests.length) {
+                  <ul class="tests">
+                    @for (x of r.tests; track $index) {
+                      <li [class.ok]="x.ok" [class.bad]="!x.ok">
+                        <i class="ph" [class.ph-check-circle]="x.ok" [class.ph-x-circle]="!x.ok"></i>
+                        <code>{{ json1(x.args) }}</code>
+                        @if (x.ok && x.resultado !== undefined) { <span class="dim">→ {{ json1(x.resultado).slice(0, 120) }}</span> }
+                        @if (!x.ok) { <span>{{ x.detalle }}</span> }
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (r.envNuevas.length) {
+                  <div class="aviso warn"><i class="ph ph-key"></i> Necesita {{ r.envNuevas.length === 1 ? 'la variable' : 'las variables' }} <b>{{ nombresEnv(r) }}</b>: se agregan a Variables para que les pongas valor.</div>
+                }
+                @if (okTests < r.tests.length) {
+                  <div class="aviso warn"><i class="ph ph-warning"></i> Hay tests que fallan: al guardar el agente se rechaza. Puedes regenerarla o agregarla y corregirla en el editor.</div>
+                }
+                <details class="gen-code"><summary>Ver código</summary><pre class="out">{{ r.tool.code }}</pre></details>
+              </div>
+            }
+          </div>
+          <div class="modal-foot">
+            @if (mt.resultado && !generandoTool()) {
+              <button class="btn-secondary" (click)="mt.resultado = null">Ajustar pedido</button>
+              <button class="btn-secondary" (click)="generarTool(mt.agente)"><i class="ph ph-arrows-clockwise"></i> Regenerar</button>
+              <span class="spacer"></span>
+              <button class="btn-primary" (click)="integrarTool(mt.resultado)"><i class="ph ph-plus"></i> Agregar al agente</button>
+            } @else {
+              <button class="btn-secondary" (click)="cerrarToolIA()">Cancelar</button>
+              <button class="btn-primary" [disabled]="pedidoTool.trim().length < 8 || generandoTool()" (click)="generarTool(mt.agente)">
+                @if (generandoTool()) { <span class="spinner"></span> Creando… } @else { <i class="ph ph-sparkle"></i> Crear herramienta }
+              </button>
+            }
+          </div>
+        </div>
+      </div>
     }
 
     <!-- ═══ Crear a mano ═══ -->
@@ -543,7 +648,34 @@ const EJEMPLOS_IA = [
     .titem small .ok { color: var(--ok); } .titem small .bad { color: var(--danger); }
     .titem:hover { background: var(--bg-card); }
     .titem.on { border-color: var(--accent-primary); background: rgba(129,140,248,.1); }
-    .titem.nueva { flex-direction: row; align-items: center; gap: 6px; color: var(--text-dim); border: 1px dashed var(--border-light); margin-top: 4px; font-size: 13px; }
+    .nuevas { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 8px; }
+    .nuevas .btn-primary.sm { justify-content: center; }
+    .recom { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 6px; }
+    .recom-h { display: flex; justify-content: space-between; align-items: center; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+    .recom-h i { color: var(--warn); }
+    .recom-vacio { margin: 0 0 4px; color: var(--text-dim); font-size: 12.5px; line-height: 1.45; }
+    .btn-secondary.sm.ancho { width: 100%; justify-content: center; }
+    .link { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px; }
+    .link:hover { color: var(--accent-primary); }
+    .sug { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 9px 10px; border-radius: 9px; border: 1px dashed var(--border-light); background: none; color: var(--text-main); cursor: pointer; }
+    .sug:hover { border-color: var(--accent-primary); border-style: solid; background: rgba(129,140,248,.06); }
+    .sug b { font-size: 13px; }
+    .sug small { color: var(--text-dim); font-size: 12px; line-height: 1.4; }
+    .sug-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sug-tags em { font-style: normal; font-size: 11px; color: var(--text-dim); }
+    .modal.ancho-tool { width: min(760px, 100%); }
+    .generando { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13.5px; }
+    .gen-res { display: flex; flex-direction: column; gap: 12px; }
+    .gen-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .gen-nombre { font-size: 15px; font-weight: 600; }
+    .gen-desc { margin: 0; color: var(--text-dim); font-size: 13.5px; }
+    .gen-params { display: flex; flex-direction: column; gap: 6px; }
+    .gen-params .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+    .gp { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: baseline; font-size: 13px; }
+    .gp em { font-style: normal; color: var(--text-dim); font-size: 12px; }
+    .gp small { color: var(--text-dim); font-size: 12px; }
+    .aviso.warn { background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.4); }
+    .gen-code summary { cursor: pointer; color: var(--text-dim); font-size: 13px; }
     .teditor { min-width: 0; }
     .teditor .grid2 > * { min-width: 0; }
     .teditor.empty { color: var(--text-dim); font-size: 13.5px; padding: 20px; border: 1px dashed var(--border-light); border-radius: 10px; }
@@ -804,6 +936,7 @@ export class AgentsComponent {
     this.mensajes.set([]);
     this.elegirTool(0);
     this.estadoTests.set({});
+    if (this.sugDe !== a.name) this.recomendadas.set(null);
     this.cdr.markForCheck();
   }
 
@@ -935,6 +1068,73 @@ export class AgentsComponent {
     }
     this.estadoTests.set({ ...this.estadoTests(), [this.toolSel()]: { ok: res.filter((x) => x.ok).length, total: res.length } });
     this.ejecutando.set(false);
+  }
+
+  // ─── Herramientas con IA y recomendadas ───────────────────────────────
+  recomendadas = signal<SugerenciaTool[] | null>(null);
+  cargandoSug = signal(false);
+  modalTool = signal<{ agente: CustomAgent; resultado: HerramientaGenerada | null } | null>(null);
+  generandoTool = signal(false);
+  faseTool = signal('');
+  pedidoTool = '';
+  private sugDe = '';
+
+  cargarSugerencias(a: CustomAgent, refrescar = false) {
+    this.cargandoSug.set(true);
+    this.api.getToolSuggestions(a.name, refrescar).subscribe({
+      next: (r) => { this.cargandoSug.set(false); this.recomendadas.set(r.sugerencias); this.sugDe = a.name; },
+      error: (e) => { this.cargandoSug.set(false); this.toast.error(e?.error?.error || 'No se pudieron sugerir herramientas'); },
+    });
+  }
+
+  abrirToolIA(sg?: SugerenciaTool) {
+    const a = this.actual();
+    if (!a) return;
+    this.pedidoTool = sg?.pedido || '';
+    this.modalTool.set({ agente: a, resultado: null });
+  }
+
+  cerrarToolIA() {
+    if (this.generandoTool() && !confirm('Se está creando la herramienta. ¿Cerrar y descartarla?')) return;
+    this.modalTool.set(null);
+  }
+
+  generarTool(a: CustomAgent) {
+    const pedido = this.pedidoTool.trim();
+    if (pedido.length < 8) return;
+    this.generandoTool.set(true);
+    // El backend no transmite avance: fases aproximadas para que se note que está trabajando.
+    const fases = ['Diseñando la herramienta…', 'Escribiendo el código…', 'Calculando los tests…', 'Probando en el sandbox…', 'Revisando los resultados…'];
+    let i = 0; this.faseTool.set(fases[0]);
+    const t = setInterval(() => { i = Math.min(i + 1, fases.length - 1); this.faseTool.set(fases[i]); }, 6000);
+    this.api.generateAgentTool(a.name, pedido).subscribe({
+      next: (r) => { clearInterval(t); this.generandoTool.set(false); const m = this.modalTool(); if (m) this.modalTool.set({ ...m, resultado: r }); },
+      error: (e) => { clearInterval(t); this.generandoTool.set(false); this.toast.error(e?.error?.error || 'No se pudo crear la herramienta'); },
+    });
+  }
+
+  /** Suma la herramienta generada al borrador del agente (se integra al guardar). */
+  integrarTool(r: HerramientaGenerada) {
+    if (!this.form) return;
+    const existentes = new Set(this.form.tools.map((x) => x.name));
+    let nombre = r.tool.name;
+    for (let n = 2; existentes.has(nombre); n++) nombre = `${r.tool.name}_${n}`;
+    this.form.tools.push({ ...JSON.parse(JSON.stringify(r.tool)), name: nombre });
+    for (const e of r.envNuevas) if (!this.form.env.some((x) => x.name === e.name)) this.form.env.push({ ...e });
+    const i = this.form.tools.length - 1;
+    this.elegirTool(i);
+    if (r.tests.length) this.estadoTests.set({ ...this.estadoTests(), [i]: { ok: this.contarOk(r), total: r.tests.length } });
+    this.recomendadas.update((l) => l?.filter((s) => s.nombre !== r.tool.name && s.pedido !== this.pedidoTool.trim()) ?? l);
+    this.modalTool.set(null);
+    this.toast.ok(`${nombre} agregada como borrador: revísala y guarda para integrarla`);
+  }
+
+  contarOk(r: HerramientaGenerada) { return r.tests.filter((x) => x.ok).length; }
+  nombresEnv(r: HerramientaGenerada) { return r.envNuevas.map((e) => e.name).join(', '); }
+  paramsDe(t: CustomToolDef) {
+    const props = (t.parameters?.properties || {}) as Record<string, any>;
+    const req: string[] = t.parameters?.required || [];
+    return Object.entries(props).map(([nombre, v]) => ({ nombre, tipo: v?.type || 'any', descripcion: v?.description || '', requerido: req.includes(nombre) }));
   }
 
   // ─── Guardar / estado ─────────────────────────────────────────────────

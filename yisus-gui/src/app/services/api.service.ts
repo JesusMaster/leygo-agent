@@ -141,6 +141,9 @@ export interface BackfillEstado { corriendo: boolean; iniciado: number | null; t
 export interface CustomToolDef { name: string; description: string; parameters: any; code: string; network?: boolean; tests?: Array<{ args: any; expect?: any; note?: string }>; }
 export interface CustomEnvVar { name: string; description: string; secret?: boolean; }
 export type CanalAgente = 'telegram' | 'api' | 'buzz' | 'a2a';
+export interface ResultadoTestTool { args: any; ok: boolean; detalle?: string; resultado?: any }
+export interface HerramientaGenerada { tool: CustomToolDef; tests: ResultadoTestTool[]; envNuevas: CustomEnvVar[]; nota: string; intentos: number }
+export interface SugerenciaTool { nombre: string; titulo: string; descripcion: string; pedido: string; network: boolean; requiere?: string }
 export interface CustomAgent {
   name: string; displayName: string; description: string; soul: string; tools: CustomToolDef[]; env: CustomEnvVar[];
   memory: boolean; model: string | null; channels: CanalAgente[]; enabled: boolean; createdBy: 'ia' | 'gui'; createdAt: string; updatedAt: string; version: number;
@@ -357,6 +360,11 @@ export class ApiService {
   /** Con `draft` prueba el código en edición sin guardarlo. */
   testAgentTool(name: string, tool: string, args: any, draft?: { code: string; network?: boolean }): Observable<{ ok: boolean; result?: any; error?: string; logs: string[]; ms: number }> {
     return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/tools/${encodeURIComponent(tool)}/test`, { args, ...(draft ? { draft } : {}) });
+  }
+  /** Herramienta con IA: borrador probado en el sandbox (no se guarda hasta "Guardar"). */
+  generateAgentTool(name: string, pedido: string): Observable<HerramientaGenerada> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/tools/generate`, { pedido }); }
+  getToolSuggestions(name: string, refrescar = false): Observable<{ sugerencias: SugerenciaTool[] }> {
+    return this.http.get<any>(`${this.baseUrl}/api/agents/${name}/tools/suggestions`, { params: refrescar ? { refrescar: '1' } : {} });
   }
   chatAgent(name: string, text: string): Observable<{ respuesta: string; pasos: string[] }> { return this.http.post<any>(`${this.baseUrl}/api/agents/${name}/chat`, { text }); }
   getLlmCatalogo(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/settings/llm/catalogo`); }

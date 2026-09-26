@@ -3,6 +3,7 @@ import express from 'express';
 import { adminGuard } from './admin_guard.js';
 import { conProgreso, customAgentsService } from '../agents/custom/custom_agents.service.js';
 import { builderAgent } from '../agents/builder.agent.js';
+import { generarHerramienta, sugerirHerramientas } from '../agents/custom/tool_generator.js';
 import { beginUsageScope, flushUsageScope } from '../utils/usage_collector.js';
 
 /** Agentes personalizados: CRUD, prueba, y creación con IA (agente programador). */
@@ -133,6 +134,24 @@ export default function createAgentsRoutes() {
       ? { code: String(req.body.draft.code).slice(0, 50_000), network: !!req.body.draft.network } : undefined;
     try { res.json(await customAgentsService.probarTool(req.params.name, req.params.tool, req.body?.args || {}, draft)); }
     catch (err: any) { res.status(400).json({ error: err.message }); }
+  });
+
+  /** Herramienta nueva con IA: devuelve un BORRADOR probado (no lo guarda; la GUI lo integra al guardar). */
+  app.post('/api/agents/:name/tools/generate', async (req, res) => {
+    const pedido = String(req.body?.pedido || '').trim();
+    if (!pedido) return res.status(400).json({ error: 'Describe la herramienta que quieres' });
+    beginUsageScope('api', `agent-tool-${req.params.name}`, `[Herramienta IA ${req.params.name}] ${pedido.slice(0, 80)}`);
+    try { res.json(await generarHerramienta(req.params.name, pedido)); }
+    catch (err: any) { res.status(400).json({ error: err.message }); }
+    finally { flushUsageScope().catch(() => {}); }
+  });
+
+  /** Herramientas recomendadas para el agente (se cachean por versión; ?refrescar=1 recalcula). */
+  app.get('/api/agents/:name/tools/suggestions', async (req, res) => {
+    beginUsageScope('api', `agent-sug-${req.params.name}`, `[Sugerencias ${req.params.name}]`);
+    try { res.json({ sugerencias: await sugerirHerramientas(req.params.name, req.query.refrescar === '1') }); }
+    catch (err: any) { res.status(400).json({ error: err.message }); }
+    finally { flushUsageScope().catch(() => {}); }
   });
 
   /** Conversación de prueba con el agente, sin pasar por el Coordinator. */
