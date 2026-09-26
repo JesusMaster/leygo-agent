@@ -11,6 +11,9 @@ export const routes: Routes = [
   { path: 'tokens',       loadComponent: () => import('./components/tokens/tokens').then(m => m.TokensComponent), canActivate: [authGuard] },
   { path: 'escalations',  loadComponent: () => import('./components/escalations/escalations').then(m => m.EscalationsComponent), canActivate: [authGuard] },
   { path: 'agents',       loadComponent: () => import('./components/agents/agents').then(m => m.AgentsComponent), canActivate: [authGuard] },
+  // Detalle de un agente: mismo componente, página completa (link directo y "atrás" del navegador).
+  { path: 'agents/:name', loadComponent: () => import('./components/agents/agents').then(m => m.AgentsComponent), canActivate: [authGuard],
+    canDeactivate: [(c: { puedeSalir?: () => boolean }) => c.puedeSalir?.() ?? true] },
   { path: 'commitments',  loadComponent: () => import('./components/commitments/commitments').then(m => m.CommitmentsComponent), canActivate: [authGuard] },
   { path: 'webhooks',     loadComponent: () => import('./components/webhooks/webhooks').then(m => m.WebhooksComponent), canActivate: [authGuard] },
   { path: 'tasks',        loadComponent: () => import('./components/tasks/tasks').then(m => m.TasksComponent), canActivate: [authGuard] },

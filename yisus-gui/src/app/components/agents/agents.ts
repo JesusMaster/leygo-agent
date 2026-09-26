@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ApiService, CanalAgente, CustomAgent, CustomToolDef, EnvVar } from '../../services/api.service';
 import { ToastService } from '../../services/toast.service';
 import { ModelPickerComponent } from '../model-picker/model-picker';
@@ -32,6 +33,7 @@ const EJEMPLOS_IA = [
   selector: 'app-agents',
   imports: [FormsModule, RouterLink, ModelPickerComponent, MarkdownPipe],
   template: `
+    @if (!actual() || !form) {
     <div class="page">
       <div class="page-head">
         <div>
@@ -46,6 +48,12 @@ const EJEMPLOS_IA = [
 
       @if (!cargado()) {
         <div class="card"><div class="empty">Cargando…</div></div>
+      } @else if (rutaAgente() && !actual()) {
+        <div class="card vacio">
+          <h3>No existe &#64;{{ rutaAgente() }}</h3>
+          <p>Puede que lo hayan eliminado o renombrado.</p>
+          <a class="btn-secondary" routerLink="/agents"><i class="ph ph-arrow-left"></i> Volver a Agentes</a>
+        </div>
       } @else if (agents().length === 0) {
         <div class="card vacio">
           <span class="vacio-ico"><i class="ph ph-robot"></i></span>
@@ -96,13 +104,14 @@ const EJEMPLOS_IA = [
         </div>
       }
     </div>
+    }
 
-    <!-- ═══ Panel lateral: edición y prueba ═══ -->
+    <!-- ═══ Detalle (ruta /agents/:name): edición y prueba ═══ -->
     @if (actual(); as a) {
       @if (form; as f) {
-        <div class="drawer-backdrop" (click)="cerrarPanel()"></div>
-        <aside class="drawer">
-          <div class="drawer-head">
+        <section class="detalle">
+          <div class="det-head">
+            <a class="volver" routerLink="/agents" title="Volver a Agentes"><i class="ph ph-arrow-left"></i></a>
             <div class="dh">
               <span class="avatar" [style.background]="colorDe(a.name, .18)" [style.color]="colorDe(a.name, 1)">{{ (f.displayName || a.name).slice(0, 1) }}</span>
               <div>
@@ -110,18 +119,21 @@ const EJEMPLOS_IA = [
                 <div class="sub">&#64;{{ a.name }} · v{{ a.version }} · {{ a.createdBy === 'ia' ? 'creado por IA' : 'creado a mano' }}</div>
               </div>
             </div>
-            <button class="btn-icon" title="Cerrar" (click)="cerrarPanel()"><i class="ph ph-x"></i></button>
+            <span class="spacer"></span>
+            <label class="switch" [title]="a.enabled ? 'Activo: clic para pausar' : 'Pausado: clic para activar'">
+              <input type="checkbox" [checked]="a.enabled" (change)="alternar(a)" /><span></span>
+            </label>
           </div>
 
           <nav class="ptabs">
-            <button [class.on]="pestana() === 'general'" (click)="pestana.set('general')">General</button>
-            <button [class.on]="pestana() === 'soul'" (click)="pestana.set('soul')">Personalidad</button>
-            <button [class.on]="pestana() === 'tools'" (click)="pestana.set('tools')">Herramientas <span class="n">{{ f.tools.length }}</span></button>
-            <button [class.on]="pestana() === 'env'" (click)="pestana.set('env')">Variables <span class="n" [class.warn]="variablesFaltantes(a).length">{{ f.env.length }}</span></button>
-            <button [class.on]="pestana() === 'probar'" (click)="pestana.set('probar')"><i class="ph ph-chat-circle-dots"></i> Probar</button>
+            <button [class.on]="pestana() === 'general'" (click)="irPestana('general')">General</button>
+            <button [class.on]="pestana() === 'soul'" (click)="irPestana('soul')">Personalidad</button>
+            <button [class.on]="pestana() === 'tools'" (click)="irPestana('tools')">Herramientas <span class="n">{{ f.tools.length }}</span></button>
+            <button [class.on]="pestana() === 'env'" (click)="irPestana('env')">Variables <span class="n" [class.warn]="variablesFaltantes(a).length">{{ f.env.length }}</span></button>
+            <button [class.on]="pestana() === 'probar'" (click)="irPestana('probar')"><i class="ph ph-chat-circle-dots"></i> Probar</button>
           </nav>
 
-          <div class="drawer-body">
+          <div class="det-body" [class.ancho]="pestana() === 'tools' || pestana() === 'soul'">
             @switch (pestana()) {
               @case ('general') {
                 <label class="field"><span>Nombre visible</span><input type="text" [(ngModel)]="f.displayName" /></label>
@@ -192,11 +204,11 @@ const EJEMPLOS_IA = [
                       <label class="field"><span>Descripción <em>el modelo la lee para decidir cuándo usarla</em></span><input type="text" [(ngModel)]="t.description" /></label>
                       <label class="field">
                         <span>Parámetros <em>JSON Schema</em>@if (errorParams(); as e) { <em class="bad"> · {{ e }}</em> }</span>
-                        <textarea rows="5" class="mono" [class.invalido]="errorParams()" [ngModel]="paramsTxt()" (ngModelChange)="editarParams($event)"></textarea>
+                        <textarea rows="8" class="mono" [class.invalido]="errorParams()" [ngModel]="paramsTxt()" (ngModelChange)="editarParams($event)"></textarea>
                       </label>
                       <label class="field">
                         <span>Código <em>cuerpo de async (args, ctx) =&gt; {{ '{' }} … {{ '}' }} · en sandbox</em></span>
-                        <textarea rows="12" class="mono code" [(ngModel)]="t.code" (keydown.tab)="tab($event, t)" spellcheck="false"></textarea>
+                        <textarea rows="22" class="mono code" [(ngModel)]="t.code" (keydown.tab)="tab($event, t)" spellcheck="false"></textarea>
                       </label>
 
                       <div class="prueba-box">
@@ -286,7 +298,7 @@ const EJEMPLOS_IA = [
             }
           </div>
 
-          <div class="drawer-foot">
+          <div class="det-foot">
             @if (pestana() === 'probar') {
               <input type="text" [(ngModel)]="textoPrueba" [placeholder]="'Escríbele a ' + a.displayName + '…'" (keydown.enter)="enviarPrueba(a)" [disabled]="probando() || !a.enabled" />
               <button class="btn-icon" title="Nueva conversación" (click)="mensajes.set([])" [disabled]="!mensajes().length"><i class="ph ph-arrow-counter-clockwise"></i></button>
@@ -300,7 +312,7 @@ const EJEMPLOS_IA = [
               </button>
             }
           </div>
-        </aside>
+        </section>
       }
     }
 
@@ -421,17 +433,27 @@ const EJEMPLOS_IA = [
     .vacio-ico { display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: rgba(129,140,248,.14); color: var(--accent-primary); font-size: 28px; }
     .vacio p { color: var(--text-dim); max-width: 52ch; margin: 8px auto 16px; }
 
-    /* Panel */
+    /* Detalle */
+    /* Igual que .page: ocupa el alto de la vista y scrollea por dentro (tabs y pie quedan fijos). */
+    .detalle { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+    .det-head, .ptabs, .det-foot { flex-shrink: 0; }
+    .det-head { display: flex; align-items: center; gap: 12px; padding: 20px 28px 14px; }
+    .det-head h3 { margin: 0; font-size: 20px; }
+    .det-head .sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+    .volver { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--border-light); color: var(--text-main); font-size: 17px; text-decoration: none; flex-shrink: 0; }
+    .volver:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+    .det-body { flex: 1 0 auto; padding: 20px 28px 28px; width: 100%; max-width: 900px; min-width: 0; }
+    .det-body.ancho { max-width: none; }
+    .det-foot { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 12px 28px; border-top: 1px solid var(--border-light); background: var(--bg-card); }
+    .det-foot input { flex: 1; }
     .dh { display: flex; align-items: center; gap: 12px; }
-    .ptabs { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-card); overflow-x: auto; scrollbar-width: none; }
+    .ptabs { display: flex; gap: 2px; padding: 0 24px; border-bottom: 1px solid var(--border-light); overflow-x: auto; scrollbar-width: none; position: sticky; top: 0; z-index: 6; background: var(--bg-main); }
     .ptabs::-webkit-scrollbar { display: none; }
     .ptabs button { display: inline-flex; align-items: center; gap: 6px; padding: 10px 10px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); font-size: 13.5px; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
     .ptabs button:hover { color: var(--text-main); }
     .ptabs button.on { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
     .n { font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-light); }
     .n.warn { color: var(--warn); border-color: rgba(245,158,11,.45); }
-    .drawer-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border-light); background: var(--bg-card); }
-    .drawer-foot input { flex: 1; }
     .dirty { color: var(--accent-primary); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
     .dirty i { font-size: 8px; }
 
@@ -458,10 +480,10 @@ const EJEMPLOS_IA = [
     .zona-peligro small { color: var(--text-dim); font-size: 12px; }
 
     .soul-h { display: flex; justify-content: space-between; }
-    .soul { min-height: calc(100vh - 330px); font-size: 14px; line-height: 1.55; resize: vertical; }
+    .soul { min-height: calc(100vh - 360px); max-width: 1100px; font-size: 14px; line-height: 1.55; resize: vertical; }
 
-    .tools { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
-    .tlist { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
+    .tools { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+    .tlist { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 56px; }
     .titem { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--text-main); text-align: left; cursor: pointer; }
     .titem code { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .titem small { color: var(--text-dim); font-size: 11.5px; display: flex; gap: 4px; align-items: center; }
@@ -470,8 +492,9 @@ const EJEMPLOS_IA = [
     .titem.on { border-color: var(--accent-primary); background: rgba(129,140,248,.1); }
     .titem.nueva { flex-direction: row; align-items: center; gap: 6px; color: var(--text-dim); border: 1px dashed var(--border-light); margin-top: 4px; font-size: 13px; }
     .teditor { min-width: 0; }
+    .teditor .grid2 > * { min-width: 0; }
     .teditor.empty { color: var(--text-dim); font-size: 13.5px; padding: 20px; border: 1px dashed var(--border-light); border-radius: 10px; }
-    .grid2 { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; }
+    .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
     .code { line-height: 1.5; tab-size: 2; white-space: pre; }
     textarea.invalido { border-color: var(--danger); }
@@ -531,10 +554,14 @@ const EJEMPLOS_IA = [
     @media (max-width: 700px) {
       .grid-ag { grid-template-columns: 1fr; }
       .canales { grid-template-columns: 1fr; }
-      .tools { grid-template-columns: 1fr; }
+      .tools { grid-template-columns: minmax(0, 1fr); }
+      .grid2 { grid-template-columns: minmax(0, 1fr); }
+      .opcion.inline { margin: 0 0 14px; }
       .tlist { position: static; flex-direction: row; overflow-x: auto; }
       .titem { flex-shrink: 0; }
-      .drawer-foot { padding: 10px 14px; }
+      .det-head, .det-body { padding-left: 14px; padding-right: 14px; }
+      .ptabs { padding: 0 8px; }
+      .det-foot { padding: 10px 14px; }
     }
   `],
 })
@@ -551,8 +578,12 @@ export class AgentsComponent {
   proveedores = signal<Record<string, string>>({});
 
   // Panel
-  abiertoEn = signal<string | null>(null);
-  actual = computed(() => this.agents().find((a) => a.name === this.abiertoEn()) || null);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  /** Agente de la ruta /agents/:name (null en la lista). */
+  rutaAgente = signal<string | null>(null);
+  private preparado: string | null = null;
+  actual = computed(() => this.agents().find((a) => a.name === this.rutaAgente()) || null);
   pestana = signal<Pestana>('general');
   form: CustomAgent | null = null;
   private original = '';
@@ -590,12 +621,20 @@ export class AgentsComponent {
   promptIA = '';
   private inicioIA = 0;
 
-  constructor() { this.load(); this.cargarEnv(); this.cargarUso(); this.cargarProveedores(); }
+  constructor() {
+    // El mismo componente atiende /agents y /agents/:name; Angular lo reutiliza al pasar de un agente a otro.
+    this.route.paramMap.pipe(takeUntilDestroyed()).subscribe((pm) => { this.rutaAgente.set(pm.get('name')); this.preparar(); });
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((q) => {
+      const t = q.get('tab') as Pestana | null;
+      this.pestana.set(t && ['general', 'soul', 'tools', 'env', 'probar'].includes(t) ? t : 'general');
+    });
+    this.load(); this.cargarEnv(); this.cargarUso(); this.cargarProveedores();
+  }
 
   // ─── Carga ────────────────────────────────────────────────────────────
   load() {
     this.api.getAgents().subscribe({
-      next: (r) => { this.agents.set(r.agents); this.cargado.set(true); this.cdr.markForCheck(); },
+      next: (r) => { this.agents.set(r.agents); this.cargado.set(true); this.preparar(); this.cdr.markForCheck(); },
       error: (e) => { this.cargado.set(true); this.toast.error(e?.error?.error || 'No se pudieron cargar los agentes'); },
     });
   }
@@ -681,23 +720,37 @@ export class AgentsComponent {
 
   // ─── Panel ────────────────────────────────────────────────────────────
   abrir(a: CustomAgent, p: Pestana = 'general') {
-    if (this.abiertoEn() !== a.name) {
-      this.form = JSON.parse(JSON.stringify(a));
-      this.original = JSON.stringify(a);
-      this.envValores = {};
-      this.mensajes.set([]);
-      this.elegirTool(0);
-      this.estadoTests.set({});
-      this.cargarEnv();
-    }
-    this.abiertoEn.set(a.name);
-    this.pestana.set(p);
+    this.router.navigate(['/agents', a.name], { queryParams: p === 'general' ? {} : { tab: p } });
   }
 
-  cerrarPanel() {
-    if (this.sucio() && !confirm('Tienes cambios sin guardar. ¿Cerrar y descartarlos?')) return;
-    this.abiertoEn.set(null);
-    this.form = null;
+  /** Copia editable del agente de la ruta (una vez por agente, para no pisar lo que se está editando). */
+  private preparar() {
+    const a = this.actual();
+    if (!a) { if (!this.rutaAgente()) { this.form = null; this.preparado = null; } return; }
+    if (this.preparado === a.name && this.form) return;
+    this.preparado = a.name;
+    this.form = JSON.parse(JSON.stringify(a));
+    this.original = JSON.stringify(a);
+    this.envValores = {};
+    this.mensajes.set([]);
+    this.elegirTool(0);
+    this.estadoTests.set({});
+    this.cdr.markForCheck();
+  }
+
+  irPestana(p: Pestana) {
+    this.pestana.set(p);
+    this.router.navigate([], { relativeTo: this.route, queryParams: { tab: p === 'general' ? null : p }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  cerrarPanel() { this.router.navigate(['/agents']); }
+
+  /** canDeactivate de /agents/:name: no perder cambios al volver o navegar. */
+  puedeSalir(): boolean {
+    if (!this.sucio()) return true;
+    const ok = confirm('Tienes cambios sin guardar. ¿Salir y descartarlos?');
+    if (ok) { this.form = this.original ? JSON.parse(this.original) : null; this.envValores = {}; this.errorParams.set(null); }
+    return ok;
   }
 
   descartar(a: CustomAgent) {
@@ -841,7 +894,7 @@ export class AgentsComponent {
   eliminar(a: CustomAgent) {
     if (!confirm(`¿Eliminar a ${a.displayName}? Se borra su definición, herramientas y memoria.`)) return;
     this.api.deleteAgent(a.name).subscribe({
-      next: () => { this.toast.ok(`${a.displayName} eliminado`); this.form = null; this.abiertoEn.set(null); this.load(); },
+      next: () => { this.toast.ok(`${a.displayName} eliminado`); this.form = null; this.preparado = null; this.agents.set(this.agents().filter((x) => x.name !== a.name)); this.router.navigate(['/agents']); },
       error: () => this.toast.error('No se pudo eliminar'),
     });
   }
@@ -890,7 +943,7 @@ export class AgentsComponent {
   irAlAgente(slug: string, p: Pestana) {
     const a = this.agents().find((x) => x.name === slug);
     this.modalIA.set(false); this.resultadoIA.set(null); this.estadosIA.set([]); this.promptIA = '';
-    if (a) setTimeout(() => this.abrir(a, p), 120);
+    if (a) this.abrir(a, p);
   }
 
   private pushEstado(texto: string, nivel: 'info' | 'ok' | 'error' = 'info') {
