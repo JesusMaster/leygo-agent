@@ -8,6 +8,11 @@ export interface ModelPrice { input: number; output: number; cached: number | nu
 export interface UsageByModel   { model: string; count: number; input_tokens: number; output_tokens: number; cached_tokens: number; total_cost: number; aproximados: number; price: ModelPrice; }
 export interface PriceRow extends ModelPrice { model: string; override: { inputPricePer1M: number; outputPricePer1M: number; cachedPricePer1M?: number } | null; }
 export interface CatalogoInfo { modelos: number; actualizado: string | null; }
+export interface UsageDaily {
+  dias: Array<{ dia: string; costo: number; tokens: number; turnos: number }>;
+  hoy: { dia: string; costo: number; turnos: number };
+  mes: { costo: number; presupuesto: number; diasMes: number; transcurridos: number; promedioDiario: number; proyeccion: number; ritmoPresupuesto: number; turnos: number; costoPorTurno: number; cacheRatio: number; ahorroCache: number };
+}
 export interface UsageByAgent   { agent: string; model: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
 export interface UsageByChannel { channel: string; count: number; input_tokens: number; output_tokens: number; total_cost: number; }
 export interface BudgetStatus   { channel: string; currentCost: number; budget: number; percentUsed: number; isExceeded: boolean; isNearLimit: boolean; }
@@ -175,10 +180,12 @@ export class ApiService {
   }
 
   /** Historial paginado con filtros; el servidor pagina, la GUI no trae de más. */
-  getUsageHistory(opts: { page: number; pageSize: number; channel?: string; agent?: string }): Observable<UsageHistoryPage> {
+  getUsageDaily(days = 30): Observable<UsageDaily> { return this.http.get<any>(`${this.baseUrl}/api/usage/daily?days=${days}`); }
+  getUsageHistory(opts: { page: number; pageSize: number; channel?: string; agent?: string; orden?: 'recientes' | 'costo' }): Observable<UsageHistoryPage> {
     const q = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });
     if (opts.channel) q.set('channel', opts.channel);
     if (opts.agent) q.set('agent', opts.agent);
+    if (opts.orden) q.set('orden', opts.orden);
     return this.http.get<UsageHistoryPage>(`${this.baseUrl}/api/usage/history?${q.toString()}`);
   }
   getBudgets(): Observable<{ global: BudgetStatus; canales: BudgetStatus[] }> {

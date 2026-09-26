@@ -528,6 +528,62 @@ export class TokenTrackerService {
   /**
    * Resumen completo para el dashboard o API (compatible con Leygo GUI)
    */
+  /**
+   * Serie diaria (zona horaria del scheduler) de los últimos `dias` días + indicadores del mes:
+   * proyección a fin de mes, gasto de hoy, costo por turno y ahorro por caché de prompt.
+   */
+  public getDailyUsage(dias = 30) {
+    const tz = process.env.SCHEDULER_TZ || 'America/Santiago';
+    const diaDe = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: tz });
+    const hoy = diaDe(new Date());
+    const inicioSerie = new Date(Date.now() - (dias + 1) * 86400000);
+    const monthStart = this.getMonthStartIso();
+    const desde = new Date(Math.min(inicioSerie.getTime(), new Date(monthStart).getTime())).toISOString();
+    const filas = sqliteReminderService.listUsageRows(desde);
+
+    const serie = new Map<string, { dia: string; costo: number; tokens: number; turnos: Set<string> }>();
+    for (let i = dias - 1; i >= 0; i--) { const d = diaDe(new Date(Date.now() - i * 86400000)); serie.set(d, { dia: d, costo: 0, tokens: 0, turnos: new Set() }); }
+    const mesActual = hoy.slice(0, 7);
+    let mesCosto = 0, mesTokensIn = 0, mesCached = 0, ahorro = 0;
+    const turnosMes = new Set<string>();
+    const turnosHoy = new Set<string>();
+    let hoyCosto = 0;
+    const precios = new Map<string, ModelPrices>();
+    for (const f of filas) {
+      const d = diaDe(new Date(f.timestamp));
+      const turno = `${f.thread_id}|${f.user_input}|${f.timestamp.slice(0, 16)}`;
+      const s = serie.get(d);
+      if (s) { s.costo += f.cost_usd; s.tokens += f.input_tokens + f.output_tokens; s.turnos.add(turno); }
+      if (d.slice(0, 7) === mesActual) {
+        mesCosto += f.cost_usd; mesTokensIn += f.input_tokens; mesCached += f.cached_tokens; turnosMes.add(turno);
+        if (f.cached_tokens) {
+          if (!precios.has(f.model)) precios.set(f.model, this.getPrices(f.model));
+          const p = precios.get(f.model)!;
+          if (p.cachedPricePer1M != null) ahorro += (f.cached_tokens / 1e6) * Math.max(0, p.inputPricePer1M - p.cachedPricePer1M);
+        }
+      }
+      if (d === hoy) { hoyCosto += f.cost_usd; turnosHoy.add(turno); }
+    }
+    const [y, m, dd] = hoy.split('-').map(Number);
+    const diasMes = new Date(y, m, 0).getDate();
+    // Días transcurridos: hoy cuenta como fracción según la hora, para no inflar la proyección de madrugada.
+    const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+    const transcurridos = Math.max(0.25, dd - 1 + (ahora.getHours() * 60 + ahora.getMinutes()) / 1440);
+    const promedio = mesCosto / transcurridos;
+    const budget = this.getBudgetStatus().budget;
+    return {
+      dias: [...serie.values()].map((s) => ({ dia: s.dia, costo: s.costo, tokens: s.tokens, turnos: s.turnos.size })),
+      hoy: { dia: hoy, costo: hoyCosto, turnos: turnosHoy.size },
+      mes: {
+        costo: mesCosto, presupuesto: budget, diasMes, transcurridos,
+        promedioDiario: promedio, proyeccion: promedio * diasMes,
+        ritmoPresupuesto: budget > 0 ? budget / diasMes : 0,
+        turnos: turnosMes.size, costoPorTurno: turnosMes.size ? mesCosto / turnosMes.size : 0,
+        cacheRatio: mesTokensIn ? mesCached / mesTokensIn : 0, ahorroCache: ahorro,
+      },
+    };
+  }
+
   public getUsageSummary(limit: number = 1000) {
     const monthStart = this.getMonthStartIso();
     const allHistory = sqliteReminderService.getUsageHistory(limit);

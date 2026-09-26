@@ -210,11 +210,19 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
                 pageSize: parseInt((req.query.pageSize as string) || '25', 10),
                 channel:  (req.query.channel as string) || undefined,
                 agent:    (req.query.agent as string) || undefined,
+                orden:    req.query.orden === 'costo' ? 'costo' : 'recientes',
+                desde:    (req.query.desde as string) || undefined,
             });
             res.json({ ...pagina, facets: sqliteReminderService.getUsageFacets() });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
+    });
+
+    /** Serie diaria + indicadores del mes (proyección, hoy, costo por turno, caché). */
+    app.get('/api/usage/daily', (req, res) => {
+        try { res.json(tokenTrackerService.getDailyUsage(Math.min(Math.max(parseInt((req.query.days as string) || '30', 10) || 30, 7), 90))); }
+        catch (err: any) { res.status(500).json({ error: err.message }); }
     });
 
     app.get('/api/usage/budget', async (req, res) => {

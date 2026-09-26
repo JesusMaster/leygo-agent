@@ -766,7 +766,7 @@ export class SqliteReminderService {
    * Página del historial de consumo, más reciente primero.
    * Filtros opcionales por canal y agente; `total` es el conteo con esos filtros.
    */
-  public getUsageHistoryPage(opts: { page?: number; pageSize?: number; channel?: string; agent?: string } = {}): { rows: UsageRecord[]; total: number; page: number; pageSize: number } {
+  public getUsageHistoryPage(opts: { page?: number; pageSize?: number; channel?: string; agent?: string; orden?: 'recientes' | 'costo'; desde?: string } = {}): { rows: UsageRecord[]; total: number; page: number; pageSize: number } {
     const pageSize = Math.min(Math.max(Number(opts.pageSize) || 25, 1), 200);
     const page = Math.max(Number(opts.page) || 1, 1);
 
@@ -774,18 +774,28 @@ export class SqliteReminderService {
     const params: any[] = [];
     if (opts.channel) { where.push(`COALESCE(channel, 'unknown') = ?`); params.push(opts.channel); }
     if (opts.agent)   { where.push(`COALESCE(agent, 'unknown') = ?`);   params.push(opts.agent); }
+    if (opts.desde)   { where.push(`timestamp >= ?`); params.push(opts.desde); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const total = (this.db.prepare(`SELECT COUNT(*) as n FROM usage_history ${whereSql}`).get(...params) as any).n as number;
     const rows = this.db.prepare(`
-      SELECT id, timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, COALESCE(channel, 'unknown') as channel, COALESCE(agent, 'unknown') as agent
+      SELECT id, timestamp, user_input, model, input_tokens, output_tokens, cost_usd, thread_id, COALESCE(channel, 'unknown') as channel, COALESCE(agent, 'unknown') as agent,
+        cached_tokens, thoughts_tokens, price_source, calls, steps, images
       FROM usage_history
       ${whereSql}
-      ORDER BY id DESC
+      ORDER BY ${opts.orden === 'costo' ? 'cost_usd DESC, id DESC' : 'id DESC'}
       LIMIT ? OFFSET ?
     `).all(...params, pageSize, (page - 1) * pageSize) as UsageRecord[];
 
     return { rows, total, page, pageSize };
+  }
+
+  /** Filas crudas desde una fecha, para agregaciones por día en la zona horaria del usuario. */
+  public listUsageRows(desdeIso: string): Array<{ timestamp: string; model: string; input_tokens: number; output_tokens: number; cached_tokens: number; cost_usd: number; thread_id: string; user_input: string; channel: string }> {
+    return this.db.prepare(`
+      SELECT timestamp, model, input_tokens, output_tokens, COALESCE(cached_tokens, 0) as cached_tokens, cost_usd, thread_id, COALESCE(user_input, '') as user_input, COALESCE(channel, 'unknown') as channel
+      FROM usage_history WHERE timestamp >= ? ORDER BY timestamp
+    `).all(desdeIso) as any[];
   }
 
   /** Valores distintos de canal y agente presentes en el historial, para los filtros de la GUI. */
