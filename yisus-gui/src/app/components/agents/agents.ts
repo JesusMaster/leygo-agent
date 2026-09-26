@@ -6,6 +6,8 @@ import { ApiService, CanalAgente, CustomAgent, CustomToolDef, EnvVar } from '../
 import { ToastService } from '../../services/toast.service';
 import { ModelPickerComponent } from '../model-picker/model-picker';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
+import { CodeEditorComponent } from '../code-editor/code-editor';
+import type { SugerenciaEditor } from '../code-editor/code-editor';
 
 const CANALES: Array<{ id: CanalAgente; nombre: string; icono: string; ayuda: string }> = [
   { id: 'telegram', nombre: 'Telegram', icono: 'ph-telegram-logo', ayuda: 'Tu bot privado' },
@@ -31,7 +33,7 @@ const EJEMPLOS_IA = [
  */
 @Component({
   selector: 'app-agents',
-  imports: [FormsModule, RouterLink, ModelPickerComponent, MarkdownPipe],
+  imports: [FormsModule, RouterLink, ModelPickerComponent, MarkdownPipe, CodeEditorComponent],
   template: `
     @if (!actual() || !form) {
     <div class="page">
@@ -219,14 +221,19 @@ const EJEMPLOS_IA = [
                         <label class="opcion inline"><input type="checkbox" [(ngModel)]="t.network" /><span><b>Usa red</b><small><code>ctx.fetch</code>, solo https</small></span></label>
                       </div>
                       <label class="field"><span>Descripción <em>el modelo la lee para decidir cuándo usarla</em></span><input type="text" [(ngModel)]="t.description" /></label>
-                      <label class="field">
+                      <div class="field">
                         <span>Parámetros <em>JSON Schema</em>@if (errorParams(); as e) { <em class="bad"> · {{ e }}</em> }</span>
-                        <textarea rows="8" class="mono" [class.invalido]="errorParams()" [ngModel]="paramsTxt()" (ngModelChange)="editarParams($event)"></textarea>
-                      </label>
-                      <label class="field">
+                        @defer (on immediate) {
+                          <app-code-editor lenguaje="json" [value]="paramsTxt()" (valueChange)="editarParams($event)" [invalido]="!!errorParams()" minAlto="110px" maxAlto="340px" />
+                        } @placeholder { <div class="editor-cargando" style="height:110px">Cargando editor…</div> }
+                      </div>
+                      <div class="field">
                         <span>Código <em>cuerpo de async (args, ctx) =&gt; {{ '{' }} … {{ '}' }} · en sandbox</em></span>
-                        <textarea rows="22" class="mono code" [(ngModel)]="t.code" (keydown.tab)="tab($event, t)" spellcheck="false"></textarea>
-                      </label>
+                        @defer (on immediate) {
+                          <app-code-editor lenguaje="javascript" [value]="t.code" (valueChange)="t.code = $event" [sugerencias]="sugerenciasDe(a, t)" minAlto="320px" maxAlto="72vh" placeholder="return { ok: true };" />
+                        } @placeholder { <div class="editor-cargando" style="height:320px">Cargando editor…</div> }
+                        <small class="hint">Tab indenta · Cmd/Ctrl+F busca · Ctrl+Espacio sugiere <code>args.*</code> y <code>ctx.*</code></small>
+                      </div>
 
                       <div class="prueba-box">
                         <div class="pb-row">
@@ -542,7 +549,7 @@ const EJEMPLOS_IA = [
     .teditor.empty { color: var(--text-dim); font-size: 13.5px; padding: 20px; border: 1px dashed var(--border-light); border-radius: 10px; }
     .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-    .code { line-height: 1.5; tab-size: 2; white-space: pre; }
+    .editor-cargando { display: grid; place-items: center; border: 1px solid var(--border-light); border-radius: 10px; background: var(--bg-input); color: var(--text-dim); font-size: 12.5px; }
     textarea.invalido { border-color: var(--danger); }
     .prueba-box { padding: 12px; border-radius: 10px; background: var(--bg-card); border: 1px solid var(--border-light); }
     .pb-row { display: flex; gap: 8px; }
@@ -870,15 +877,28 @@ export class AgentsComponent {
     this.elegirTool(Math.min(i, this.form!.tools.length - 1));
   }
 
-  /** Tab inserta dos espacios en el editor de código en vez de saltar de campo. */
-  tab(ev: Event, t: CustomToolDef) {
-    ev.preventDefault();
-    const el = ev.target as HTMLTextAreaElement;
-    const [a, b] = [el.selectionStart, el.selectionEnd];
-    t.code = t.code.slice(0, a) + '  ' + t.code.slice(b);
-    el.value = t.code;
-    el.selectionStart = el.selectionEnd = a + 2;
+  /** Autocompletado del editor: parámetros de la herramienta y lo que ofrece ctx en el sandbox. */
+  sugerenciasDe(a: CustomAgent, t: CustomToolDef): SugerenciaEditor[] {
+    const clave = `${a.name}|${t.name}|${JSON.stringify(t.parameters?.properties || {})}|${this.form?.env.map((e) => e.name).join(',')}|${t.network}|${this.form?.memory}`;
+    if (this.cacheSug?.clave === clave) return this.cacheSug.lista;
+    const props = (t.parameters?.properties || {}) as Record<string, any>;
+    const req: string[] = t.parameters?.required || [];
+    const lista: SugerenciaEditor[] = [
+      ...Object.entries(props).map(([k, v]) => ({ label: `args.${k}`, detail: `${v?.type || 'any'}${req.includes(k) ? ' · requerido' : ''}`, info: v?.description, type: 'variable' })),
+      ...(this.form?.env || []).filter((e) => e.name).map((e) => ({ label: `ctx.env.${e.name}`, detail: e.secret ? 'secreto' : 'variable', info: e.description, type: 'constant' })),
+      { label: 'ctx.env', detail: 'Record<string, string>', info: 'Variables del agente (AGENT_<NOMBRE>_<VAR> o la global).' },
+      { label: 'ctx.log', detail: '(...valores) => void', info: 'Aparece en "logs" al probar.', type: 'function' },
+      { label: 'ctx.now', detail: '() => string', info: 'Fecha y hora actual en ISO.', type: 'function' },
+      ...(this.form?.tools[this.toolSel()]?.network ? [{ label: 'ctx.fetch', detail: '(url, init?) => { ok, status, json, text }', info: 'Solo https. Marca "Usa red" en la herramienta.', type: 'function' }] : []),
+      ...(this.form?.memory ? [
+        { label: 'ctx.memory.search', detail: '(query, limit?) => [{ text, meta, score }]', info: 'Busca en la memoria propia del agente.', type: 'function' },
+        { label: 'ctx.memory.save', detail: '(text, meta?) => id', info: 'Guarda un recuerdo en la memoria del agente.', type: 'function' },
+      ] : []),
+    ];
+    this.cacheSug = { clave, lista };
+    return lista;
   }
+  private cacheSug: { clave: string; lista: SugerenciaEditor[] } | null = null;
 
   private parsearArgs(): any | undefined {
     try { return JSON.parse(this.argsPrueba.trim() || '{}'); }

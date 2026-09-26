@@ -133,8 +133,10 @@ input[type=text], input[type=password], input[type=number], input[type=email], i
   color: var(--text-main); font-family: var(--font-main); font-size: 14px;
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent-primary); }
-label.field { display: block; margin-bottom: 14px; }
-label.field span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+label.field, div.field { display: block; margin-bottom: 14px; }
+label.field span, div.field > span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+/* Un div.field que solo trae la etiqueta (el control va después) no suma margen propio. */
+div.field:has(> span:only-child) { margin-bottom: 0; }
 
 /* ─── Chips de herramientas ───────────────────────────────────────────── */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
