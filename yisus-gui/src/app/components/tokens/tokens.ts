@@ -286,7 +286,7 @@ interface Card { name?: string; url?: string; version?: string; protocolVersion?
     .btn-primary.sm, .btn-secondary.sm { padding: 6px 11px; font-size: 12.5px; }
     .nota { font-size: 12.5px; color: var(--text-dim); margin-top: 10px; line-height: 1.5; }
     .nota i { margin-right: 4px; vertical-align: -1px; }
-    .nota a { color: var(--accent); }
+    .nota a { color: var(--accent-primary); }
     .empty-state { text-align: center; padding: 44px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
     .empty-state > i { font-size: 38px; color: var(--accent-primary); }
     .empty-state p { color: var(--text-dim); max-width: 60ch; margin: 0 0 8px; }
