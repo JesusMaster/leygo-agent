@@ -5,6 +5,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { sqliteReminderService } from '../database/sqlite.service.js';
 import { describeChannels, reloadChannelConfig, saveChannelTools, getToolsDisponiblesA2A, saveToolsDisponiblesA2A } from '../config/channels.js';
+import { aplicarHerramientasEnCaliente, aplicarTodosLosCanales } from '../agents/aplicar_canales.js';
 import { allToolNames, TOOL_GROUPS, expandToolSpec, grupoDeTool, TOOL_CATALOG } from '../agents/tool_catalog.js';
 import { describirTool } from '../a2a/card.js';
 import { scheduledTasksService } from '../services/scheduled_tasks.service.js';
@@ -140,16 +141,18 @@ export default function createAdminRoutes() {
       return res.status(400).json({ error: 'Se espera { tools: string[] }' });
     }
     saveChannelTools(channel, tools);
+    aplicarHerramientasEnCaliente(channel);
     res.json({
       status: 'success',
       canal: channel,
       tools: expandToolSpec(tools),
-      aviso: 'Los agentes de Telegram, Buzz y API se construyen al arrancar: el cambio aplica al reiniciar el servicio.',
+      enCaliente: true,
     });
   });
 
   app.post('/api/channels/reload', (_req, res) => {
     reloadChannelConfig();
+    aplicarTodosLosCanales();
     res.json({ status: 'success', canales: describeChannels() });
   });
 
@@ -173,10 +176,11 @@ export default function createAdminRoutes() {
     const tools: string[] = req.body?.tools;
     if (!Array.isArray(tools)) return res.status(400).json({ error: 'Se espera { tools: string[] }' });
     saveToolsDisponiblesA2A(tools);
+    aplicarHerramientasEnCaliente('a2a');
     res.json({
       status: 'success',
       disponibles: getToolsDisponiblesA2A(),
-      aviso: 'El agente público se arma al arrancar: aplica al reiniciar el servicio.',
+      enCaliente: true,
     });
   });
 

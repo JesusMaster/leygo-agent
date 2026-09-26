@@ -123,10 +123,9 @@ const TAB_KEY = 'yisus_settings_tab';
       <div class="card">
         <h3>Sobre los canales</h3>
         <p class="card-sub" style="margin-bottom:0">
-          Los cambios de herramientas en Telegram, Buzz y API se guardan en <code>config/channels.json</code>,
-          pero esos agentes se construyen al arrancar: aplican al reiniciar el servicio.
-          Los tokens de A2A son la excepción — su agente se arma por token, así que un cambio de alcance
-          o una revocación surten efecto de inmediato.
+          Los cambios de herramientas en Telegram, Buzz, API y A2A se guardan en <code>config/channels.json</code>
+          y se aplican de inmediato a los agentes en ejecución, sin reiniciar. Lo mismo vale para el alcance
+          o la revocación de un token A2A.
         </p>
       </div>
       }

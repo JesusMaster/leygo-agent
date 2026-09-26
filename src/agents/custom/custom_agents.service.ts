@@ -73,6 +73,22 @@ export function registrarCoordinadorVivo(canal: string, agent: LlmAgent, wrap?: 
   coordinadoresVivos.set(canal, lista);
 }
 
+/**
+ * Reemplaza EN CALIENTE las herramientas de los coordinadores vivos de un canal.
+ * `armar` recibe el wrap del coordinador (A2A: guard de permisos) y devuelve la
+ * lista final. Se modifica el mismo array para que el LlmAgent lo vea en el
+ * siguiente turno sin reconstruir el runner ni perder sesiones.
+ */
+export function reemplazarToolsVivas(canal: string, armar: (wrap?: (tool: any) => any) => any[]): number {
+  const lista = coordinadoresVivos.get(canal) || [];
+  for (const { agent, wrap } of lista) {
+    const nuevas = armar(wrap);
+    const actuales = agent.tools as any[];
+    actuales.splice(0, actuales.length, ...nuevas);
+  }
+  return lista.length;
+}
+
 function schemaGemini(json: any): any {
   const tipo = String(json?.type || 'object').toUpperCase();
   const out: any = { type: tipo };

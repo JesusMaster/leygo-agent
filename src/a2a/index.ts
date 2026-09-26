@@ -125,7 +125,10 @@ export function mountA2A(
     // Descubrimiento (público por diseño del protocolo)
     app.use(
         '/.well-known/agent-card.json',
-        agentCardHandler({ agentCardProvider: async () => yisusAgentCard }),
+        // maxAge 0: la card cambia cuando se edita el techo del canal; con el default
+        // (1 h) el navegador y los clientes seguían viendo las skills anteriores.
+        // Queda "no-cache" + ETag: se revalida siempre y responde 304 si no cambió.
+        agentCardHandler({ agentCardProvider: async () => yisusAgentCard, cache: { maxAge: 0 } }),
     );
 
     // Endpoint JSON-RPC del protocolo

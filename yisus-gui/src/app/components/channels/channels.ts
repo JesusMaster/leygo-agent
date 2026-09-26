@@ -326,16 +326,19 @@ export class ChannelsComponent {
     this.guardando.set(true);
     const s = this.sel();
     const hechos: string[] = [];
+    let pideReinicio = false;
     try {
       for (const k of this.canales) {
         if (!this.sucio(k.id)) continue;
-        if (k.id === 'a2a') await firstValueFrom(this.api.saveDisponiblesA2A(s.a2a));
-        else await firstValueFrom(this.api.saveChannelTools(k.id, s[k.id]));
+        const r: any = k.id === 'a2a'
+          ? await firstValueFrom(this.api.saveDisponiblesA2A(s.a2a))
+          : await firstValueFrom(this.api.saveChannelTools(k.id, s[k.id]));
+        if (!r?.enCaliente) pideReinicio = true; // backend antiguo: arma los agentes solo al arrancar
         this.original.update((o) => ({ ...o, [k.id]: [...s[k.id]] }));
         hechos.push(k.nombre);
       }
-      this.toast.ok(`Guardado: ${hechos.join(', ')}`);
-      this.reiniciar.set(true);
+      this.toast.ok(pideReinicio ? `Guardado: ${hechos.join(', ')}` : `Aplicado sin reiniciar: ${hechos.join(', ')}`);
+      this.reiniciar.set(pideReinicio);
     } catch (e: any) {
       this.toast.error(`${hechos.length ? `Guardado ${hechos.join(', ')}; ` : ''}falló el resto: ${e?.error?.error || e?.message || 'error'}`);
     } finally {

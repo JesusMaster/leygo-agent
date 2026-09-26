@@ -355,7 +355,10 @@ export class TokensComponent {
 
   constructor() { this.load(); this.cargarCard(); }
 
-  ir(t: Tab) { this.tab.set(t); try { localStorage.setItem('yisus_a2a_tab', t); } catch {} }
+  ir(t: Tab) {
+    this.tab.set(t); try { localStorage.setItem('yisus_a2a_tab', t); } catch {}
+    if (t === 'conectar') this.cargarCard();
+  }
 
   load() {
     this.api.getTokens().subscribe({ next: (r) => this.tokens.set(r.tokens), error: () => this.toast.error('No se pudieron cargar los tokens') });
@@ -371,7 +374,7 @@ export class TokensComponent {
     });
   }
   private cargarCard() {
-    fetch(this.cardUrl()).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+    fetch(this.cardUrl(), { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((c: Card) => this.card.set(c)).catch((e) => this.cardError.set(e?.message || 'sin respuesta'));
   }
 
