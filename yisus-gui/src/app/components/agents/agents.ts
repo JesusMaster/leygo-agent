@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -33,6 +33,7 @@ const EJEMPLOS_IA = [
  */
 @Component({
   selector: 'app-agents',
+  host: { '(window:beforeunload)': 'alSalirDelNavegador($event)', '(document:keydown)': 'atajos($event)' },
   imports: [FormsModule, RouterLink, ModelPickerComponent, MarkdownPipe, CodeEditorComponent],
   template: `
     @if (!actual() || !form) {
@@ -89,6 +90,7 @@ const EJEMPLOS_IA = [
                 <span class="tag"><i class="ph ph-cpu"></i> {{ etiquetaModelo(a.model) }}</span>
                 <span class="tag"><i class="ph ph-wrench"></i> {{ a.tools.length }} herramienta{{ a.tools.length === 1 ? '' : 's' }}@if (usaRed(a)) { · red }</span>
                 @if (a.memory) { <span class="tag"><i class="ph ph-brain"></i> memoria</span> }
+                @if (hayBorrador(a.name)) { <span class="tag acc" title="Tienes cambios sin guardar en este agente"><i class="ph ph-pencil-simple-line"></i> borrador sin guardar</span> }
                 @if (faltan.length) { <span class="tag warn" [title]="'Sin valor: ' + faltan.join(', ')"><i class="ph ph-key"></i> falta {{ faltan.length === 1 ? faltan[0] : faltan.length + ' variables' }}</span> }
               </div>
 
@@ -128,12 +130,26 @@ const EJEMPLOS_IA = [
           </div>
 
           <nav class="ptabs">
-            <button [class.on]="pestana() === 'general'" (click)="irPestana('general')">General</button>
-            <button [class.on]="pestana() === 'soul'" (click)="irPestana('soul')">Personalidad</button>
-            <button [class.on]="pestana() === 'tools'" (click)="irPestana('tools')">Herramientas <span class="n">{{ f.tools.length }}</span></button>
-            <button [class.on]="pestana() === 'env'" (click)="irPestana('env')">Variables <span class="n" [class.warn]="variablesFaltantes(a).length">{{ f.env.length }}</span></button>
+            @let mod = modificadas();
+            <button [class.on]="pestana() === 'general'" (click)="irPestana('general')">General@if (mod.general) { <i class="mod" title="Cambios sin guardar"></i> }</button>
+            <button [class.on]="pestana() === 'soul'" (click)="irPestana('soul')">Personalidad@if (mod.soul) { <i class="mod" title="Cambios sin guardar"></i> }</button>
+            <button [class.on]="pestana() === 'tools'" (click)="irPestana('tools')">Herramientas <span class="n">{{ f.tools.length }}</span>@if (mod.tools) { <i class="mod" title="Cambios sin guardar"></i> }</button>
+            <button [class.on]="pestana() === 'env'" (click)="irPestana('env')">Variables <span class="n" [class.warn]="variablesFaltantes(a).length">{{ f.env.length }}</span>@if (mod.env) { <i class="mod" title="Cambios sin guardar"></i> }</button>
             <button [class.on]="pestana() === 'probar'" (click)="irPestana('probar')"><i class="ph ph-chat-circle-dots"></i> Probar</button>
           </nav>
+
+          @if (borradorPendiente(); as bp) {
+            <div class="restaurar">
+              <i class="ph ph-clock-counter-clockwise"></i>
+              <div>
+                <b>Tienes cambios sin guardar de {{ haceTexto(bp.t) }}</b>
+                <small>{{ bp.resumen }}@if (bp.version !== a.version) { · se hicieron sobre la v{{ bp.version }} (la actual es v{{ a.version }}) }</small>
+              </div>
+              <span class="spacer"></span>
+              <button class="btn-secondary sm" (click)="descartarBorrador(a)">Descartar</button>
+              <button class="btn-primary sm" (click)="restaurarBorrador()">Restaurar</button>
+            </div>
+          }
 
           <div class="det-body" [class.ancho]="pestana() === 'tools' || pestana() === 'soul'">
             @switch (pestana()) {
@@ -327,7 +343,14 @@ const EJEMPLOS_IA = [
 
               @case ('probar') {
                 <div class="chat">
-                  @if (sucio()) { <div class="aviso"><i class="ph ph-info"></i> Tienes cambios sin guardar: la prueba usa la versión guardada.</div> }
+                  @if (sucio()) {
+                    <div class="pendiente">
+                      <i class="ph ph-warning-circle"></i>
+                      <div><b>Tus cambios todavía no están en {{ a.displayName }}</b><small>Probar usa la versión guardada (v{{ a.version }}). Guarda primero para probar lo que acabas de editar.</small></div>
+                      <span class="spacer"></span>
+                      <button class="btn-primary sm" (click)="guardar(a)" [disabled]="guardando()">@if (guardando()) { <span class="spinner"></span> Guardando… } @else { <i class="ph ph-floppy-disk"></i> Guardar y probar }</button>
+                    </div>
+                  }
                   @if (!mensajes().length) {
                     <div class="chat-vacio">
                       <p>Conversación directa con {{ a.displayName }}, sin pasar por el Coordinator. Cada mensaje es un turno aislado.</p>
@@ -360,13 +383,13 @@ const EJEMPLOS_IA = [
             }
           </div>
 
-          <div class="det-foot">
+          <div class="det-foot" [class.sucio]="sucio() && pestana() !== 'probar'">
             @if (pestana() === 'probar') {
               <input type="text" [(ngModel)]="textoPrueba" [placeholder]="'Escríbele a ' + a.displayName + '…'" (keydown.enter)="enviarPrueba(a)" [disabled]="probando() || !a.enabled" />
               <button class="btn-icon" title="Nueva conversación" (click)="mensajes.set([])" [disabled]="!mensajes().length"><i class="ph ph-arrow-counter-clockwise"></i></button>
               <button class="btn-primary" (click)="enviarPrueba(a)" [disabled]="!textoPrueba.trim() || probando() || !a.enabled"><i class="ph ph-paper-plane-tilt"></i></button>
             } @else {
-              @if (sucio()) { <span class="dirty"><i class="ph ph-circle-fill"></i> Cambios sin guardar</span> } @else { <span class="dim">Sin cambios</span> }
+              @if (sucio()) { <span class="dirty"><i class="ph ph-circle-fill"></i> Cambios sin guardar <small class="dim">· se conservan en este navegador · {{ atajo }}+S para guardar</small></span> } @else { <span class="dim">Todo guardado · v{{ a.version }}</span> }
               <span class="spacer"></span>
               @if (sucio()) { <button class="btn-secondary" (click)="descartar(a)">Descartar</button> }
               <button class="btn-primary" [disabled]="!sucio() || guardando()" (click)="guardar(a)">
@@ -376,6 +399,25 @@ const EJEMPLOS_IA = [
           </div>
         </section>
       }
+    }
+
+    <!-- ═══ Salir con cambios sin guardar ═══ -->
+    @if (modalSalida(); as sal) {
+      <div class="modal-backdrop">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <div class="modal-head"><h3><i class="ph ph-warning-circle"></i> Cambios sin guardar</h3></div>
+          <div class="modal-body">
+            <p style="margin:0">Tienes cambios en <b>{{ sal.nombre }}</b> que aún no están guardados: {{ sal.resumen }}.</p>
+            <small class="hint">Si sales sin guardar quedan como borrador en este navegador y podrás restaurarlos al volver.</small>
+          </div>
+          <div class="modal-foot">
+            <button class="btn-secondary" (click)="responderSalida('quedarse')">Seguir editando</button>
+            <span class="spacer"></span>
+            <button class="btn-secondary" (click)="responderSalida('salir')">Salir (dejar borrador)</button>
+            <button class="btn-primary" (click)="responderSalida('guardar')" [disabled]="guardando()">@if (guardando()) { <span class="spinner"></span> Guardando… } @else { <i class="ph ph-floppy-disk"></i> Guardar y salir }</button>
+          </div>
+        </div>
+      </div>
     }
 
     <!-- ═══ Herramienta con IA ═══ -->
@@ -445,7 +487,8 @@ const EJEMPLOS_IA = [
               <button class="btn-secondary" (click)="mt.resultado = null">Ajustar pedido</button>
               <button class="btn-secondary" (click)="generarTool(mt.agente)"><i class="ph ph-arrows-clockwise"></i> Regenerar</button>
               <span class="spacer"></span>
-              <button class="btn-primary" (click)="integrarTool(mt.resultado)"><i class="ph ph-plus"></i> Agregar al agente</button>
+              <button class="btn-secondary" (click)="integrarTool(mt.resultado)" title="Queda en el editor; se integra cuando guardas">Solo agregar al borrador</button>
+              <button class="btn-primary" (click)="integrarTool(mt.resultado, mt.agente)" [disabled]="guardando()"><i class="ph ph-floppy-disk"></i> Agregar y guardar</button>
             } @else {
               <button class="btn-secondary" (click)="cerrarToolIA()">Cancelar</button>
               <button class="btn-primary" [disabled]="pedidoTool.trim().length < 8 || generandoTool()" (click)="generarTool(mt.agente)">
@@ -612,6 +655,16 @@ const EJEMPLOS_IA = [
     .ptabs button.on { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
     .n { font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-light); }
     .n.warn { color: var(--warn); border-color: rgba(245,158,11,.45); }
+    .det-foot.sucio { border-top-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-card)); }
+    .dirty small { font-weight: 400; margin-left: 4px; }
+    .ptabs .mod { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-primary); display: inline-block; margin-left: 2px; }
+    .restaurar, .pendiente { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 28px 0; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(129,140,248,.5); background: rgba(129,140,248,.1); }
+    .restaurar > i, .pendiente > i { font-size: 22px; color: var(--accent-primary); }
+    .restaurar > div, .pendiente > div { display: flex; flex-direction: column; font-size: 13.5px; }
+    .restaurar small, .pendiente small { color: var(--text-dim); font-size: 12.5px; }
+    .pendiente { margin: 0 0 6px; border-color: rgba(245,158,11,.5); background: rgba(245,158,11,.08); }
+    .pendiente > i { color: var(--warn); }
+    .tag.acc { color: var(--accent-primary); border-color: rgba(129,140,248,.5); }
     .dirty { color: var(--accent-primary); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
     .dirty i { font-size: 8px; }
 
@@ -757,7 +810,7 @@ const EJEMPLOS_IA = [
     }
   `],
 })
-export class AgentsComponent {
+export class AgentsComponent implements OnDestroy {
   api = inject(ApiService);
   private toast = inject(ToastService);
   private cdr = inject(ChangeDetectorRef);
@@ -937,6 +990,9 @@ export class AgentsComponent {
     this.elegirTool(0);
     this.estadoTests.set({});
     if (this.sugDe !== a.name) this.recomendadas.set(null);
+    this.borradorPendiente.set(null);
+    this.ultimoBorrador = '';
+    this.leerBorrador(a);
     this.cdr.markForCheck();
   }
 
@@ -947,15 +1003,144 @@ export class AgentsComponent {
 
   cerrarPanel() { this.router.navigate(['/agents']); }
 
-  /** canDeactivate de /agents/:name: no perder cambios al volver o navegar. */
-  puedeSalir(): boolean {
-    if (!this.sucio()) return true;
-    const ok = confirm('Tienes cambios sin guardar. ¿Salir y descartarlos?');
-    if (ok) { this.form = this.original ? JSON.parse(this.original) : null; this.envValores = {}; this.errorParams.set(null); }
-    return ok;
+  // ─── Cambios sin guardar ───────────────────────────────────────────────
+  // Tres capas: borrador automático en localStorage (sobrevive a salir, recargar o cerrar),
+  // modal propio al salir con Guardar/Salir/Seguir, y aviso del navegador al recargar/cerrar.
+  readonly atajo = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  modalSalida = signal<{ nombre: string; resumen: string; resolver: (ok: boolean) => void } | null>(null);
+  borradorPendiente = signal<{ form: CustomAgent; t: number; version: number; resumen: string } | null>(null);
+  private autoguardado = setInterval(() => this.guardarBorrador(), 1500);
+  private ultimoBorrador = '';
+
+  ngOnDestroy() { clearInterval(this.autoguardado); this.guardarBorrador(); }
+
+  private claveBorrador(nombre: string) { return `yisus_agent_draft:${nombre}`; }
+
+  hayBorrador(nombre: string): boolean { try { return !!localStorage.getItem(this.claveBorrador(nombre)); } catch { return false; } }
+
+  /** Se guarda solo la definición (no los valores de variables: pueden ser secretos). */
+  private guardarBorrador() {
+    const a = this.actual();
+    if (!a || !this.form || this.borradorPendiente()) return;
+    const clave = this.claveBorrador(a.name);
+    try {
+      if (JSON.stringify(this.form) === this.original) {
+        if (this.ultimoBorrador) { localStorage.removeItem(clave); this.ultimoBorrador = ''; }
+        return;
+      }
+      const json = JSON.stringify(this.form);
+      if (json === this.ultimoBorrador) return;
+      localStorage.setItem(clave, JSON.stringify({ form: this.form, t: Date.now(), version: a.version }));
+      this.ultimoBorrador = json;
+    } catch { /* sin localStorage: queda el aviso al salir */ }
+  }
+
+  private borrarBorrador(nombre: string) { try { localStorage.removeItem(this.claveBorrador(nombre)); } catch {} this.ultimoBorrador = ''; }
+
+  private leerBorrador(a: CustomAgent) {
+    try {
+      const raw = localStorage.getItem(this.claveBorrador(a.name));
+      if (!raw) return;
+      const b = JSON.parse(raw);
+      if (!b?.form || JSON.stringify(b.form) === JSON.stringify(a)) { this.borrarBorrador(a.name); return; }
+      this.borradorPendiente.set({ form: b.form, t: b.t, version: b.version, resumen: this.resumirCambios(JSON.parse(JSON.stringify(a)), b.form) });
+    } catch { this.borrarBorrador(a.name); }
+  }
+
+  restaurarBorrador() {
+    const b = this.borradorPendiente();
+    if (!b) return;
+    this.form = JSON.parse(JSON.stringify(b.form));
+    this.borradorPendiente.set(null);
+    this.elegirTool(Math.min(this.toolSel(), Math.max(0, (this.form?.tools.length || 1) - 1)));
+    this.version.update((v) => v + 1);
+    this.toast.ok('Cambios restaurados: revisa y guarda');
+  }
+
+  descartarBorrador(a: CustomAgent) { this.borradorPendiente.set(null); this.borrarBorrador(a.name); }
+
+  /** Qué secciones cambiaron respecto de lo guardado (para el punto en las pestañas). */
+  modificadas(): { general: boolean; soul: boolean; tools: boolean; env: boolean } {
+    this.version();
+    const f = this.form;
+    if (!f || !this.original) return { general: false, soul: false, tools: false, env: false };
+    const o = this.originalParseado();
+    const j = JSON.stringify;
+    return {
+      general: f.displayName !== o.displayName || f.description !== o.description || j(f.channels) !== j(o.channels) || f.model !== o.model || f.memory !== o.memory,
+      soul: f.soul !== o.soul,
+      tools: j(f.tools) !== j(o.tools) || !!this.errorParams(),
+      env: j(f.env) !== j(o.env) || Object.values(this.envValores).some((v) => (v || '').trim()),
+    };
+  }
+  private cacheOriginal: { raw: string; obj: CustomAgent } | null = null;
+  private originalParseado(): CustomAgent {
+    if (this.cacheOriginal?.raw !== this.original) this.cacheOriginal = { raw: this.original, obj: JSON.parse(this.original) };
+    return this.cacheOriginal.obj;
+  }
+
+  private resumirCambios(o: CustomAgent, f: CustomAgent): string {
+    const partes: string[] = [];
+    const nuevas = f.tools.filter((t) => !o.tools.some((x) => x.name === t.name)).map((t) => t.name);
+    const quitadas = o.tools.filter((t) => !f.tools.some((x) => x.name === t.name)).map((t) => t.name);
+    const editadas = f.tools.filter((t) => { const x = o.tools.find((y) => y.name === t.name); return x && JSON.stringify(x) !== JSON.stringify(t); }).map((t) => t.name);
+    if (nuevas.length) partes.push(`${nuevas.length === 1 ? 'herramienta nueva' : nuevas.length + ' herramientas nuevas'} (${nuevas.join(', ')})`);
+    if (editadas.length) partes.push(`${editadas.length === 1 ? 'editada' : 'editadas'}: ${editadas.join(', ')}`);
+    if (quitadas.length) partes.push(`${quitadas.length === 1 ? 'quitada' : 'quitadas'}: ${quitadas.join(', ')}`);
+    if (f.soul !== o.soul) partes.push('personalidad');
+    if (f.displayName !== o.displayName || f.description !== o.description || JSON.stringify(f.channels) !== JSON.stringify(o.channels) || f.model !== o.model || f.memory !== o.memory) partes.push('datos generales');
+    if (JSON.stringify(f.env) !== JSON.stringify(o.env)) partes.push('variables');
+    return partes.join(' · ') || 'cambios menores';
+  }
+
+  haceTexto(t: number) {
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return 'hace un momento';
+    if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+    if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+    return new Date(t).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
+  }
+
+  /** canDeactivate de /agents/:name: modal propio en vez de confirm(). */
+  puedeSalir(): boolean | Promise<boolean> {
+    const a = this.actual();
+    if (!a || !this.sucio()) return true;
+    this.guardarBorrador();
+    const resumen = this.resumirCambios(this.originalParseado(), this.form!);
+    return new Promise<boolean>((resolver) => this.modalSalida.set({ nombre: a.displayName, resumen, resolver }));
+  }
+
+  async responderSalida(r: 'quedarse' | 'salir' | 'guardar') {
+    const sal = this.modalSalida();
+    const a = this.actual();
+    if (!sal) return;
+    if (r === 'guardar' && a) {
+      const ok = await this.guardar(a);
+      if (!ok) return; // se queda el modal: el toast explica qué falló
+    }
+    this.modalSalida.set(null);
+    if (r !== 'quedarse') { this.preparado = null; this.borradorPendiente.set(null); }
+    sal.resolver(r !== 'quedarse');
+  }
+
+  alSalirDelNavegador(ev: BeforeUnloadEvent) {
+    if (!this.actual() || !this.sucio()) return;
+    this.guardarBorrador();
+    ev.preventDefault();
+    ev.returnValue = '';
+  }
+
+  atajos(ev: KeyboardEvent) {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 's') {
+      const a = this.actual();
+      if (!a || !this.form) return;
+      ev.preventDefault();
+      if (this.sucio() && !this.guardando()) this.guardar(a);
+    }
   }
 
   descartar(a: CustomAgent) {
+    this.borrarBorrador(a.name);
     this.form = JSON.parse(this.original);
     this.envValores = {};
     this.elegirTool(Math.min(this.toolSel(), (this.form?.tools.length || 1) - 1));
@@ -1113,8 +1298,8 @@ export class AgentsComponent {
     });
   }
 
-  /** Suma la herramienta generada al borrador del agente (se integra al guardar). */
-  integrarTool(r: HerramientaGenerada) {
+  /** Suma la herramienta generada al borrador del agente; con `guardarEn` además guarda. */
+  async integrarTool(r: HerramientaGenerada, guardarEn?: CustomAgent) {
     if (!this.form) return;
     const existentes = new Set(this.form.tools.map((x) => x.name));
     let nombre = r.tool.name;
@@ -1126,7 +1311,12 @@ export class AgentsComponent {
     if (r.tests.length) this.estadoTests.set({ ...this.estadoTests(), [i]: { ok: this.contarOk(r), total: r.tests.length } });
     this.recomendadas.update((l) => l?.filter((s) => s.nombre !== r.tool.name && s.pedido !== this.pedidoTool.trim()) ?? l);
     this.modalTool.set(null);
-    this.toast.ok(`${nombre} agregada como borrador: revísala y guarda para integrarla`);
+    if (guardarEn) {
+      const ok = await this.guardar(guardarEn);
+      if (!ok) this.toast.error(`${nombre} quedó en el borrador: corrige lo que falló y guarda`);
+    } else {
+      this.toast.ok(`${nombre} agregada al borrador: guarda para integrarla (${this.atajo}+S)`);
+    }
   }
 
   contarOk(r: HerramientaGenerada) { return r.tests.filter((x) => x.ok).length; }
@@ -1138,14 +1328,15 @@ export class AgentsComponent {
   }
 
   // ─── Guardar / estado ─────────────────────────────────────────────────
-  guardar(a: CustomAgent) {
-    if (!this.form) return;
-    if (this.errorParams()) { this.pestana.set('tools'); this.toast.error('Hay parámetros con JSON inválido'); return; }
+  /** Guarda el agente (y los valores de variables escritos). Devuelve si quedó guardado. */
+  guardar(a: CustomAgent): Promise<boolean> {
+    if (!this.form) return Promise.resolve(false);
+    if (this.errorParams()) { this.irPestana('tools'); this.toast.error('Hay parámetros con JSON inválido'); return Promise.resolve(false); }
     const sinNombre = this.form.tools.findIndex((t) => !/^[a-z][a-z0-9_]*$/.test(t.name));
-    if (sinNombre >= 0) { this.pestana.set('tools'); this.elegirTool(sinNombre); this.toast.error('Nombre de herramienta inválido: usa snake_case'); return; }
+    if (sinNombre >= 0) { this.irPestana('tools'); this.elegirTool(sinNombre); this.toast.error('Nombre de herramienta inválido: usa snake_case'); return Promise.resolve(false); }
     this.guardando.set(true);
     const { name, createdAt, createdBy, updatedAt, version, ...cambios } = this.form;
-    this.api.updateAgent(a.name, cambios).subscribe({
+    return new Promise<boolean>((listo) => this.api.updateAgent(a.name, cambios).subscribe({
       next: (r) => {
         const patch: Record<string, string> = {};
         for (const e of this.form!.env) { const v = (this.envValores[e.name] || '').trim(); if (v && e.name) patch[`AGENT_${a.name.toUpperCase()}_${e.name.toUpperCase()}`] = v; }
@@ -1154,16 +1345,20 @@ export class AgentsComponent {
           this.form = JSON.parse(JSON.stringify(r.agent));
           this.original = JSON.stringify(r.agent);
           this.envValores = {};
+          this.borrarBorrador(a.name);
+          this.borradorPendiente.set(null);
           this.agents.set(this.agents().map((x) => (x.name === a.name ? r.agent : x)));
+          this.version.update((v) => v + 1);
           this.toast.ok(`${r.agent.displayName} guardado (v${r.agent.version})`);
           this.cargarEnv();
+          listo(true);
         };
         if (Object.keys(patch).length) this.api.saveEnv(patch).subscribe({ next: fin, error: () => { this.toast.error('Agente guardado, pero no se pudieron escribir las variables'); fin(); } });
         else fin();
       },
       // El backend corre los tests de las herramientas antes de guardar: el error dice cuál falló.
-      error: (e) => { this.guardando.set(false); this.toast.error(e?.error?.error || 'No se pudo guardar'); },
-    });
+      error: (e) => { this.guardando.set(false); this.toast.error(e?.error?.error || 'No se pudo guardar'); listo(false); },
+    }));
   }
 
   alternar(a: CustomAgent) {
@@ -1176,7 +1371,7 @@ export class AgentsComponent {
   eliminar(a: CustomAgent) {
     if (!confirm(`¿Eliminar a ${a.displayName}? Se borra su definición, herramientas y memoria.`)) return;
     this.api.deleteAgent(a.name).subscribe({
-      next: () => { this.toast.ok(`${a.displayName} eliminado`); this.form = null; this.preparado = null; this.agents.set(this.agents().filter((x) => x.name !== a.name)); this.router.navigate(['/agents']); },
+      next: () => { this.toast.ok(`${a.displayName} eliminado`); this.borrarBorrador(a.name); this.form = null; this.preparado = null; this.agents.set(this.agents().filter((x) => x.name !== a.name)); this.router.navigate(['/agents']); },
       error: () => this.toast.error('No se pudo eliminar'),
     });
   }

@@ -13,7 +13,7 @@ export const routes: Routes = [
   { path: 'agents',       loadComponent: () => import('./components/agents/agents').then(m => m.AgentsComponent), canActivate: [authGuard] },
   // Detalle de un agente: mismo componente, página completa (link directo y "atrás" del navegador).
   { path: 'agents/:name', loadComponent: () => import('./components/agents/agents').then(m => m.AgentsComponent), canActivate: [authGuard],
-    canDeactivate: [(c: { puedeSalir?: () => boolean }) => c.puedeSalir?.() ?? true] },
+    canDeactivate: [(c: { puedeSalir?: () => boolean | Promise<boolean> }) => c.puedeSalir?.() ?? true] },
   { path: 'commitments',  loadComponent: () => import('./components/commitments/commitments').then(m => m.CommitmentsComponent), canActivate: [authGuard] },
   { path: 'webhooks',     loadComponent: () => import('./components/webhooks/webhooks').then(m => m.WebhooksComponent), canActivate: [authGuard] },
   { path: 'tasks',        loadComponent: () => import('./components/tasks/tasks').then(m => m.TasksComponent), canActivate: [authGuard] },
