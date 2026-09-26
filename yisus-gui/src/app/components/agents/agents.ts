@@ -136,6 +136,8 @@ const EJEMPLOS_IA = [
           <div class="det-body" [class.ancho]="pestana() === 'tools' || pestana() === 'soul'">
             @switch (pestana()) {
               @case ('general') {
+                <div class="gen-grid">
+                <div class="gen-main">
                 <label class="field"><span>Nombre visible</span><input type="text" [(ngModel)]="f.displayName" /></label>
                 <label class="field">
                   <span>Cuándo usarlo</span>
@@ -161,13 +163,28 @@ const EJEMPLOS_IA = [
                   <span>Modelo</span>
                   <app-model-picker [value]="f.model || ''" (valueChange)="f.model = $event || null" etiquetaDefecto="Por defecto (el del Coordinator)" />
                 </div>
-                <label class="opcion">
-                  <input type="checkbox" [(ngModel)]="f.memory" />
-                  <span><b>Memoria propia</b><small>Recuerda entre conversaciones (se guarda en Qdrant, colección propia del agente).</small></span>
-                </label>
-                <div class="zona-peligro">
-                  <div><b>Eliminar agente</b><small>Borra su definición, herramientas y memoria. No se puede deshacer.</small></div>
-                  <button class="btn-danger sm" (click)="eliminar(a)"><i class="ph ph-trash"></i> Eliminar</button>
+                </div>
+                <aside class="gen-side">
+                  <div class="resumen">
+                    <h4>Resumen</h4>
+                    <dl>
+                      <dt>Mención</dt><dd><code>&#64;{{ a.name }}</code></dd>
+                      <dt>Herramientas</dt><dd>{{ a.tools.length }}@if (usaRed(a)) { · usa red }</dd>
+                      <dt>Variables</dt><dd>{{ a.env.length }}@if (variablesFaltantes(a).length) { <span class="warn-t"> · {{ variablesFaltantes(a).length }} sin valor</span> }</dd>
+                      <dt>Este mes</dt><dd>@if (uso()[a.name]; as u) { {{ u.turnos }} usos · {{ '$' + u.costo.toFixed(2) }} } @else { sin uso }</dd>
+                      <dt>Versión</dt><dd>v{{ a.version }} · {{ hace(a.updatedAt) }}</dd>
+                      <dt>Creado</dt><dd>{{ fecha(a.createdAt) }} · {{ a.createdBy === 'ia' ? 'por IA' : 'a mano' }}</dd>
+                    </dl>
+                  </div>
+                  <label class="opcion">
+                    <input type="checkbox" [(ngModel)]="f.memory" />
+                    <span><b>Memoria propia</b><small>Recuerda entre conversaciones (se guarda en Qdrant, colección propia del agente).</small></span>
+                  </label>
+                  <div class="zona-peligro">
+                    <div><b>Eliminar agente</b><small>Borra su definición, herramientas y memoria. No se puede deshacer.</small></div>
+                    <button class="btn-danger sm" (click)="eliminar(a)"><i class="ph ph-trash"></i> Eliminar</button>
+                  </div>
+                </aside>
                 </div>
               }
 
@@ -246,24 +263,32 @@ const EJEMPLOS_IA = [
               }
 
               @case ('env') {
-                <p class="card-sub">Claves y datos que usan sus herramientas (<code>ctx.env.NOMBRE</code>). Se guardan en el .env como <code>AGENT_{{ a.name.toUpperCase() }}_NOMBRE</code>.</p>
-                @for (e of f.env; track $index; let i = $index) {
-                  @let actualVal = envActual[a.name + ':' + e.name];
-                  <div class="envr">
-                    <div class="envr-top">
+                <p class="intro">Claves y datos que usan sus herramientas (<code>ctx.env.NOMBRE</code>). Se guardan en el .env como <code>AGENT_{{ a.name.toUpperCase() }}_NOMBRE</code>; si falta, se usa la variable global del mismo nombre.</p>
+                <div class="env-tabla">
+                  @if (f.env.length) {
+                    <div class="env-cab"><span>Nombre</span><span>Para qué es</span><span>Valor</span><span>Estado</span><span></span></div>
+                  }
+                  @for (e of f.env; track $index; let i = $index) {
+                    @let actualVal = envActual[a.name + ':' + e.name];
+                    <div class="env-fila">
                       <input type="text" class="mono nombre" [(ngModel)]="e.name" placeholder="NOMBRE" />
-                      @if (actualVal) { <span class="tag ok"><i class="ph ph-check"></i> propia</span> }
-                      @else if (envGlobal[e.name]) { <span class="tag ok" [title]="'Sin valor propio: usa ' + e.name + ' del .env'"><i class="ph ph-check"></i> usa la global</span> }
-                      @else { <span class="tag warn">sin valor</span> }
-                      <label class="mini"><input type="checkbox" [(ngModel)]="e.secret" /> secreto</label>
-                      <span class="spacer"></span>
+                      <input type="text" [(ngModel)]="e.description" placeholder="Para qué es" [title]="e.description" />
+                      <div class="valor">
+                        <input [type]="e.secret ? 'password' : 'text'" autocomplete="new-password" [(ngModel)]="envValores[e.name]"
+                          [placeholder]="actualVal ? actualVal + ' · escribe para reemplazar' : envGlobal[e.name] ? 'usa la global · escribe para una propia' : 'valor'" />
+                        <label class="mini" title="Se muestra enmascarado"><input type="checkbox" [(ngModel)]="e.secret" /> secreto</label>
+                      </div>
+                      <div>
+                        @if (actualVal) { <span class="tag ok"><i class="ph ph-check"></i> propia</span> }
+                        @else if (envGlobal[e.name]) { <span class="tag ok" [title]="'Sin valor propio: usa ' + e.name + ' del .env'"><i class="ph ph-check"></i> global</span> }
+                        @else { <span class="tag warn">sin valor</span> }
+                      </div>
                       <button class="btn-icon danger" title="Quitar" (click)="f.env.splice(i, 1)"><i class="ph ph-trash"></i></button>
                     </div>
-                    <input type="text" [(ngModel)]="e.description" placeholder="Para qué es" />
-                    <input [type]="e.secret ? 'password' : 'text'" autocomplete="new-password" [(ngModel)]="envValores[e.name]"
-                      [placeholder]="actualVal ? actualVal + ' · escribe para reemplazar' : 'valor'" />
-                  </div>
-                }
+                  } @empty {
+                    <div class="env-vacio">Sin variables. Agrégalas si una herramienta necesita una API key o un dato de configuración.</div>
+                  }
+                </div>
                 <button class="agregar" (click)="f.env.push({ name: '', description: '', secret: true })"><i class="ph ph-plus"></i> Agregar variable</button>
               }
 
@@ -284,10 +309,14 @@ const EJEMPLOS_IA = [
                       @else {
                         <div class="burbuja md" [innerHTML]="m.texto | markdown"></div>
                         @if (m.pasos?.length || m.ms) {
-                          <div class="pasos">
-                            @for (p of m.pasos || []; track $index) { <span class="paso"><i class="ph ph-wrench"></i> {{ p }}</span> }
-                            @if (m.ms) { <span class="dim">{{ (m.ms / 1000).toFixed(1) }} s</span> }
-                          </div>
+                          <details class="pasos">
+                            <summary>
+                              @for (h of herramientasUsadas(m.pasos); track $index) { <span class="paso"><i class="ph ph-wrench"></i> {{ h }}</span> }
+                              @if (m.pasos?.length) { <span class="dim">{{ m.pasos!.length }} paso{{ m.pasos!.length === 1 ? '' : 's' }}</span> }
+                              @if (m.ms) { <span class="dim">· {{ (m.ms / 1000).toFixed(1) }} s</span> }
+                            </summary>
+                            <pre class="out">{{ (m.pasos || []).join('\n') }}</pre>
+                          </details>
                         }
                       }
                     </div>
@@ -442,8 +471,25 @@ const EJEMPLOS_IA = [
     .det-head .sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
     .volver { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--border-light); color: var(--text-main); font-size: 17px; text-decoration: none; flex-shrink: 0; }
     .volver:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
-    .det-body { flex: 1 0 auto; padding: 20px 28px 28px; width: 100%; max-width: 900px; min-width: 0; }
-    .det-body.ancho { max-width: none; }
+    .det-body { flex: 1 0 auto; padding: 20px 28px 28px; width: 100%; min-width: 0; }
+    .gen-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 28px; align-items: start; }
+    .gen-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 64px; }
+    .gen-side .opcion, .gen-side .zona-peligro { margin: 0; }
+    .resumen { padding: 14px 16px; border: 1px solid var(--border-light); border-radius: 12px; background: var(--bg-card); }
+    .resumen h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+    .resumen dl { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; margin: 0; font-size: 13px; }
+    .resumen dt { color: var(--text-dim); }
+    .resumen dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    .warn-t { color: var(--warn); }
+    .intro { margin: 0 0 14px; color: var(--text-dim); font-size: 13.5px; }
+    .env-tabla { border: 1px solid var(--border-light); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+    .env-cab, .env-fila { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(0, 1.3fr) 110px 36px; gap: 10px; align-items: center; padding: 10px 14px; }
+    .env-cab { background: var(--bg-card); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+    .env-fila { border-top: 1px solid var(--border-light); }
+    .env-fila .nombre { text-transform: uppercase; }
+    .env-fila .valor { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .env-fila .valor input[type=password], .env-fila .valor input[type=text] { flex: 1; min-width: 0; }
+    .env-vacio { padding: 18px; color: var(--text-dim); font-size: 13.5px; }
     .det-foot { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 12px 28px; border-top: 1px solid var(--border-light); background: var(--bg-card); }
     .det-foot input { flex: 1; }
     .dh { display: flex; align-items: center; gap: 12px; }
@@ -480,7 +526,7 @@ const EJEMPLOS_IA = [
     .zona-peligro small { color: var(--text-dim); font-size: 12px; }
 
     .soul-h { display: flex; justify-content: space-between; }
-    .soul { min-height: calc(100vh - 360px); max-width: 1100px; font-size: 14px; line-height: 1.55; resize: vertical; }
+    .soul { min-height: calc(100vh - 360px); font-size: 14px; line-height: 1.55; resize: vertical; }
 
     .tools { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
     .tlist { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 56px; }
@@ -509,9 +555,6 @@ const EJEMPLOS_IA = [
     .tests code { color: var(--text-main); font-size: 12px; }
     .btn-borrar { margin-top: 14px; background: none; border: none; color: var(--danger); font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; }
 
-    .envr { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: 10px; margin-bottom: 10px; background: var(--bg-card); }
-    .envr-top { display: flex; align-items: center; gap: 8px; }
-    .envr-top .nombre { max-width: 240px; text-transform: uppercase; }
     .mini { display: inline-flex; gap: 5px; align-items: center; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
     .agregar { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px dashed var(--border-light); background: none; color: var(--text-dim); font-size: 13px; cursor: pointer; }
     .agregar:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
@@ -524,9 +567,12 @@ const EJEMPLOS_IA = [
     .aviso { padding: 9px 12px; border-radius: 10px; font-size: 13px; background: rgba(129,140,248,.08); border: 1px solid rgba(129,140,248,.35); }
     .msg { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
     .msg.yo { align-items: flex-end; }
-    .burbuja { max-width: 88%; padding: 10px 14px; border-radius: 14px; background: var(--bg-card); border: 1px solid var(--border-light); font-size: 14px; }
+    .burbuja { max-width: min(760px, 80%); padding: 10px 14px; border-radius: 14px; background: var(--bg-card); border: 1px solid var(--border-light); font-size: 14px; }
     .msg.yo .burbuja { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; white-space: pre-wrap; }
-    .pasos { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .pasos { max-width: min(760px, 80%); }
+    .pasos summary { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; cursor: pointer; list-style: none; }
+    .pasos summary::-webkit-details-marker { display: none; }
+    .pasos .out { max-height: 260px; }
     .paso { font-size: 11.5px; font-family: ui-monospace, monospace; color: var(--text-dim); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-light); }
     .escribiendo { display: inline-flex; gap: 4px; }
     .escribiendo span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); animation: b 1s infinite; }
@@ -551,9 +597,16 @@ const EJEMPLOS_IA = [
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-light); border-top-color: var(--accent-primary); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: middle; }
     @keyframes sp { to { transform: rotate(360deg); } }
 
+    @media (max-width: 1100px) {
+      .gen-grid { grid-template-columns: minmax(0, 1fr); }
+      .gen-side { position: static; }
+    }
     @media (max-width: 700px) {
       .grid-ag { grid-template-columns: 1fr; }
       .canales { grid-template-columns: 1fr; }
+      .env-cab { display: none; }
+      .env-fila { grid-template-columns: minmax(0, 1fr) auto; }
+      .env-fila > :nth-child(2), .env-fila > .valor { grid-column: 1 / -1; }
       .tools { grid-template-columns: minmax(0, 1fr); }
       .grid2 { grid-template-columns: minmax(0, 1fr); }
       .opcion.inline { margin: 0 0 14px; }
@@ -707,6 +760,15 @@ export class AgentsComponent {
     if (s < 86400) return `editado hace ${Math.round(s / 3600)} h`;
     const d = Math.round(s / 86400);
     return d === 1 ? 'editado ayer' : `editado hace ${d} días`;
+  }
+
+  fecha(iso: string) { try { return new Date(iso).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; } }
+
+  /** Nombres de las herramientas llamadas ("→ nombre({...})"), sin repetir. */
+  herramientasUsadas(pasos?: string[]): string[] {
+    const out: string[] = [];
+    for (const p of pasos || []) { const m = p.match(/^\s*→\s*([\w.-]+)\(/); if (m && !out.includes(m[1])) out.push(m[1]); }
+    return out;
   }
 
   variablesFaltantes(a: CustomAgent) { return a.env.filter((e) => e.name && !this.envActual[`${a.name}:${e.name}`] && !this.envGlobal[e.name]).map((e) => e.name); }
