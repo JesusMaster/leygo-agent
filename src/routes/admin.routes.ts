@@ -319,6 +319,15 @@ export default function createAdminRoutes() {
     });
   });
 
+  /** Contadores para los avisos del menú de la GUI (lo que espera tu atención). */
+  app.get('/api/admin/pendientes', (_req, res) => {
+    const c = sqliteReminderService.commitmentStats();
+    res.json({
+      escalamientos: sqliteReminderService.countPendingEscalations(),
+      compromisos: { propuestos: c.propuesto || 0, vencidos: c.vencidos || 0 },
+    });
+  });
+
   // ─── Escalamientos del triage ────────────────────────────────────────────
   app.get('/api/escalations', (req, res) => {
     const status = (req.query.status as string) || undefined;

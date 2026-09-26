@@ -251,6 +251,8 @@ export class ApiService {
   }
 
   // ─── Escalamientos ────────────────────────────────────────────────────
+  /** Lo que espera tu atención, para los avisos del menú. */
+  getPendientes(): Observable<{ escalamientos: number; compromisos: { propuestos: number; vencidos: number } }> { return this.http.get<any>(`${this.baseUrl}/api/admin/pendientes`); }
   getEscalations(status = 'pendiente'): Observable<{ escalations: Escalation[] }> {
     return this.http.get<any>(`${this.baseUrl}/api/escalations?status=${status}`);
   }

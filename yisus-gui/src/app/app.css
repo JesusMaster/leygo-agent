@@ -2,10 +2,10 @@
 
 .sidebar {
   width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-light);
-  display: flex; flex-direction: column; padding: 24px 16px; z-index: 10;
+  display: flex; flex-direction: column; padding: 24px 16px; z-index: 10; overflow-y: auto; flex-shrink: 0;
 }
 
-.logo-section { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; padding: 0 8px; position: relative; }
+.logo-section { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 0 8px; position: relative; }
 .logo-icon { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
 .logo-icon svg { width: 100%; height: 100%; }
 .logo-text { font-family: 'Space Grotesk', sans-serif; font-weight: 900; font-size: 30px; color: var(--text-main); margin-left: -5px; }
@@ -14,16 +14,26 @@
   width: 7px; height: 7px; border-radius: 50%; bottom: 10px; margin-left: 3px;
 }
 
-.nav-menu { display: flex; flex-direction: column; gap: 4px; }
+.nav-menu { display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.nav-grupo { display: flex; flex-direction: column; gap: 2px; }
+/* Sistema (Consumo, Ajustes) va al fondo, junto al perfil: se usa poco. */
+.nav-grupo.abajo { margin-top: auto; padding-top: 14px; }
+.nav-titulo { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); opacity: .7; padding: 0 12px 4px; }
+.nav-badge {
+  margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; line-height: 1;
+  background: rgba(129,140,248,.18); color: var(--accent-primary);
+}
+.nav-badge.urgente { background: var(--danger, #ef4444); color: #fff; }
 .nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;
+  display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px;
   text-decoration: none; color: var(--text-dim); font-size: 14px; font-weight: 500; transition: all .2s;
 }
 .nav-item:hover { background-color: var(--bg-main); color: var(--text-main); }
 .nav-item.active { background-color: var(--bg-main); color: var(--accent-primary); }
 .nav-item .icon { font-size: 18px; display: flex; }
 
-.sidebar-footer { margin-top: auto; padding-top: 24px; border-top: 1px solid var(--border-light); }
+.sidebar-footer { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--border-light); }
 .user-profile { display: flex; align-items: center; gap: 12px; padding: 4px 8px; }
 .avatar-container img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
 .user-details { display: flex; flex-direction: column; }
@@ -62,8 +72,8 @@ input:checked + .slider:before { transform: translateX(24px); }
 
 .view-container { flex: 1; display: flex; overflow: hidden; }
 
-/* ─── Móvil / tablet: menú off-canvas ───────────────────────────────────── */
-.menu-toggle, .sidebar-close, .sidebar-backdrop { display: none; }
+/* ─── Móvil / tablet: barra inferior + menú off-canvas en "Más" ─────────── */
+.sidebar-close, .sidebar-backdrop, .tabbar { display: none; }
 .main-header .project-info { min-width: 0; }
 .status { flex-wrap: wrap; }
 
@@ -81,7 +91,21 @@ input:checked + .slider:before { transform: translateX(24px); }
   .menu-open .sidebar-backdrop { display: block; opacity: 1; pointer-events: auto; }
   .sidebar-backdrop { display: block; }
   .sidebar-close { display: grid; margin-left: auto; }
-  .menu-toggle { display: grid; font-size: 22px; margin-left: -6px; }
+  .tabbar {
+    display: flex; flex-shrink: 0; background: var(--bg-sidebar); border-top: 1px solid var(--border-light);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); z-index: 20;
+  }
+  .tabbar.oculta { display: none; }
+  .tab {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px;
+    background: none; border: 0; border-radius: 10px; color: var(--text-dim); text-decoration: none; font: inherit; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab.active { color: var(--accent-primary); }
+  .tab.active .tab-ico { background: rgba(129,140,248,.14); }
+  .tab-ico { position: relative; font-size: 22px; display: grid; place-items: center; width: 52px; height: 30px; border-radius: 999px; transition: background .15s; }
+  .tab-ico .nav-badge { position: absolute; top: -3px; right: 4px; margin: 0; min-width: 17px; height: 17px; font-size: 10px; padding: 0 4px; box-shadow: 0 0 0 2px var(--bg-sidebar); }
+  .tab-l { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .main-header { padding: 0 14px; height: 60px; gap: 10px; }
   .project-name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status { font-size: 12px; }

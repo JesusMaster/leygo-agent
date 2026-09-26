@@ -20,36 +20,18 @@
     </div>
 
     <nav class="nav-menu">
-      <a routerLink="/chat" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-chat-circle-dots"></i></span><span class="label">Chat</span>
-      </a>
-      <a routerLink="/usage" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-chart-bar"></i></span><span class="label">Consumo</span>
-      </a>
-      <a routerLink="/channels" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-sliders-horizontal"></i></span><span class="label">Canales y tools</span>
-      </a>
-      <a routerLink="/tokens" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-key"></i></span><span class="label">Tokens A2A</span>
-      </a>
-      <a routerLink="/escalations" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-warning-octagon"></i></span><span class="label">Escalamientos</span>
-      </a>
-      <a routerLink="/commitments" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-check-square"></i></span><span class="label">Compromisos</span>
-      </a>
-      <a routerLink="/agents" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-robot"></i></span><span class="label">Agentes</span>
-      </a>
-      <a routerLink="/webhooks" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-share-network"></i></span><span class="label">Webhooks</span>
-      </a>
-      <a routerLink="/tasks" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-calendar-check"></i></span><span class="label">Tareas programadas</span>
-      </a>
-      <a routerLink="/settings" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)">
-        <span class="icon"><i class="ph ph-gear"></i></span><span class="label">Ajustes</span>
-      </a>
+      @for (g of menu; track g.titulo) {
+        <div class="nav-grupo" [class.abajo]="g.abajo">
+          @if (g.titulo) { <span class="nav-titulo">{{ g.titulo }}</span> }
+          @for (it of g.items; track it.ruta) {
+            @let n = aviso(it);
+            <a [routerLink]="it.ruta" routerLinkActive="active" class="nav-item" (click)="menuOpen.set(false)" [title]="it.ayuda">
+              <span class="icon"><i class="ph {{ it.icono }}"></i></span><span class="label">{{ it.nombre }}</span>
+              @if (n) { <span class="nav-badge" [class.urgente]="n.urgente" [title]="n.texto">{{ n.n }}</span> }
+            </a>
+          }
+        </div>
+      }
     </nav>
 
     <div class="sidebar-footer">
@@ -68,7 +50,6 @@
 
   <main class="content-area">
     <header class="main-header">
-      <button type="button" class="btn-icon menu-toggle" aria-label="Abrir menú" (click)="menuOpen.set(true)"><i class="ph ph-list"></i></button>
       <div class="project-info">
         <h2 class="project-name">Yisus Agent</h2>
         <div class="status">
@@ -109,6 +90,21 @@
     <div class="view-container">
       <router-outlet></router-outlet>
     </div>
+
+    <!-- Móvil: lo de uso diario a un toque; el resto en "Más" (el mismo menú lateral). -->
+    <nav class="tabbar" [class.oculta]="teclado()" aria-label="Navegación principal">
+      @for (it of barra; track it.ruta) {
+        @let n = aviso(it);
+        <a [routerLink]="it.ruta" routerLinkActive="active" class="tab">
+          <span class="tab-ico"><i class="ph {{ it.icono }}"></i>@if (n) { <span class="nav-badge" [class.urgente]="n.urgente">{{ n.n }}</span> }</span>
+          <span class="tab-l">{{ it.corto || it.nombre }}</span>
+        </a>
+      }
+      <button type="button" class="tab" [class.active]="enMas()" (click)="menuOpen.set(true)">
+        <span class="tab-ico"><i class="ph ph-dots-three-outline"></i></span>
+        <span class="tab-l">Más</span>
+      </button>
+    </nav>
   </main>
 
   <app-toast></app-toast>
