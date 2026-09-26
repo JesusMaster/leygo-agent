@@ -207,10 +207,29 @@ const EJEMPLOS_IA = [
               }
 
               @case ('soul') {
-                <div class="field">
-                  <span class="soul-h">Personalidad e instrucciones <small class="dim">{{ f.soul.length }} caracteres</small></span>
-                  <textarea class="soul" [(ngModel)]="f.soul" spellcheck="true"></textarea>
-                  <small class="hint">Quién es, cómo habla, qué hace y qué no. Se suma a las reglas generales de Yisus (fecha, tono, límites).</small>
+                @let menc = mencionesTools(f);
+                <div class="soul-top">
+                  <div class="soul-tit">
+                    <b>Personalidad e instrucciones</b>
+                    <small class="dim">{{ palabras(f.soul) }} palabras · {{ f.soul.length }} caracteres · {{ secciones(f.soul) }} secciones</small>
+                  </div>
+                  <div class="soul-acc">
+                    <small class="dim">Insertar sección:</small>
+                    @for (sec of seccionesSoul; track sec) { <button class="chip mini" (click)="insertarSeccion(f, sec)">{{ sec }}</button> }
+                  </div>
+                </div>
+                @defer (on immediate) {
+                  <app-code-editor lenguaje="markdown" [value]="f.soul" (valueChange)="f.soul = $event" [resaltar]="menc.todas" [sugerencias]="sugerenciasSoul(f)"
+                    minAlto="calc(100vh - 400px)" maxAlto="none" placeholder="Eres … (quién es, cómo habla, qué hace y qué no)" />
+                } @placeholder { <div class="editor-cargando" style="height:calc(100vh - 400px)">Cargando editor…</div> }
+                <div class="soul-pie">
+                  <small class="hint">Markdown: <code># Sección</code>, <code>- lista</code>, <code>**énfasis**</code>. Pliega secciones desde el margen · Ctrl+Espacio sugiere herramientas. Se suma a las reglas generales de Yisus (fecha, tono, límites).</small>
+                  @if (f.tools.length) {
+                    <div class="menciones">
+                      @for (t of menc.mencionadas; track t) { <span class="tag ok" title="La personalidad la menciona"><i class="ph ph-check"></i> {{ t }}</span> }
+                      @for (t of menc.faltan; track t) { <span class="tag" title="La personalidad no la menciona: el modelo igual puede usarla, pero ayuda decir cuándo"><i class="ph ph-circle-dashed"></i> {{ t }}</span> }
+                    </div>
+                  }
                 </div>
               }
 
@@ -690,8 +709,13 @@ const EJEMPLOS_IA = [
     .zona-peligro > div { flex: 1; display: flex; flex-direction: column; font-size: 13.5px; }
     .zona-peligro small { color: var(--text-dim); font-size: 12px; }
 
-    .soul-h { display: flex; justify-content: space-between; }
-    .soul { min-height: calc(100vh - 360px); font-size: 14px; line-height: 1.55; resize: vertical; }
+    .soul-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .soul-tit { display: flex; flex-direction: column; gap: 2px; }
+    .soul-acc { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .chip.mini { padding: 3px 9px; font-size: 11.5px; font-family: ui-monospace, Menlo, monospace; }
+    .soul-pie { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .menciones { display: flex; gap: 6px; flex-wrap: wrap; }
+    .menciones .tag { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 
     .tools { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
     .tlist { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 56px; }
@@ -1194,6 +1218,37 @@ export class AgentsComponent implements OnDestroy {
     this.form!.tools.splice(i, 1);
     this.elegirTool(Math.min(i, this.form!.tools.length - 1));
   }
+
+  readonly seccionesSoul = ['# IDENTIDAD', '# CÓMO TRABAJAS', '# QUÉ NO HACES', '# TONO', '# EJEMPLOS'];
+
+  palabras(t: string) { return (t.trim().match(/\S+/g) || []).length; }
+  secciones(t: string) { return (t.match(/^#{1,3}\s+\S/gm) || []).length; }
+
+  insertarSeccion(f: CustomAgent, sec: string) {
+    const base = f.soul.replace(/\s+$/, '');
+    f.soul = `${base}${base ? '\n\n' : ''}${sec}\n`;
+  }
+
+  /** Herramientas mencionadas (o no) en la personalidad, para que se note si falta decir cuándo usarlas. */
+  mencionesTools(f: CustomAgent): { todas: string[]; mencionadas: string[]; faltan: string[] } {
+    const clave = f.tools.map((t) => t.name).join('|') + '§' + f.soul.length + '§' + f.soul.slice(-40);
+    if (this.cacheMenc?.clave === clave) return this.cacheMenc.valor;
+    const todas = f.tools.map((t) => t.name).filter(Boolean);
+    const mencionadas = todas.filter((n) => new RegExp(`\\b${n}\\b`).test(f.soul));
+    const valor = { todas, mencionadas, faltan: todas.filter((n) => !mencionadas.includes(n)) };
+    this.cacheMenc = { clave, valor };
+    return valor;
+  }
+  private cacheMenc: { clave: string; valor: { todas: string[]; mencionadas: string[]; faltan: string[] } } | null = null;
+
+  sugerenciasSoul(f: CustomAgent): SugerenciaEditor[] {
+    const clave = f.tools.map((t) => t.name + t.description.length).join('|');
+    if (this.cacheSoulSug?.clave === clave) return this.cacheSoulSug.lista;
+    const lista = f.tools.filter((t) => t.name).map((t) => ({ label: t.name, detail: 'herramienta', info: t.description, type: 'function' }));
+    this.cacheSoulSug = { clave, lista };
+    return lista;
+  }
+  private cacheSoulSug: { clave: string; lista: SugerenciaEditor[] } | null = null;
 
   /** Autocompletado del editor: parámetros de la herramienta y lo que ofrece ctx en el sandbox. */
   sugerenciasDe(a: CustomAgent, t: CustomToolDef): SugerenciaEditor[] {
