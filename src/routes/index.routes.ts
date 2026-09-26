@@ -64,15 +64,18 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
         res.json({ events });
     });
 
+    /** Origen público de la petición (respeta el esquema real detrás de Caddy). */
+    const origenDe = (req: express.Request) => `${(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim()}://${req.get('host')}`;
+
     // ─── Webhooks Personalizados con IA (Estilo Leygo) ────────────────────────
     // Crear Webhook personalizado
     app.post('/api/webhooks', express.json(), async (req, res) => {
         try {
-            const { titulo, instrucciones, modelo } = req.body;
+            const { titulo, instrucciones, modelo, delivery, modo } = req.body;
             if (!titulo || !instrucciones) {
                 return res.status(400).json({ error: 'titulo e instrucciones son obligatorios' });
             }
-            const created = customWebhookService.createWebhook(titulo, instrucciones, modelo, req.get('host'));
+            const created = customWebhookService.createWebhook(titulo, instrucciones, modelo, origenDe(req), { delivery, modo });
             res.status(201).json({
                 status: 'success',
                 message: 'Webhook creado exitosamente',
@@ -87,7 +90,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     // Listar Webhooks
     app.get('/api/webhooks', async (req, res) => {
         try {
-            const webhooks = customWebhookService.listWebhooks(req.get('host'));
+            const webhooks = customWebhookService.listWebhooks(origenDe(req));
             res.json({ webhooks });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
@@ -125,7 +128,7 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     // Obtener Webhook por ID
     app.get('/api/webhooks/:id', async (req, res) => {
         try {
-            const wh = customWebhookService.getWebhook(req.params.id, req.get('host'));
+            const wh = customWebhookService.getWebhook(req.params.id, origenDe(req));
             if (!wh) return res.status(404).json({ error: 'Webhook no encontrado' });
             res.json(wh);
         } catch (err: any) {
@@ -136,12 +139,30 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     // Actualizar Webhook (título, instrucciones, modelo o pausado/reanudado)
     app.put('/api/webhooks/:id', express.json(), async (req, res) => {
         try {
-            const updated = customWebhookService.updateWebhook(req.params.id, req.body, req.get('host'));
+            const updated = customWebhookService.updateWebhook(req.params.id, req.body || {}, origenDe(req));
             if (!updated) return res.status(404).json({ error: 'Webhook no encontrado' });
             res.json(updated);
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
+    });
+
+    // Probar con un payload desde la GUI (no exige secreto; entrega solo si se pide).
+    app.post('/api/webhooks/:id/test', express.json({ limit: '2mb' }), async (req, res) => {
+        try {
+            const r = await customWebhookService.executeWebhook(req.params.id, req.body?.payload ?? {}, {}, { prueba: true, entregar: !!req.body?.entregar });
+            if (r.status === 'not_found') return res.status(404).json(r);
+            res.json(r);
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Secreto: genera uno nuevo (se muestra una sola vez) o lo quita.
+    app.post('/api/webhooks/:id/secret', express.json(), async (req, res) => {
+        const r = customWebhookService.rotarSecreto(req.params.id, req.body?.quitar === true);
+        if (!r) return res.status(404).json({ error: 'Webhook no encontrado' });
+        res.json(r);
     });
 
     // Eliminar Webhook
@@ -170,9 +191,13 @@ export default function createIndexRoutes(runner: Runner, sessionService: RedisS
     const handleCustomWebhookPost = async (req: express.Request, res: express.Response) => {
         const { id } = req.params;
         try {
-            const result = await customWebhookService.executeWebhook(id, req.body, req.headers);
+            const token = typeof req.query.token === 'string' ? req.query.token : null;
+            const result = await customWebhookService.executeWebhook(id, req.body, req.headers, { token });
             if (result.status === 'not_found') {
                 return res.status(404).json(result);
+            }
+            if (result.status === 'unauthorized') {
+                return res.status(401).json({ status: 'unauthorized', message: result.message });
             }
             if (result.status === 'paused') {
                 return res.status(403).json(result);

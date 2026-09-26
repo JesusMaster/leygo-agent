@@ -100,11 +100,19 @@ export type TaskInput = {
 export interface CustomWebhook {
   id: string; titulo: string; instrucciones: string; modelo: string;
   paused: number; created_at?: number; updated_at?: number; url?: string;
+  /** Dónde avisa. Vacío = Telegram (por defecto). */
+  delivery?: TaskDelivery[];
+  /** 'siempre' avisa cada payload; 'importante' deja que la IA descarte lo rutinario. */
+  modo?: 'siempre' | 'importante';
+  tieneSecreto?: boolean;
+  stats?: { total: number; semana: number; errores: number; silenciados: number; ultimo: number | null; ultimoEstado: string | null };
 }
+export interface WebhookTestResult { status: 'success' | 'silenced' | 'error' | 'not_found' | 'paused' | 'unauthorized'; message: string; response?: string; entrega?: string; ms?: number }
 
 export interface CustomWebhookLog {
   id: number; webhook_id: string; payload: string; response: string;
   status: string; created_at: number; webhook_titulo?: string | null;
+  entrega?: string | null; ms?: number | null; origen?: string | null;
 }
 
 export interface WebhookProvider { id: string; name: string; kind: string; models: string[]; error?: string; }
@@ -284,10 +292,10 @@ export class ApiService {
 
   // ─── Webhooks con IA ──────────────────────────────────────────────────
   getWebhooks(): Observable<{ webhooks: CustomWebhook[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks`); }
-  createWebhook(data: { titulo: string; instrucciones: string; modelo: string }): Observable<any> {
-    return this.http.post(`${this.baseUrl}/api/webhooks`, data);
+  createWebhook(data: { titulo: string; instrucciones: string; modelo: string; delivery?: TaskDelivery[]; modo?: string }): Observable<{ data: CustomWebhook; url: string }> {
+    return this.http.post<any>(`${this.baseUrl}/api/webhooks`, data);
   }
-  updateWebhook(id: string, fields: Partial<{ titulo: string; instrucciones: string; modelo: string; paused: number }>): Observable<any> {
+  updateWebhook(id: string, fields: Partial<{ titulo: string; instrucciones: string; modelo: string; paused: number; delivery: TaskDelivery[]; modo: string }>): Observable<any> {
     return this.http.put(`${this.baseUrl}/api/webhooks/${id}`, fields);
   }
   deleteWebhook(id: string): Observable<any> { return this.http.delete(`${this.baseUrl}/api/webhooks/${id}`); }
@@ -300,6 +308,10 @@ export class ApiService {
   deleteWebhookLog(webhookId: string, logId: number): Observable<any> {
     return this.http.delete(`${this.baseUrl}/api/webhooks/${webhookId}/logs/${logId}`);
   }
+  /** Prueba con un payload (no exige secreto; entrega solo si `entregar`). */
+  testWebhook(id: string, payload: any, entregar = false): Observable<WebhookTestResult> { return this.http.post<any>(`${this.baseUrl}/api/webhooks/${id}/test`, { payload, entregar }); }
+  /** Genera un secreto nuevo (se ve una sola vez) o lo quita. */
+  webhookSecret(id: string, quitar = false): Observable<{ secreto: string | null }> { return this.http.post<any>(`${this.baseUrl}/api/webhooks/${id}/secret`, { quitar }); }
   getWebhookModels(): Observable<{ providers: WebhookProvider[] }> { return this.http.get<any>(`${this.baseUrl}/api/webhooks/models`); }
 
   // ─── Ajustes ──────────────────────────────────────────────────────────────

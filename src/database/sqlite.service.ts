@@ -33,6 +33,12 @@ export interface CustomWebhook {
   paused: number; // 0 = activo, 1 = pausado
   created_at: number;
   updated_at: number;
+  /** JSON de TaskDelivery[]: dónde avisar. Vacío = Telegram (compatibilidad). */
+  delivery?: string | null;
+  /** 'siempre' = avisa cada payload; 'importante' = la IA decide si vale la pena avisar. */
+  modo?: string | null;
+  /** sha256 del secreto que debe venir en X-Webhook-Secret (o ?token=). Nunca sale del backend. */
+  secret_hash?: string | null;
 }
 
 export interface CustomWebhookLog {
@@ -40,8 +46,13 @@ export interface CustomWebhookLog {
   webhook_id: string;
   payload: string;
   response: string;
-  status: string; // 'success' | 'error' | 'skipped'
+  status: string; // 'success' | 'error' | 'skipped' | 'silenced'
   created_at: number;
+  /** Resumen de la entrega: "Telegram ✓ · Google Chat ✗ (motivo)". */
+  entrega?: string | null;
+  ms?: number | null;
+  /** 'externo' (POST real) | 'prueba' (desde la GUI). */
+  origen?: string | null;
 }
 
 export interface A2APeer {
@@ -427,6 +438,7 @@ export class SqliteReminderService {
 
     // 11. Migraciones de esquema sobre bases ya existentes
     this.migrateUsageHistory();
+    this.migrateCustomWebhooks();
     this.migrateScheduledTasks();
     this.migrateEscalations();
     this.migrateCommitments();
@@ -521,8 +533,7 @@ export class SqliteReminderService {
 
   public getCustomWebhooks(): CustomWebhook[] {
     const stmt = this.db.prepare(`
-      SELECT id, titulo, instrucciones, modelo, paused, created_at, updated_at
-      FROM custom_webhooks
+      SELECT * FROM custom_webhooks
       ORDER BY created_at DESC
     `);
     return stmt.all() as CustomWebhook[];
@@ -530,8 +541,7 @@ export class SqliteReminderService {
 
   public getCustomWebhook(id: string): CustomWebhook | null {
     const stmt = this.db.prepare(`
-      SELECT id, titulo, instrucciones, modelo, paused, created_at, updated_at
-      FROM custom_webhooks
+      SELECT * FROM custom_webhooks
       WHERE id = ?
     `);
     const res = stmt.get(id);
@@ -540,7 +550,7 @@ export class SqliteReminderService {
 
   public updateCustomWebhook(
     id: string,
-    fields: { titulo?: string; instrucciones?: string; modelo?: string; paused?: number }
+    fields: { titulo?: string; instrucciones?: string; modelo?: string; paused?: number; delivery?: string | null; modo?: string; secret_hash?: string | null }
   ): CustomWebhook | null {
     const current = this.getCustomWebhook(id);
     if (!current) return null;
@@ -549,24 +559,19 @@ export class SqliteReminderService {
     const instrucciones = fields.instrucciones !== undefined ? fields.instrucciones : current.instrucciones;
     const modelo = fields.modelo !== undefined ? fields.modelo : current.modelo;
     const paused = fields.paused !== undefined ? fields.paused : current.paused;
+    const delivery = fields.delivery !== undefined ? fields.delivery : current.delivery ?? null;
+    const modo = fields.modo !== undefined ? fields.modo : current.modo || 'siempre';
+    const secret_hash = fields.secret_hash !== undefined ? fields.secret_hash : current.secret_hash ?? null;
     const now = Date.now();
 
     const stmt = this.db.prepare(`
       UPDATE custom_webhooks
-      SET titulo = ?, instrucciones = ?, modelo = ?, paused = ?, updated_at = ?
+      SET titulo = ?, instrucciones = ?, modelo = ?, paused = ?, delivery = ?, modo = ?, secret_hash = ?, updated_at = ?
       WHERE id = ?
     `);
-    stmt.run(titulo, instrucciones, modelo, paused, now, id);
+    stmt.run(titulo, instrucciones, modelo, paused, delivery, modo, secret_hash, now, id);
 
-    return {
-      id,
-      titulo,
-      instrucciones,
-      modelo,
-      paused,
-      created_at: current.created_at,
-      updated_at: now,
-    };
+    return { ...current, titulo, instrucciones, modelo, paused, delivery, modo, secret_hash, updated_at: now };
   }
 
   public deleteCustomWebhook(id: string): boolean {
@@ -583,13 +588,34 @@ export class SqliteReminderService {
     webhookId: string,
     payload: string,
     response: string,
-    status: 'success' | 'error' | 'skipped'
+    status: 'success' | 'error' | 'skipped' | 'silenced',
+    extra: { entrega?: string | null; ms?: number | null; origen?: string } = {}
   ): void {
     const stmt = this.db.prepare(`
-      INSERT INTO custom_webhook_logs (webhook_id, payload, response, status, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO custom_webhook_logs (webhook_id, payload, response, status, created_at, entrega, ms, origen)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(webhookId, payload, response, status, Date.now());
+    stmt.run(webhookId, payload, response, status, Date.now(), extra.entrega ?? null, extra.ms ?? null, extra.origen || 'externo');
+  }
+
+  /** Resumen por webhook para las tarjetas: totales, última ejecución, errores y silenciados (7 días). */
+  public getCustomWebhookStats(): Record<string, { total: number; semana: number; errores: number; silenciados: number; ultimo: number | null; ultimoEstado: string | null }> {
+    const desde = Date.now() - 7 * 86400_000;
+    const filas = this.db.prepare(`
+      SELECT webhook_id,
+             COUNT(*) AS total,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS semana,
+             SUM(CASE WHEN created_at >= ? AND status = 'error' THEN 1 ELSE 0 END) AS errores,
+             SUM(CASE WHEN created_at >= ? AND status = 'silenced' THEN 1 ELSE 0 END) AS silenciados,
+             MAX(created_at) AS ultimo
+      FROM custom_webhook_logs GROUP BY webhook_id
+    `).all(desde, desde, desde) as any[];
+    const out: Record<string, any> = {};
+    for (const f of filas) {
+      const u = this.db.prepare(`SELECT status FROM custom_webhook_logs WHERE webhook_id = ? ORDER BY created_at DESC LIMIT 1`).get(f.webhook_id) as any;
+      out[f.webhook_id] = { total: f.total, semana: f.semana || 0, errores: f.errores || 0, silenciados: f.silenciados || 0, ultimo: f.ultimo, ultimoEstado: u?.status || null };
+    }
+    return out;
   }
 
   public deleteCustomWebhookLog(logId: number): boolean {
@@ -600,7 +626,7 @@ export class SqliteReminderService {
   /** Logs de todos los webhooks con el título de cada uno, para la vista "Ver ejecuciones". */
   public getAllCustomWebhookLogs(limit: number = 50): Array<CustomWebhookLog & { webhook_titulo: string | null }> {
     return this.db.prepare(`
-      SELECT l.id, l.webhook_id, l.payload, l.response, l.status, l.created_at, w.titulo as webhook_titulo
+      SELECT l.id, l.webhook_id, l.payload, l.response, l.status, l.created_at, l.entrega, l.ms, l.origen, w.titulo as webhook_titulo
       FROM custom_webhook_logs l
       LEFT JOIN custom_webhooks w ON w.id = l.webhook_id
       ORDER BY l.created_at DESC
@@ -611,7 +637,7 @@ export class SqliteReminderService {
   public getCustomWebhookLogs(webhookId?: string, limit: number = 20): CustomWebhookLog[] {
     if (webhookId) {
       const stmt = this.db.prepare(`
-        SELECT id, webhook_id, payload, response, status, created_at
+        SELECT id, webhook_id, payload, response, status, created_at, entrega, ms, origen
         FROM custom_webhook_logs
         WHERE webhook_id = ?
         ORDER BY created_at DESC
@@ -635,6 +661,21 @@ export class SqliteReminderService {
    * Migración idempotente: agrega columnas nuevas a bases ya existentes.
    * (SQLite no soporta ADD COLUMN IF NOT EXISTS, hay que inspeccionar primero.)
    */
+  private migrateCustomWebhooks(): void {
+    try {
+      const wh = new Set((this.db.prepare(`PRAGMA table_info(custom_webhooks)`).all() as any[]).map((c) => c.name));
+      if (!wh.has('delivery'))    this.db.exec(`ALTER TABLE custom_webhooks ADD COLUMN delivery TEXT`);
+      if (!wh.has('modo'))        this.db.exec(`ALTER TABLE custom_webhooks ADD COLUMN modo TEXT DEFAULT 'siempre'`);
+      if (!wh.has('secret_hash')) this.db.exec(`ALTER TABLE custom_webhooks ADD COLUMN secret_hash TEXT`);
+      const lg = new Set((this.db.prepare(`PRAGMA table_info(custom_webhook_logs)`).all() as any[]).map((c) => c.name));
+      if (!lg.has('entrega')) this.db.exec(`ALTER TABLE custom_webhook_logs ADD COLUMN entrega TEXT`);
+      if (!lg.has('ms'))      this.db.exec(`ALTER TABLE custom_webhook_logs ADD COLUMN ms INTEGER`);
+      if (!lg.has('origen'))  this.db.exec(`ALTER TABLE custom_webhook_logs ADD COLUMN origen TEXT DEFAULT 'externo'`);
+    } catch (err: any) {
+      console.warn('⚠️ [SQLite] No se pudo migrar custom_webhooks:', err.message);
+    }
+  }
+
   private migrateUsageHistory(): void {
     try {
       const cols = this.db.prepare(`PRAGMA table_info(usage_history)`).all() as any[];
