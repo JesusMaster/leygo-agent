@@ -1,5 +1,6 @@
 import { BaseLlm } from '@google/adk';
 import { recordModelUsage } from '../../utils/usage_collector.js';
+import { mensajeDeError } from './openai_compatible_llm.js';
 import { aMensajesAnthropic, toolsAnthropic, desdeRespuestaAnthropic , respuestaError, fetchConReintentos } from './conversion.js';
 
 export interface AnthropicParams {
@@ -49,7 +50,7 @@ export class AnthropicLlm extends BaseLlm {
       });
       const texto = await res.text();
       if (!res.ok) {
-        yield respuestaError(this.p.agentName, this.model, String(res.status), `Anthropic respondió ${res.status}: ${texto.slice(0, 300)}`);
+        yield respuestaError(this.p.agentName, this.model, String(res.status), `Anthropic respondió ${res.status}: ${mensajeDeError(texto)}`);
         return;
       }
       data = JSON.parse(texto);

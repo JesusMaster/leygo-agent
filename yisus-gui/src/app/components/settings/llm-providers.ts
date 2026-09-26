@@ -61,25 +61,31 @@ type Prueba = { ok: boolean; ms: number; respuesta?: string; error?: string; mod
                 @if (!p.enabled) { <span class="tag">apagado</span> }
               </div>
 
-              @if (prueba()[p.id]; as r) {
+              @if (ocupado()[p.id]) {
+                <div class="res wait"><i class="ph ph-spinner"></i><span>Probando{{ probandoModelo()[p.id] ? ' ' + probandoModelo()[p.id] : '' }}…</span></div>
+              } @else if (prueba()[p.id]; as r) {
                 <div class="res" [class.ok]="r.ok" [class.bad]="!r.ok">
                   <i class="ph" [class.ph-check-circle]="r.ok" [class.ph-x-circle]="!r.ok"></i>
-                  @if (r.ok) { <span><b>{{ r.modelo }}</b> respondió en {{ r.ms }} ms</span> }
-                  @else { <span>{{ r.error }}</span> }
+                  <div class="res-t">
+                    @if (r.ok) { <span><b>{{ r.modelo }}</b> respondió en {{ r.ms }} ms</span> }
+                    @else {
+                      @if (r.modelo) { <b>{{ r.modelo }}</b> }
+                      <span class="err" [class.full]="errAbierto()[p.id]" (click)="alternarErr(p.id)" [title]="errAbierto()[p.id] ? '' : 'Ver completo'">{{ r.error }}</span>
+                      <button class="link" (click)="abrirEditar(p)">Probar con otro modelo</button>
+                    }
+                  </div>
                 </div>
               }
 
               <div class="prov-actions">
-                <button class="btn-secondary sm" (click)="probarRapido(p)" [disabled]="ocupado() === p.id || !p.enabled" title="Lista sus modelos y le hace una pregunta corta al primero">
-                  <i class="ph" [class.ph-lightning]="ocupado() !== p.id" [class.ph-spinner]="ocupado() === p.id"></i> Probar
+                <button class="btn-secondary sm" (click)="probarRapido(p)" [disabled]="ocupado()[p.id] || !p.enabled" title="Le hace una pregunta corta a un modelo de chat del proveedor">
+                  <i class="ph" [class.ph-lightning]="!ocupado()[p.id]" [class.ph-spinner]="ocupado()[p.id]"></i> Probar
                 </button>
                 <button class="btn-secondary sm" (click)="verModelos(p)" [disabled]="cargandoModelos() === p.id">
                   <i class="ph" [class.ph-list]="cargandoModelos() !== p.id" [class.ph-spinner]="cargandoModelos() === p.id"></i>
                   Modelos@if (modelosDe()[p.id]; as ms) { <span class="n">{{ ms.length }}</span> }
                 </button>
                 <button class="btn-secondary sm" (click)="abrirEditar(p)"><i class="ph ph-pencil-simple"></i> Editar</button>
-                <span class="spacer"></span>
-                <button class="btn-icon danger" title="Eliminar" (click)="eliminar(p)"><i class="ph ph-trash"></i></button>
               </div>
 
               @if (abiertos()[p.id] && modelosDe()[p.id]; as ms) {
@@ -151,6 +157,7 @@ type Prueba = { ok: boolean; ms: number; respuesta?: string; error?: string; mod
             }
           </div>
           <div class="modal-foot">
+            @if (form.id) { <button class="btn-borrar" (click)="eliminarDesdeModal()"><i class="ph ph-trash"></i> Eliminar</button><span class="spacer"></span> }
             <button class="btn-secondary" (click)="cerrar()">Cancelar</button>
             <button class="btn-primary" (click)="guardar()" [disabled]="guardando() || !form.name.trim()">{{ form.id ? 'Guardar' : 'Agregar y probar' }}</button>
           </div>
@@ -187,6 +194,13 @@ type Prueba = { ok: boolean; ms: number; respuesta?: string; error?: string; mod
     .res i { margin-top: 2px; }
     .res.ok { background: rgba(16,185,129,.1); color: var(--ok); }
     .res.bad { background: rgba(239,68,68,.1); color: var(--danger); word-break: break-word; }
+    .res.wait { background: var(--bg-input); color: var(--text-dim); }
+    .res-t { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .err { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+    .err.full { display: block; }
+    .link { align-self: flex-start; background: none; border: none; padding: 0; color: var(--accent-primary); font-size: 12px; cursor: pointer; }
+    .btn-borrar { background: none; border: none; color: var(--danger); font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 6px 4px; }
+    .btn-borrar:hover { text-decoration: underline; }
     .modelos { display: flex; flex-wrap: wrap; gap: 6px; max-height: 150px; overflow: auto; padding-top: 10px; border-top: 1px dashed var(--border-light); }
     .modelos code { font-size: 11px; padding: 2px 7px; background: var(--bg-input); border-radius: 6px; cursor: copy; }
     .modelos code:hover { color: var(--accent-primary); }
@@ -231,7 +245,9 @@ export class LlmProvidersComponent {
   probando = signal(false);
   pruebaModal = signal<Prueba | null>(null);
   prueba = signal<Record<string, Prueba>>({});
-  ocupado = signal<string | null>(null);
+  ocupado = signal<Record<string, boolean>>({});
+  probandoModelo = signal<Record<string, string>>({});
+  errAbierto = signal<Record<string, boolean>>({});
   cargandoModelos = signal<string | null>(null);
   modelosDe = signal<Record<string, string[]>>({});
   abiertos = signal<Record<string, boolean>>({});
@@ -308,11 +324,16 @@ export class LlmProvidersComponent {
     });
   }
 
-  eliminar(p: LlmProvider) {
+  eliminarDesdeModal() {
+    const p = this.providers().find((x) => x.id === this.form.id);
+    if (p) this.eliminar(p, () => this.modal.set(false));
+  }
+
+  eliminar(p: LlmProvider, alTerminar?: () => void) {
     const n = this.usos(p.id);
     if (!confirm(`¿Eliminar "${p.name}"?${n ? ` ${n} agente${n === 1 ? '' : 's'} volverá${n === 1 ? '' : 'n'} a Gemini por defecto.` : ''}`)) return;
     this.api.deleteLlmProvider(p.id).subscribe({
-      next: () => { this.toast.ok('Proveedor eliminado'); this.cambio.emit(); },
+      next: () => { this.toast.ok('Proveedor eliminado'); alTerminar?.(); this.cambio.emit(); },
       error: (e) => this.toast.error(e?.error?.error || 'No se pudo eliminar'),
     });
   }
@@ -334,21 +355,32 @@ export class LlmProvidersComponent {
     this.api.getLlmModels(id).subscribe({ next: (r) => { this.modelosDe.set({ ...this.modelosDe(), [id]: r.models }); this.cdr.markForCheck(); }, error: () => {} });
   }
 
-  /** Lista modelos y prueba el primero (o el último que funcionó). */
+  alternarErr(id: string) { this.errAbierto.set({ ...this.errAbierto(), [id]: !this.errAbierto()[id] }); }
+
+  private marcar(id: string, v: boolean, modelo = '') {
+    this.ocupado.set({ ...this.ocupado(), [id]: v });
+    this.probandoModelo.set({ ...this.probandoModelo(), [id]: modelo });
+  }
+
+  /** Prueba con el último modelo que funcionó o con uno de chat liviano de su lista. */
   probarRapido(p: Pick<LlmProvider, 'id' | 'name'>) {
-    this.ocupado.set(p.id);
-    const fijar = (r: Prueba) => { this.ocupado.set(null); this.prueba.set({ ...this.prueba(), [p.id]: r }); this.cdr.markForCheck(); };
-    const conModelo = (modelo: string) => this.api.testLlm(p.id, modelo).subscribe({
-      next: (r) => fijar({ ...r, modelo }),
-      error: (e) => fijar({ ok: false, ms: 0, modelo, error: e?.error?.error || 'Error al probar' }),
-    });
+    this.marcar(p.id, true);
+    this.errAbierto.set({ ...this.errAbierto(), [p.id]: false });
+    const fijar = (r: Prueba) => { this.marcar(p.id, false); this.prueba.set({ ...this.prueba(), [p.id]: r }); this.cdr.markForCheck(); };
+    const conModelo = (modelo: string) => {
+      this.marcar(p.id, true, modelo);
+      this.api.testLlm(p.id, modelo).subscribe({
+        next: (r) => fijar({ ...r, modelo }),
+        error: (e) => fijar({ ok: false, ms: 0, modelo, error: e?.error?.error || 'Error al probar' }),
+      });
+    };
     const previo = this.prueba()[p.id]?.ok ? this.prueba()[p.id].modelo : undefined;
     if (previo) { conModelo(previo); return; }
     this.api.getLlmModels(p.id).subscribe({
       next: (r) => {
         this.modelosDe.set({ ...this.modelosDe(), [p.id]: r.models });
         const modelo = elegirModeloDePrueba(r.models);
-        if (!modelo) { fijar({ ok: false, ms: 0, error: 'Respondió, pero sin modelos: revisa la key o descarga uno (Ollama).' }); return; }
+        if (!modelo) { fijar({ ok: false, ms: 0, error: 'Respondió, pero sin modelos de chat: revisa la key o descarga uno (Ollama).' }); return; }
         conModelo(modelo);
       },
       error: (e) => fijar({ ok: false, ms: 0, error: e?.error?.error || 'No se pudo conectar: revisa la URL y la key' }),
@@ -367,9 +399,26 @@ export class LlmProvidersComponent {
   }
 }
 
-/** Prefiere un modelo de chat barato para la prueba (evita embeddings, imagen, audio). */
+/**
+ * Modelo para la prueba rápida: de chat, liviano y estable. Se descartan los
+ * especializados (computer use, imagen, audio, embeddings, realtime…), que
+ * rechazan una pregunta de texto simple y harían parecer caído al proveedor.
+ */
 function elegirModeloDePrueba(ms: string[]): string | undefined {
-  const chat = ms.filter((m) => !/(embed|image|imagen|tts|audio|whisper|vision-preview|dall|moderation|rerank|veo|lyria)/i.test(m));
+  const NO_CHAT = /(embed|image|imagen|tts|audio|whisper|transcribe|speech|dall|moderation|rerank|veo|lyria|computer|robotics|live|native|realtime|search|aqa|learnlm|sora|codex|instruct|davinci|babbage|vision-preview|guard)/i;
+  const chat = ms.filter((m) => !NO_CHAT.test(m));
   const lista = chat.length ? chat : ms;
-  return lista.find((m) => /(flash|mini|haiku|small|turbo|lite|chat)/i.test(m)) || lista[0];
+  const puntaje = (m: string) =>
+    (/(flash|mini|nano|haiku|small|turbo|lite|chat|kimi)/i.test(m) ? 4 : 0)
+    + (/(preview|exp|beta|alpha|test)/i.test(m) ? 0 : 2)
+    + (/(thinking|reason|r1|\bo\d|pro|opus|large)/i.test(m) ? 0 : 1)
+    + version(m) / 100
+    - m.length / 1000;
+  return [...lista].sort((a, b) => puntaje(b) - puntaje(a))[0];
+}
+
+/** Versión aproximada del nombre (gemini-3.8-flash → 3.8, claude-haiku-4-5 → 4.5) para preferir la más nueva. */
+function version(m: string): number {
+  const x = m.match(/(\d+)(?:[.-](\d))?(?!\d{3})/);
+  return x ? Number(`${x[1]}.${x[2] || 0}`) : 0;
 }

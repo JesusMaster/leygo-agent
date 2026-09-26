@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { BaseLlm } from '@google/adk';
 import { TrackedGemini } from '../tracked_gemini.js';
 import { OpenAiCompatibleLlm } from './openai_compatible_llm.js';
+import { mensajeDeError } from './openai_compatible_llm.js';
 import { AnthropicLlm } from './anthropic_llm.js';
 import { llmSettingsService, type LlmProvider } from '../../services/llm_settings.service.js';
 import { aplicarPresupuesto } from './context_budget.js';
@@ -160,23 +161,29 @@ export async function probarModelo(providerId: string, model: string): Promise<{
   const provider = llmSettingsService.getProvider(providerId);
   if (!provider) return { ok: false, ms: 0, error: 'Proveedor no encontrado' };
   const t0 = Date.now();
+  const LIMITE_MS = 45_000;
+  const ctrl = new AbortController();
   try {
     const llm = construirLlm({ ...provider }, model, 'prueba_gui');
-    const req: any = {
-      model,
-      contents: [{ role: 'user', parts: [{ text: 'Responde únicamente con la palabra: listo' }] }],
-      config: { maxOutputTokens: 20 },
-    };
-    let texto = '';
-    let error: string | undefined;
-    for await (const r of llm.generateContentAsync(req, false)) {
-      if (r?.errorMessage) error = r.errorMessage;
-      for (const p of r?.content?.parts || []) if (p.text) texto += p.text;
-    }
-    if (error) return { ok: false, ms: Date.now() - t0, error };
+    // Sin maxOutputTokens: con un tope bajo los modelos que razonan (gpt-5, o-series,
+    // deepseek-r1, Gemini con thinking) gastan todo en pensar y la prueba sale vacía o falla.
+    const req: any = { model, contents: [{ role: 'user', parts: [{ text: 'Responde únicamente con la palabra: listo' }] }], config: {} };
+    const correr = (async () => {
+      let texto = '';
+      let error: string | undefined;
+      for await (const r of llm.generateContentAsync(req, false, ctrl.signal)) {
+        if (r?.errorMessage) error = r.errorMessage;
+        for (const p of r?.content?.parts || []) if (p.text && !p.thought) texto += p.text;
+      }
+      return { texto, error };
+    })();
+    const limite = new Promise<never>((_, mal) => setTimeout(() => { ctrl.abort(); mal(new Error(`sin respuesta en ${LIMITE_MS / 1000} s`)); }, LIMITE_MS));
+    const { texto, error } = await Promise.race([correr, limite]);
+    if (error) return { ok: false, ms: Date.now() - t0, error: mensajeDeError(error) };
+    if (!texto.trim()) return { ok: false, ms: Date.now() - t0, error: 'Respondió vacío: puede ser un modelo que no es de chat (imagen, audio, embeddings).' };
     return { ok: true, ms: Date.now() - t0, respuesta: texto.trim().slice(0, 200) };
   } catch (err: any) {
-    return { ok: false, ms: Date.now() - t0, error: err?.message || String(err) };
+    return { ok: false, ms: Date.now() - t0, error: mensajeDeError(err?.message || String(err)) };
   }
 }
 
